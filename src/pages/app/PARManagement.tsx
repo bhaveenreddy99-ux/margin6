@@ -7,19 +7,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, BookOpen, Trash2, Save, Check, Search, Upload, MoreVertical, FileSpreadsheet, Copy, Download, MapPin, LayoutGrid, Table2, List, Package, Clock } from "lucide-react";
+import { Plus, BookOpen, Trash2, Save, Check, Search, Upload, MoreVertical, FileSpreadsheet, Copy, Download, MapPin, Package, Clock, Pencil } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ExportButtons } from "@/components/ExportButtons";
+import { exportToCSV, exportToExcel, exportToPDF } from "@/lib/export-utils";
 import { useIsCompact } from "@/hooks/use-mobile";
 import { useCategoryMapping } from "@/hooks/useCategoryMapping";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PARImportDialog } from "@/components/par/PARImportDialog";
 import ItemIdentityBlock from "@/components/ItemIdentityBlock";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
@@ -43,16 +41,17 @@ export default function PARManagementPage() {
   const [newGuideListError, setNewGuideListError] = useState("");
   const [guideOpen, setGuideOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [filterCategory, setFilterCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [linkingGuideId, setLinkingGuideId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importExistingOpen, setImportExistingOpen] = useState(false);
-  /** Desktop line-item view: reference-style rows, card grid, or classic table */
-  const [parItemsLayout, setParItemsLayout] = useState<"rows" | "grid" | "table">("rows");
   const [deleteGuide, setDeleteGuide] = useState<any>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<any>(null);
+  const [renameName, setRenameName] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
   const [guideCoverage, setGuideCoverage] = useState<Record<string, { total: number; covered: number }>>({});
   /** Display names for par_guides.created_by (when profiles are readable) */
   const [guideCreatorNames, setGuideCreatorNames] = useState<Record<string, string>>({});
@@ -65,11 +64,27 @@ export default function PARManagementPage() {
     setGuides([]);
     setItems([]);
     setCatalogItems([]);
-    setFilterCategory("all");
     setSearch("");
     setLoading(true);
-    supabase.from("inventory_lists").select("*").eq("restaurant_id", currentRestaurant.id)
-      .then(({ data }) => { if (data) setLists(data); setLoading(false); });
+    (async () => {
+      const { data: listData } = await supabase.from("inventory_lists").select("*").eq("restaurant_id", currentRestaurant.id);
+      if (listData) setLists(listData);
+      const { data: guideData } = await supabase
+        .from("par_guides")
+        .select("*")
+        .eq("restaurant_id", currentRestaurant.id)
+        .order("created_at", { ascending: false });
+      if (guideData?.length) {
+        setGuides(guideData);
+        void hydrateGuideCreators(guideData);
+        fetchGuideCoverage(guideData);
+      } else {
+        setGuides([]);
+        setGuideCoverage({});
+        setGuideCreatorNames({});
+      }
+      setLoading(false);
+    })();
   }, [currentRestaurant]);
 
   useEffect(() => {
@@ -100,35 +115,20 @@ export default function PARManagementPage() {
   }, []);
 
   useEffect(() => {
-    if (!currentRestaurant || !selectedList) { setGuides([]); setSelectedGuide(null); return; }
-    supabase.from("par_guides").select("*")
+    if (!currentRestaurant) return;
+    if (!selectedGuide?.inventory_list_id) {
+      setCatalogItems([]);
+      return;
+    }
+    supabase
+      .from("inventory_catalog_items")
+      .select("*")
       .eq("restaurant_id", currentRestaurant.id)
-      .or(`inventory_list_id.eq.${selectedList},inventory_list_id.is.null`)
-      .order("created_at", { ascending: false })
+      .eq("inventory_list_id", selectedGuide.inventory_list_id)
       .then(({ data }) => {
-        if (data) {
-          setGuides(data);
-          void hydrateGuideCreators(data);
-          fetchGuideCoverage(data);
-          if (data.length === 0) {
-            setSelectedGuide(null);
-            setItems([]);
-          } else if (selectedGuide) {
-            const refreshedSelectedGuide = data.find(g => g.id === selectedGuide.id);
-            if (refreshedSelectedGuide) {
-              setSelectedGuide(refreshedSelectedGuide);
-            } else {
-              setSelectedGuide(null);
-              setItems([]);
-            }
-          }
-        }
+        if (data) setCatalogItems(data);
       });
-    supabase.from("inventory_catalog_items").select("*")
-      .eq("restaurant_id", currentRestaurant.id)
-      .eq("inventory_list_id", selectedList)
-      .then(({ data }) => { if (data) setCatalogItems(data); });
-  }, [currentRestaurant, selectedList]);
+  }, [currentRestaurant, selectedGuide?.id, selectedGuide?.inventory_list_id]);
 
   const fetchGuideCoverage = async (guideList: any[]) => {
     const coverage: Record<string, { total: number; covered: number }> = {};
@@ -155,24 +155,12 @@ export default function PARManagementPage() {
     if (data) setItems(data);
   }, []);
 
-  /** When a list has guides, open the first matching one so the main area is not empty */
-  useEffect(() => {
-    if (!selectedList || guides.length === 0) return;
-    const relevant = guides.filter(g => !g.inventory_list_id || g.inventory_list_id === selectedList);
-    if (relevant.length === 0) return;
-    const match = selectedGuide && relevant.some(g => g.id === selectedGuide.id);
-    if (match) return;
-    const g = relevant[0];
-    setSelectedGuide(g);
-    void fetchItems(g.id);
-  }, [selectedList, guides, selectedGuide, fetchItems]);
-
-  const refreshGuides = async (listIdOverride?: string) => {
-    const activeListId = listIdOverride || selectedList;
-    if (!currentRestaurant || !activeListId) return;
-    const { data } = await supabase.from("par_guides").select("*")
+  const refreshGuides = async () => {
+    if (!currentRestaurant) return;
+    const { data } = await supabase
+      .from("par_guides")
+      .select("*")
       .eq("restaurant_id", currentRestaurant.id)
-      .or(`inventory_list_id.eq.${activeListId},inventory_list_id.is.null`)
       .order("created_at", { ascending: false });
     if (data) {
       setGuides(data);
@@ -290,7 +278,7 @@ export default function PARManagementPage() {
     setGuideOpen(false);
     setSelectedList(newGuideListId);
     setCatalogItems(sourceCatalogItems || []);
-    await refreshGuides(newGuideListId);
+    await refreshGuides();
     setSelectedGuide(data);
     fetchItems(data.id);
   };
@@ -378,7 +366,7 @@ export default function PARManagementPage() {
     if (selectedGuide?.id === guide.id) {
       setSelectedGuide(data || { ...guide, inventory_list_id: listId });
     }
-    await refreshGuides(listId);
+    await refreshGuides();
     toast.success(`Guide linked to ${linkedListName}`);
   };
 
@@ -394,7 +382,60 @@ export default function PARManagementPage() {
     toast.success("PAR guide deleted");
     setDeleteGuide(null);
     if (selectedGuide?.id === guide.id) { setSelectedGuide(null); setItems([]); }
-    refreshGuides();
+    void refreshGuides();
+  };
+
+  const openRenameGuide = (g: any) => {
+    setRenameTarget(g);
+    setRenameName(g.name || "");
+    setRenameOpen(true);
+  };
+
+  const handleSaveRename = async () => {
+    if (!renameTarget || !renameName.trim()) return;
+    const targetId = renameTarget.id;
+    setRenameSaving(true);
+    const { data, error } = await supabase
+      .from("par_guides")
+      .update({ name: renameName.trim() })
+      .eq("id", targetId)
+      .select()
+      .single();
+    setRenameSaving(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Guide renamed");
+    setRenameOpen(false);
+    setRenameTarget(null);
+    setRenameName("");
+    await refreshGuides();
+    if (data && selectedGuide?.id === targetId) setSelectedGuide(data);
+  };
+
+  const handleExportGuide = async (g: any, exportFormat: "csv" | "excel" | "pdf") => {
+    const { data, error } = await supabase.from("par_guide_items").select("*").eq("par_guide_id", g.id);
+    if (error) {
+      toast.error("Could not load items for export");
+      return;
+    }
+    const rows = (data || []).map(i => ({
+      item_name: i.item_name,
+      category: i.category,
+      unit: i.unit,
+      par_level: i.par_level,
+    }));
+    if (rows.length === 0) {
+      toast.error("No items to export");
+      return;
+    }
+    const safeName = (g.name || "par-guide").replace(/[^a-z0-9-_]+/gi, "_").replace(/^_+|_+$/g, "") || "par-guide";
+    const filename = `par-${safeName}`;
+    const meta = { listName: g.name };
+    if (exportFormat === "csv") exportToCSV(rows, filename, "inventory");
+    else if (exportFormat === "excel") exportToExcel(rows, filename, "inventory", meta);
+    else exportToPDF(rows, filename, "inventory", meta);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
@@ -456,13 +497,7 @@ export default function PARManagementPage() {
     return 0;
   };
 
-  const categories = hasMappings
-    ? mappedCategories.map(c => c.name)
-    : [...new Set(items.map(i => i.category).filter(Boolean))];
-
   const filteredItems = items.filter(i => {
-    const cat = getItemCategory(i);
-    if (filterCategory !== "all" && cat !== filterCategory) return false;
     if (search && !i.item_name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -537,7 +572,7 @@ export default function PARManagementPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">PAR management</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-xl">Set target stock levels for each inventory list — pick a list, then open or create a PAR guide.</p>
+          <p className="text-sm text-muted-foreground mt-1 max-w-xl">Set target stock levels per guide — open a guide from the grid or create a new one.</p>
         </div>
         {isManagerOrOwner && (
           <div className="flex flex-wrap gap-2 justify-end shrink-0">
@@ -590,70 +625,8 @@ export default function PARManagementPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="rounded-2xl border border-border/70 bg-muted/10 shadow-sm p-4 md:p-6 space-y-5">
-      {/* Sticky controls */}
-      <div className={`space-y-3 ${isCompact ? "sticky top-0 z-20 bg-background/95 backdrop-blur-sm -mx-2 px-2 py-2 border-b rounded-t-lg" : ""}`}>
-        <Card className={isCompact ? "border-0 shadow-none bg-transparent" : "border-border/60 shadow-sm bg-card"}>
-          <CardContent className={`space-y-4 ${isCompact ? "p-0" : "p-5"}`}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">View by · Inventory list</Label>
-                <Select value={selectedList} onValueChange={v => { setSelectedList(v); setSelectedGuide(null); setItems([]); }}>
-                  <SelectTrigger className="h-10"><SelectValue placeholder="Select list" /></SelectTrigger>
-                  <SelectContent>{lists.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              {selectedList && isManagerOrOwner && (
-                <div className="flex items-end gap-2">
-                  <Button className="bg-gradient-amber shadow-amber gap-2" size="sm" onClick={() => setGuideOpen(true)}>
-                    <Plus className="h-4 w-4" /> Create from saved list
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* PAR guide selector as dropdown on compact */}
-            {selectedList && guides.length > 0 && isCompact && (
-              <div className="space-y-2">
-                <Label className="text-sm">PAR Guide</Label>
-                <div className="flex gap-2">
-                  <Select
-                    value={selectedGuide?.id || ""}
-                    onValueChange={v => {
-                      const g = guides.find(g => g.id === v);
-                      if (g) {
-                        if (g.inventory_list_id && g.inventory_list_id !== selectedList) {
-                          setSelectedList(g.inventory_list_id);
-                        }
-                        setSelectedGuide(g);
-                        fetchItems(g.id);
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="h-10"><SelectValue placeholder="Select guide" /></SelectTrigger>
-                    <SelectContent>
-                      {guides.map(g => (
-                        <SelectItem key={g.id} value={g.id}>
-                          {g.name}{g.inventory_list_id ? ` • ${getListName(g.inventory_list_id)}` : " • Unlinked"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {isManagerOrOwner && selectedGuide && (
-                    <Button variant="outline" size="icon" className="h-10 w-10 shrink-0 text-destructive hover:text-destructive" onClick={() => setDeleteGuide(selectedGuide)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Desktop guide cards — reference-style cells */}
-      {selectedList && !isCompact && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {!selectedGuide && (
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {guides.map(g => {
             const cov = guideCoverage[g.id];
             const locName = getLocationName(g.location_id);
@@ -661,8 +634,12 @@ export default function PARManagementPage() {
             return (
               <Card
                 key={g.id}
-                className={`cursor-pointer border-border/80 bg-card shadow-sm transition-all duration-200 hover:border-slate-400/50 dark:hover:border-border ${selectedGuide?.id === g.id ? "ring-2 ring-slate-700 dark:ring-primary border-slate-700/25 dark:border-primary/30" : ""}`}
-                onClick={() => { setSelectedGuide(g); fetchItems(g.id); }}
+                className="cursor-pointer border-border/80 bg-card shadow-sm transition-all duration-200 hover:border-slate-400/50 dark:hover:border-border"
+                onClick={() => {
+                  setSelectedGuide(g);
+                  setSelectedList(g.inventory_list_id ?? "");
+                  void fetchItems(g.id);
+                }}
               >
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2">
@@ -675,6 +652,18 @@ export default function PARManagementPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={e => { e.stopPropagation(); openRenameGuide(g); }}>
+                            <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={e => { e.stopPropagation(); void handleExportGuide(g, "csv"); }}>
+                            <Download className="h-3.5 w-3.5 mr-2" /> Export CSV
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={e => { e.stopPropagation(); void handleExportGuide(g, "excel"); }}>
+                            <FileSpreadsheet className="h-3.5 w-3.5 mr-2" /> Export Excel
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={e => { e.stopPropagation(); void handleExportGuide(g, "pdf"); }}>
+                            <Download className="h-3.5 w-3.5 mr-2" /> Export PDF
+                          </DropdownMenuItem>
                           <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={e => { e.stopPropagation(); setDeleteGuide(g); }}>
                             <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
                           </DropdownMenuItem>
@@ -738,26 +727,16 @@ export default function PARManagementPage() {
             <Card className="col-span-full sm:col-span-2 lg:col-span-3 xl:col-span-4">
               <CardContent className="empty-state py-10">
                 <BookOpen className="empty-state-icon" />
-                <p className="empty-state-title">No PAR guides for this list</p>
-                <p className="empty-state-description">Create a PAR guide from the saved list or import one from a file.</p>
+                <p className="empty-state-title">No PAR guides yet</p>
+                <p className="empty-state-description">Create a PAR guide or import one from a file.</p>
               </CardContent>
             </Card>
           )}
         </div>
       )}
 
-      {/* Empty state for compact when no guides */}
-      {selectedList && isCompact && guides.length === 0 && (
-        <Card>
-          <CardContent className="empty-state py-10">
-            <BookOpen className="empty-state-icon" />
-            <p className="empty-state-title">No PAR guides for this list</p>
-            <p className="empty-state-description">Create a PAR guide to set target stock levels.</p>
-          </CardContent>
-        </Card>
-      )}
-
       {selectedGuide && (
+        <div className="rounded-2xl border border-border/70 bg-muted/10 shadow-sm p-4 md:p-6 space-y-5">
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-border/60 pb-4">
             <div className="min-w-0">
@@ -793,57 +772,6 @@ export default function PARManagementPage() {
                   <Upload className="h-3.5 w-3.5" /> Import
                 </Button>
               )}
-              {!isCompact && (
-                <TooltipProvider>
-                  <div className="flex rounded-md border border-border/80 p-0.5 bg-muted/30 shrink-0">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant={parItemsLayout === "rows" ? "secondary" : "ghost"}
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => setParItemsLayout("rows")}
-                          aria-label="Row list view"
-                        >
-                          <List className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">List rows</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant={parItemsLayout === "grid" ? "secondary" : "ghost"}
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => setParItemsLayout("grid")}
-                          aria-label="Grid view"
-                        >
-                          <LayoutGrid className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Grid cells</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant={parItemsLayout === "table" ? "secondary" : "ghost"}
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => setParItemsLayout("table")}
-                          aria-label="Table view"
-                        >
-                          <Table2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Table</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </TooltipProvider>
-              )}
               <ExportButtons
                 items={items.map(i => ({ item_name: i.item_name, category: i.category, unit: i.unit, par_level: i.par_level }))}
                 filename={`par-${selectedGuide.name}`}
@@ -858,27 +786,10 @@ export default function PARManagementPage() {
             </div>
           </div>
 
-          {/* Search + category chips */}
-          <div className="space-y-2">
-            <div className="relative max-w-sm">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." className="pl-8 h-9 text-sm" />
-            </div>
-            {categories.length > 1 && (
-              <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-                <button
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterCategory === "all" ? "bg-primary text-primary-foreground" : "bg-muted/60 text-muted-foreground hover:bg-muted"}`}
-                  onClick={() => setFilterCategory("all")}
-                >All</button>
-                {categories.map(c => (
-                  <button
-                    key={c}
-                    className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterCategory === c ? "bg-primary text-primary-foreground" : "bg-muted/60 text-muted-foreground hover:bg-muted"}`}
-                    onClick={() => setFilterCategory(c)}
-                  >{c}</button>
-                ))}
-              </div>
-            )}
+          {/* Search */}
+          <div className="relative max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." className="pl-8 h-9 text-sm" />
           </div>
 
           {isCompact ? (
@@ -949,7 +860,7 @@ export default function PARManagementPage() {
                 </Card>
               )}
             </div>
-          ) : parItemsLayout === "rows" ? (
+          ) : (
             filteredItems.length === 0 ? (
               <Card className="border-border/80 shadow-sm">
                 <CardContent className="text-center text-muted-foreground py-10 text-sm">
@@ -970,7 +881,6 @@ export default function PARManagementPage() {
                         const packSize = (item as { pack_size?: string }).pack_size || ciRow?.pack_size || "—";
                         const prod = getItemProductNumber(item.item_name) || "—";
                         const lo = getItemLastOrdered(item.item_name);
-                        const uom = String((item.unit || ciRow?.unit || "EA") || "EA").trim() || "EA";
                         return (
                           <div
                             key={item.id}
@@ -1017,9 +927,6 @@ export default function PARManagementPage() {
                                     {item.par_level}
                                   </span>
                                 )}
-                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                  Par <span className="font-semibold text-foreground">{uom}</span>
-                                </span>
                                 {isManagerOrOwner && (
                                   <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleDeleteItem(item.id)}>
                                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -1037,170 +944,16 @@ export default function PARManagementPage() {
                 </div>
               </Card>
             )
-          ) : parItemsLayout === "grid" ? (
-            <div className="space-y-6">
-              {sortedCategoryKeys.map((category) => {
-                const catItems = groupedItems[category];
-                return (
-                  <div key={category}>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2 px-0.5">{category}</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                      {catItems.map((item) => {
-                        const globalIdx = filteredItems.indexOf(item);
-                        return (
-                          <Card key={item.id} className="border shadow-sm overflow-hidden hover:border-primary/25 transition-colors">
-                            <CardContent className="p-3 space-y-2">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0 flex-1">
-                                  <p className="font-semibold text-sm leading-snug line-clamp-2">{item.item_name}</p>
-                                  <ItemIdentityBlock brandName={item.brand_name} className="block mt-0.5" />
-                                  <p className="text-[11px] text-muted-foreground mt-1">
-                                    {[item.unit, item.pack_size].filter(Boolean).join(" · ") || "—"}
-                                    {getItemProductNumber(item.item_name) ? ` · #${getItemProductNumber(item.item_name)}` : ""}
-                                  </p>
-                                </div>
-                                {isManagerOrOwner && (
-                                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 shrink-0" onClick={() => handleDeleteItem(item.id)}>
-                                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                  </Button>
-                                )}
-                              </div>
-                              <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <Badge variant="secondary" className="text-[10px] font-normal truncate max-w-[7rem]">{getItemCategory(item)}</Badge>
-                                  {(() => {
-                                    const d = getItemLastOrdered(item.item_name);
-                                    return d ? (
-                                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">{format(new Date(d), "MM/dd/yy")}</span>
-                                    ) : null;
-                                  })()}
-                                </div>
-                              </div>
-                              {isManagerOrOwner ? (
-                                <div>
-                                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">PAR level</label>
-                                  <Input
-                                    ref={el => { inputRefs.current[item.id] = el; }}
-                                    inputMode="decimal"
-                                    type="number"
-                                    step="0.1"
-                                    min="0"
-                                    value={item.par_level ?? ""}
-                                    onChange={e => handleParLevelChange(item.id, e.target.value)}
-                                    onBlur={() => handleSaveParLevel(item.id, Number(item.par_level))}
-                                    onKeyDown={e => handleKeyDown(e, globalIdx)}
-                                    className="h-10 text-base font-mono text-center mt-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  />
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-between pt-1">
-                                  <span className="text-xs text-muted-foreground">PAR</span>
-                                  <span className="font-mono text-lg">{item.par_level}</span>
-                                </div>
-                              )}
-                              <div className="flex items-center justify-end min-h-[1rem]">
-                                {savingId === item.id && <span className="text-[10px] text-muted-foreground animate-pulse">Saving…</span>}
-                                {savedId === item.id && <Check className="h-3.5 w-3.5 text-success" />}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-              {filteredItems.length === 0 && (
-                <Card>
-                  <CardContent className="text-center text-muted-foreground py-8 text-sm">
-                    No items in this PAR guide.
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          ) : (
-            <Card className="overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="text-xs font-semibold">Item</TableHead>
-                    <TableHead className="text-xs font-semibold">Category</TableHead>
-                    <TableHead className="text-xs font-semibold">Unit</TableHead>
-                    <TableHead className="text-xs font-semibold">Pack Size</TableHead>
-                    <TableHead className="text-xs font-semibold">Product #</TableHead>
-                    <TableHead className="text-xs font-semibold">Last Ordered</TableHead>
-                    <TableHead className="text-xs font-semibold">PAR Level</TableHead>
-                    {isManagerOrOwner && <TableHead className="w-10"></TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredItems.map((i, idx) => (
-                    <TableRow key={i.id} className="hover:bg-muted/30 transition-colors">
-                      <TableCell>
-                        <span className="font-medium text-sm">{i.item_name}</span>
-                        <ItemIdentityBlock
-                          brandName={i.brand_name}
-                          className="block mt-0.5"
-                        />
-                      </TableCell>
-                      <TableCell><Badge variant="secondary" className="text-[10px] font-normal">{getItemCategory(i)}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{i.unit}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{i.pack_size || "—"}</TableCell>
-                      <TableCell className="text-xs font-mono text-muted-foreground/60">{getItemProductNumber(i.item_name) || "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {(() => {
-                          const d = getItemLastOrdered(i.item_name);
-                          return d ? format(new Date(d), "MM/dd/yy") : "—";
-                        })()}
-                      </TableCell>
-                      <TableCell>
-                        {isManagerOrOwner ? (
-                          <Input
-                            ref={el => { inputRefs.current[i.id] = el; }}
-                            inputMode="decimal"
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            value={i.par_level ?? ""}
-                            onChange={e => handleParLevelChange(i.id, e.target.value)}
-                            onBlur={() => handleSaveParLevel(i.id, Number(i.par_level))}
-                            onKeyDown={e => handleKeyDown(e, idx)}
-                            className="w-20 h-8 text-sm font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                        ) : (
-                          <span className="font-mono text-sm">{i.par_level}</span>
-                        )}
-                      </TableCell>
-                      {isManagerOrOwner && (
-                        <TableCell>
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDeleteItem(i.id)}>
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                  {filteredItems.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
-                        No items in this PAR guide.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </Card>
           )}
         </>
+        </div>
       )}
-
-      </div>
 
       {/* Standalone Import PAR Guide dialog (creates new guide) */}
       <PARImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        onImportComplete={() => { refreshGuides(); }}
+        onImportComplete={() => { void refreshGuides(); }}
       />
 
       {/* Import into existing guide */}
@@ -1214,6 +967,30 @@ export default function PARManagementPage() {
           onImportComplete={() => fetchItems(selectedGuide.id)}
         />
       )}
+
+      <Dialog open={renameOpen} onOpenChange={open => { setRenameOpen(open); if (!open) { setRenameTarget(null); setRenameName(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Rename PAR guide</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="space-y-2">
+              <Label>Guide name</Label>
+              <Input
+                value={renameName}
+                onChange={e => setRenameName(e.target.value)}
+                className="h-10"
+                autoFocus
+                onKeyDown={e => { if (e.key === "Enter") void handleSaveRename(); }}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button type="button" variant="outline" onClick={() => { setRenameOpen(false); setRenameTarget(null); setRenameName(""); }}>Cancel</Button>
+              <Button type="button" onClick={() => void handleSaveRename()} disabled={renameSaving || !renameName.trim()}>
+                {renameSaving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deleteGuide} onOpenChange={open => { if (!open) setDeleteGuide(null); }}>
         <AlertDialogContent>
