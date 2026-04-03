@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+import {
+  analyzeInvoiceComparison,
+  deriveInvoiceComparisonStatus,
+} from "@/lib/invoice-comparison";
+
+describe("invoice comparison tolerances", () => {
+  it("ignores small percentage quantity variance on large lines", () => {
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 100,
+        invoiced_qty: 100.2,
+        po_unit_cost: 5,
+        invoiced_unit_cost: 5,
+      }),
+    ).toBe("ok");
+  });
+
+  it("flags meaningful percentage quantity variance", () => {
+    const analysis = analyzeInvoiceComparison({
+      po_qty: 10,
+      invoiced_qty: 10.2,
+      po_unit_cost: 5,
+      invoiced_unit_cost: 5,
+    });
+
+    expect(analysis.qty.exceedsTolerance).toBe(true);
+    expect(analysis.qty.percentDifference).toBeGreaterThan(0.5);
+    expect(analysis.status).toBe("qty_mismatch");
+  });
+
+  it("ignores small percentage price variance on large lines", () => {
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 5,
+        invoiced_qty: 5,
+        po_unit_cost: 20,
+        invoiced_unit_cost: 20.05,
+      }),
+    ).toBe("ok");
+  });
+
+  it("flags meaningful percentage price variance", () => {
+    const analysis = analyzeInvoiceComparison({
+      po_qty: 5,
+      invoiced_qty: 5,
+      po_unit_cost: 2,
+      invoiced_unit_cost: 2.05,
+    });
+
+    expect(analysis.price.exceedsTolerance).toBe(true);
+    expect(analysis.price.percentDifference).toBeGreaterThan(1);
+    expect(analysis.status).toBe("price_mismatch");
+  });
+
+  it("flags meaningful line-total variance even when qty and price are within tolerance", () => {
+    const analysis = analyzeInvoiceComparison({
+      po_qty: 100,
+      invoiced_qty: 100.2,
+      po_unit_cost: 5,
+      invoiced_unit_cost: 5.02,
+      po_total_cost: 500,
+      invoiced_total_cost: 520,
+    });
+
+    expect(analysis.qty.exceedsTolerance).toBe(false);
+    expect(analysis.price.exceedsTolerance).toBe(false);
+    expect(analysis.total.exceedsTolerance).toBe(true);
+    expect(analysis.status).toBe("total_mismatch");
+  });
+
+  it("preserves special non-tolerance statuses", () => {
+    expect(
+      deriveInvoiceComparisonStatus({
+        status: "missing_from_invoice",
+        po_qty: 10,
+        invoiced_qty: 0,
+      }),
+    ).toBe("missing_from_invoice");
+    expect(
+      deriveInvoiceComparisonStatus({
+        status: "unmatched",
+        po_qty: null,
+        invoiced_qty: 4,
+      }),
+    ).toBe("unmatched");
+  });
+});

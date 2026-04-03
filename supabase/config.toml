@@ -1,0 +1,22 @@
+project_id = "rldjfjcnsibhuomylvrd"
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.process-notifications]
+verify_jwt = false
+
+[functions.portfolio-dashboard]
+verify_jwt = false
+
+[functions.send-invite]
+verify_jwt = false
+
+[functions.parse-invoice]
+verify_jwt = false
+
+[functions.vendor-import-invoices]
+verify_jwt = false
+
+[functions.vendor-import-invoice-details]
+verify_jwt = false

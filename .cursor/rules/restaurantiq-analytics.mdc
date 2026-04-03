@@ -1,0 +1,41 @@
+---
+description: RestaurantIQ — dashboard KPIs, formulas, display rules
+globs:
+  - "**/Dashboard.tsx"
+  - "**/Reports.tsx"
+  - "**/usage-analytics.ts"
+alwaysApply: false
+---
+
+# Analytics & dashboard math
+
+Numbers must be consistent and traceable across Dashboard, Reports, and shared libs.
+
+## Food cost %
+`Food Cost % = (COGS / Total Revenue) × 100`  
+`COGS = Opening Inventory Value + Purchases − Closing Inventory Value`  
+Use real counts where available; if revenue is missing, show **—**, not a fabricated %.
+
+## Inventory value
+`SUM(quantity × unit_cost)` using catalog cost basis. Null cost → exclude or warn. Prefer category breakdown where the UI supports it.
+
+## PAR variance
+`Variance = current_quantity − par_level`; `% = (Variance / par_level) × 100` when par_level > 0.  
+Understock → red; on par → green; overstock → amber. **`getRisk()` / variance should align with PAR from guides**, not random defaults.
+
+## Waste
+`Waste cost = SUM(waste_qty × unit_cost)`; optional **Waste % of purchases** over a period (week default; support day/month filters).
+
+## Order accuracy (procurement)
+`(Items received as ordered / items ordered) × 100` at line level where PO vs receipt data exists.
+
+## Turnover
+`Turnover = COGS / Average inventory value`; average = (opening + closing) / 2. Context: many restaurants target roughly 4–8×/month by category.
+
+## Reorder point (advanced)
+`ROP = (Avg daily usage × Lead time days) + Safety stock` with safety stock from service level when you have enough history; if usage history &lt; ~14 days, fall back to **PAR-based** suggestions only.
+
+## Display
+- Percentages: ~1 decimal. Currency: 2 decimals, `$`. Quantities: whole unless weight UOM → 2 decimals.
+- No KPI from null/undefined without skeleton or “No data yet”.
+- Charts: labeled axes, legend, clear date range in copy.

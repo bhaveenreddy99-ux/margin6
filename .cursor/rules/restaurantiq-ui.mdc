@@ -1,0 +1,23 @@
+---
+description: RestaurantIQ — mobile UX, tables, empty states, roles
+globs: "**/*.tsx"
+alwaysApply: false
+---
+
+# UI / UX
+
+- **Mobile-first**: wide tables need `overflow-x-auto` (or responsive card layouts). Screens that often need care: Reports, SmartOrder, WasteLog, ListManagement.
+- **Primary CTA** reachable with one thumb on common phone sizes.
+- **Empty states**: say what to do next, not only “No data.”
+- **Loading**: skeleton or spinner — avoid blank content areas.
+- **Destructive** actions: confirmation dialog (delete guide, void PO, etc.).
+- **Roles**: staff vs manager vs owner — hide or gate financials and destructive actions per existing app patterns.
+
+# App navigation (conceptual order)
+Dashboard → List Management → PAR Management → Inventory (enter / review / approved) → Smart Order → Purchase History → Invoices (receiving) → Waste Log → Reports → Notifications → Settings / Staff.
+
+# Backlog reminders (verify before implementing)
+- **EnterInventory**: “NO PAR” / risk — confirm PAR comes from linked `par_guide_items`, not wrong field.
+- **EnterInventory**: category grouping — `groupBy` key must match catalog category source.
+- **Staff edits**: sensitive fields (PAR/price) may need manager notification instead of direct edit — product decision.
+- **P1 ideas**: `computeOrderQty` pack rounding; `par_settings` thresholds vs `getRisk()`; smart order stale after review; invite token on signup; variance reporting.

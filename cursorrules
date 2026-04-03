@@ -1,0 +1,15 @@
+# Cursor / AI rules moved
+
+Project rules for Cursor live under **`.cursor/rules/`** as `.mdc` files (YAML frontmatter).
+
+| File | Purpose |
+|------|---------|
+| `restaurantiq-core.mdc` | Mindset, protocol, security, product bar — **always applied** |
+| `restaurantiq-data.mdc` | Supabase tables, PAR truth, legacy — **always applied** |
+| `restaurantiq-typescript.mdc` | TS + Supabase error handling — when editing `*.ts` / `*.tsx` |
+| `restaurantiq-analytics.mdc` | KPI formulas — Dashboard / Reports / usage-analytics |
+| `restaurantiq-ui.mdc` | Mobile UX, empty states, nav hints — when editing `*.tsx` |
+
+In **Cursor**: ensure project rules are enabled; the agent picks up `.cursor/rules` automatically for this folder.
+
+The previous single-file content was split and **aligned to this repo** (e.g. `inventory_sessions` / `inventory_session_items`, PO vs `orders` table). **Do not put secrets** (Supabase ref, keys) in rules — use env only.

@@ -1,0 +1,30 @@
+---
+description: RestaurantIQ — TypeScript, Supabase errors, async hygiene
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript & API usage
+
+- Prefer **zero `as any`**. Derive types from `src/integrations/supabase/types.ts` or narrow with `unknown`.
+- Every **`supabase.from()` / RPC** result: handle **`error`**; do not assume `data` is set.
+
+```ts
+const { data, error } = await supabase.from("…").select();
+if (error) {
+  toast.error("Failed to load. Please try again.");
+  return;
+}
+```
+
+- Async paths: `try/catch` or `.catch()`; avoid silent failures.
+- Props: explicit interfaces/types for components; avoid implicit `any`.
+
+## Known debt (tighten over time)
+Heavy `as any` history in files such as `InvoiceReview.tsx`, `EnterInventory.tsx`, `ListManagement.tsx` — new code should not add to this pattern.
+
+## Structure (aspirational)
+Prefer shared query/helpers in `src/lib/` or `src/services/` for repeated Supabase access; large pages may still inline queries — match existing file style when editing.
+
+## Code hygiene
+Avoid leaving commented-out dead code. Prefer structured logging or error boundaries over stray `console.log` in user-facing flows. Split components that grow far past ~300 lines when you are already touching them.
