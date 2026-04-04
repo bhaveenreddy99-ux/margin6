@@ -16,6 +16,8 @@ export interface InvoiceHeader {
   vendor_name: string;
   invoice_number: string;
   invoice_date: string;
+  /** Optional PO # for auto-link (manual or pre-filled from linked PO when editing). */
+  po_number: string;
   location_id: string;
   linked_smart_order_id: string;
 }

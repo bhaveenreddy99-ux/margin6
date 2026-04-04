@@ -85,4 +85,40 @@ describe("invoice comparison tolerances", () => {
       }),
     ).toBe("unmatched");
   });
+
+  it("flags received_short when received is below billed beyond tolerance", () => {
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 10,
+        invoiced_qty: 10,
+        received_qty: 8,
+        po_unit_cost: 5,
+        invoiced_unit_cost: 5,
+      }),
+    ).toBe("received_short");
+  });
+
+  it("flags received_over when received exceeds billed beyond tolerance", () => {
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 10,
+        invoiced_qty: 10,
+        received_qty: 12,
+        po_unit_cost: 5,
+        invoiced_unit_cost: 5,
+      }),
+    ).toBe("received_over");
+  });
+
+  it("prioritizes received variance over PO vs invoice qty when both apply", () => {
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 10,
+        invoiced_qty: 10,
+        received_qty: 7,
+        po_unit_cost: 5,
+        invoiced_unit_cost: 6,
+      }),
+    ).toBe("received_short");
+  });
 });

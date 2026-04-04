@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.4"
   }
   public: {
     Tables: {
@@ -141,6 +141,67 @@ export type Database = {
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_issues: {
+        Row: {
+          catalog_item_id: string | null
+          created_at: string | null
+          id: string
+          invoice_line_comparison_id: string | null
+          issue_type: string
+          item_name: string
+          notes: string | null
+          purchase_history_id: string
+          reported_at: string | null
+          resolved_at: string | null
+        }
+        Insert: {
+          catalog_item_id?: string | null
+          created_at?: string | null
+          id?: string
+          invoice_line_comparison_id?: string | null
+          issue_type: string
+          item_name: string
+          notes?: string | null
+          purchase_history_id: string
+          reported_at?: string | null
+          resolved_at?: string | null
+        }
+        Update: {
+          catalog_item_id?: string | null
+          created_at?: string | null
+          id?: string
+          invoice_line_comparison_id?: string | null
+          issue_type?: string
+          item_name?: string
+          notes?: string | null
+          purchase_history_id?: string
+          reported_at?: string | null
+          resolved_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_issues_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_issues_invoice_line_comparison_id_fkey"
+            columns: ["invoice_line_comparison_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_line_comparisons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_issues_purchase_history_id_fkey"
+            columns: ["purchase_history_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_history"
             referencedColumns: ["id"]
           },
         ]
@@ -516,7 +577,6 @@ export type Database = {
       inventory_session_items: {
         Row: {
           brand_name: string | null
-          catalog_item_id: string | null
           category: string | null
           current_stock: number
           id: string
@@ -533,7 +593,6 @@ export type Database = {
         }
         Insert: {
           brand_name?: string | null
-          catalog_item_id?: string | null
           category?: string | null
           current_stock?: number
           id?: string
@@ -550,7 +609,6 @@ export type Database = {
         }
         Update: {
           brand_name?: string | null
-          catalog_item_id?: string | null
           category?: string | null
           current_stock?: number
           id?: string
@@ -566,13 +624,6 @@ export type Database = {
           vendor_sku?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "inventory_session_items_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "inventory_session_items_session_id_fkey"
             columns: ["session_id"]
@@ -623,6 +674,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "inventory_sessions_counting_par_guide_id_fkey"
+            columns: ["counting_par_guide_id"]
+            isOneToOne: false
+            referencedRelation: "par_guides"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "inventory_sessions_inventory_list_id_fkey"
             columns: ["inventory_list_id"]
@@ -737,6 +795,237 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "invitations_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_items: {
+        Row: {
+          brand_name: string | null
+          catalog_item_id: string | null
+          created_at: string
+          id: string
+          invoice_id: string
+          item_name: string
+          match_status: string | null
+          pack_size: string | null
+          product_number: string | null
+          quantity_invoiced: number | null
+          total_cost: number | null
+          unit: string | null
+          unit_cost: number | null
+        }
+        Insert: {
+          brand_name?: string | null
+          catalog_item_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id: string
+          item_name: string
+          match_status?: string | null
+          pack_size?: string | null
+          product_number?: string | null
+          quantity_invoiced?: number | null
+          total_cost?: number | null
+          unit?: string | null
+          unit_cost?: number | null
+        }
+        Update: {
+          brand_name?: string | null
+          catalog_item_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          item_name?: string
+          match_status?: string | null
+          pack_size?: string | null
+          product_number?: string | null
+          quantity_invoiced?: number | null
+          total_cost?: number | null
+          unit?: string | null
+          unit_cost?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_items_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_items_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_line_comparisons: {
+        Row: {
+          catalog_item_id: string | null
+          cost_diff: number | null
+          created_at: string | null
+          id: string
+          invoiced_qty: number | null
+          invoiced_unit_cost: number | null
+          item_name: string
+          po_qty: number | null
+          po_unit_cost: number | null
+          purchase_history_id: string
+          purchase_history_item_id: string | null
+          qty_diff: number | null
+          received_qty: number | null
+          smart_order_run_id: string | null
+          status: string | null
+        }
+        Insert: {
+          catalog_item_id?: string | null
+          cost_diff?: number | null
+          created_at?: string | null
+          id?: string
+          invoiced_qty?: number | null
+          invoiced_unit_cost?: number | null
+          item_name: string
+          po_qty?: number | null
+          po_unit_cost?: number | null
+          purchase_history_id: string
+          purchase_history_item_id?: string | null
+          qty_diff?: number | null
+          received_qty?: number | null
+          smart_order_run_id?: string | null
+          status?: string | null
+        }
+        Update: {
+          catalog_item_id?: string | null
+          cost_diff?: number | null
+          created_at?: string | null
+          id?: string
+          invoiced_qty?: number | null
+          invoiced_unit_cost?: number | null
+          item_name?: string
+          po_qty?: number | null
+          po_unit_cost?: number | null
+          purchase_history_id?: string
+          purchase_history_item_id?: string | null
+          qty_diff?: number | null
+          received_qty?: number | null
+          smart_order_run_id?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_line_comparisons_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_comparisons_purchase_history_id_fkey"
+            columns: ["purchase_history_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_history"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_comparisons_purchase_history_item_id_fkey"
+            columns: ["purchase_history_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_history_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_comparisons_smart_order_run_id_fkey"
+            columns: ["smart_order_run_id"]
+            isOneToOne: false
+            referencedRelation: "smart_order_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          confirmed_at: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_date: string | null
+          invoice_email: string | null
+          invoice_number: string | null
+          invoice_subtotal: number | null
+          invoice_tax: number | null
+          invoice_total: number | null
+          location_id: string | null
+          pdf_url: string | null
+          purchase_order_id: string | null
+          receipt_status: string | null
+          restaurant_id: string
+          status: string
+          updated_at: string
+          vendor_name: string | null
+        }
+        Insert: {
+          confirmed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_date?: string | null
+          invoice_email?: string | null
+          invoice_number?: string | null
+          invoice_subtotal?: number | null
+          invoice_tax?: number | null
+          invoice_total?: number | null
+          location_id?: string | null
+          pdf_url?: string | null
+          purchase_order_id?: string | null
+          receipt_status?: string | null
+          restaurant_id: string
+          status?: string
+          updated_at?: string
+          vendor_name?: string | null
+        }
+        Update: {
+          confirmed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_date?: string | null
+          invoice_email?: string | null
+          invoice_number?: string | null
+          invoice_subtotal?: number | null
+          invoice_tax?: number | null
+          invoice_total?: number | null
+          location_id?: string | null
+          pdf_url?: string | null
+          purchase_order_id?: string | null
+          receipt_status?: string | null
+          restaurant_id?: string
+          status?: string
+          updated_at?: string
+          vendor_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_restaurant_id_fkey"
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
@@ -1345,12 +1634,17 @@ export type Database = {
           invoice_date: string | null
           invoice_number: string | null
           invoice_status: string
+          invoice_subtotal: number | null
+          invoice_tax: number | null
+          invoice_total: number | null
           location_id: string | null
           pdf_url: string | null
           po_number: string | null
+          purchase_order_id: string | null
           receipt_status: string | null
           restaurant_id: string
           smart_order_run_id: string | null
+          source: string | null
           vendor_name: string | null
         }
         Insert: {
@@ -1362,12 +1656,17 @@ export type Database = {
           invoice_date?: string | null
           invoice_number?: string | null
           invoice_status?: string
+          invoice_subtotal?: number | null
+          invoice_tax?: number | null
+          invoice_total?: number | null
           location_id?: string | null
           pdf_url?: string | null
           po_number?: string | null
+          purchase_order_id?: string | null
           receipt_status?: string | null
           restaurant_id: string
           smart_order_run_id?: string | null
+          source?: string | null
           vendor_name?: string | null
         }
         Update: {
@@ -1379,12 +1678,17 @@ export type Database = {
           invoice_date?: string | null
           invoice_number?: string | null
           invoice_status?: string
+          invoice_subtotal?: number | null
+          invoice_tax?: number | null
+          invoice_total?: number | null
           location_id?: string | null
           pdf_url?: string | null
           po_number?: string | null
+          purchase_order_id?: string | null
           receipt_status?: string | null
           restaurant_id?: string
           smart_order_run_id?: string | null
+          source?: string | null
           vendor_name?: string | null
         }
         Relationships: [
@@ -1400,6 +1704,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_history_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "smart_order_runs"
             referencedColumns: ["id"]
           },
           {
@@ -1475,148 +1786,6 @@ export type Database = {
           },
         ]
       }
-      invoice_items: {
-        Row: {
-          brand_name: string | null
-          catalog_item_id: string | null
-          created_at: string
-          id: string
-          invoice_id: string
-          item_name: string
-          match_status: string
-          pack_size: string | null
-          quantity: number
-          total_cost: number | null
-          unit_cost: number | null
-          vendor_sku: string | null
-        }
-        Insert: {
-          brand_name?: string | null
-          catalog_item_id?: string | null
-          created_at?: string
-          id?: string
-          invoice_id: string
-          item_name: string
-          match_status?: string
-          pack_size?: string | null
-          quantity?: number
-          total_cost?: number | null
-          unit_cost?: number | null
-          vendor_sku?: string | null
-        }
-        Update: {
-          brand_name?: string | null
-          catalog_item_id?: string | null
-          created_at?: string
-          id?: string
-          invoice_id?: string
-          item_name?: string
-          match_status?: string
-          pack_size?: string | null
-          quantity?: number
-          total_cost?: number | null
-          unit_cost?: number | null
-          vendor_sku?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "invoice_items_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_items_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      invoices: {
-        Row: {
-          confirmed_at: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          invoice_date: string | null
-          invoice_number: string | null
-          invoice_subtotal: number | null
-          invoice_tax: number | null
-          invoice_total: number | null
-          location_id: string | null
-          pdf_url: string | null
-          purchase_order_id: string | null
-          receipt_status: string | null
-          restaurant_id: string
-          status: string
-          updated_at: string
-          vendor_name: string | null
-        }
-        Insert: {
-          confirmed_at?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          invoice_date?: string | null
-          invoice_number?: string | null
-          invoice_subtotal?: number | null
-          invoice_tax?: number | null
-          invoice_total?: number | null
-          location_id?: string | null
-          pdf_url?: string | null
-          purchase_order_id?: string | null
-          receipt_status?: string | null
-          restaurant_id: string
-          status?: string
-          updated_at?: string
-          vendor_name?: string | null
-        }
-        Update: {
-          confirmed_at?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          invoice_date?: string | null
-          invoice_number?: string | null
-          invoice_subtotal?: number | null
-          invoice_tax?: number | null
-          invoice_total?: number | null
-          location_id?: string | null
-          pdf_url?: string | null
-          purchase_order_id?: string | null
-          receipt_status?: string | null
-          restaurant_id?: string
-          status?: string
-          updated_at?: string
-          vendor_name?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "invoices_location_id_fkey"
-            columns: ["location_id"]
-            isOneToOne: false
-            referencedRelation: "locations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoices_purchase_order_id_fkey"
-            columns: ["purchase_order_id"]
-            isOneToOne: false
-            referencedRelation: "purchase_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoices_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: false
-            referencedRelation: "restaurants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       purchase_order_items: {
         Row: {
           brand_name: string | null
@@ -1625,8 +1794,9 @@ export type Database = {
           id: string
           item_name: string
           pack_size: string | null
+          product_number: string | null
           purchase_order_id: string
-          quantity_ordered: number
+          quantity_ordered: number | null
           smart_order_run_item_id: string | null
           total_cost: number | null
           unit_cost: number | null
@@ -1638,8 +1808,9 @@ export type Database = {
           id?: string
           item_name: string
           pack_size?: string | null
+          product_number?: string | null
           purchase_order_id: string
-          quantity_ordered?: number
+          quantity_ordered?: number | null
           smart_order_run_item_id?: string | null
           total_cost?: number | null
           unit_cost?: number | null
@@ -1651,8 +1822,9 @@ export type Database = {
           id?: string
           item_name?: string
           pack_size?: string | null
+          product_number?: string | null
           purchase_order_id?: string
-          quantity_ordered?: number
+          quantity_ordered?: number | null
           smart_order_run_item_id?: string | null
           total_cost?: number | null
           unit_cost?: number | null
@@ -1685,10 +1857,9 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
-          created_from_session_id: string | null
           id: string
-          inventory_list_id: string | null
-          po_number: string
+          notes: string | null
+          po_number: string | null
           restaurant_id: string
           smart_order_run_id: string | null
           status: string
@@ -1699,10 +1870,9 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
-          created_from_session_id?: string | null
           id?: string
-          inventory_list_id?: string | null
-          po_number: string
+          notes?: string | null
+          po_number?: string | null
           restaurant_id: string
           smart_order_run_id?: string | null
           status?: string
@@ -1713,10 +1883,9 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
-          created_from_session_id?: string | null
           id?: string
-          inventory_list_id?: string | null
-          po_number?: string
+          notes?: string | null
+          po_number?: string | null
           restaurant_id?: string
           smart_order_run_id?: string | null
           status?: string
@@ -1725,20 +1894,6 @@ export type Database = {
           vendor_name?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "purchase_orders_created_from_session_id_fkey"
-            columns: ["created_from_session_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_sessions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "purchase_orders_inventory_list_id_fkey"
-            columns: ["inventory_list_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_lists"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "purchase_orders_restaurant_id_fkey"
             columns: ["restaurant_id"]
@@ -1749,302 +1904,8 @@ export type Database = {
           {
             foreignKeyName: "purchase_orders_smart_order_run_id_fkey"
             columns: ["smart_order_run_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "smart_order_runs"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      stock_movements: {
-        Row: {
-          catalog_item_id: string
-          created_at: string
-          created_by: string | null
-          id: string
-          invoice_id: string | null
-          invoice_item_id: string | null
-          movement_type: string
-          notes: string | null
-          quantity: number
-          reference_id: string | null
-          reference_type: string | null
-          restaurant_id: string
-        }
-        Insert: {
-          catalog_item_id: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          invoice_item_id?: string | null
-          movement_type: string
-          notes?: string | null
-          quantity: number
-          reference_id?: string | null
-          reference_type?: string | null
-          restaurant_id: string
-          invoice_id?: string | null
-        }
-        Update: {
-          catalog_item_id?: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          invoice_item_id?: string | null
-          movement_type?: string
-          notes?: string | null
-          quantity?: number
-          reference_id?: string | null
-          reference_type?: string | null
-          restaurant_id?: string
-          invoice_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "stock_movements_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "stock_movements_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "stock_movements_invoice_item_id_fkey"
-            columns: ["invoice_item_id"]
-            isOneToOne: false
-            referencedRelation: "invoice_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "stock_movements_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: false
-            referencedRelation: "restaurants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      delivery_issues: {
-        Row: {
-          catalog_item_id: string | null
-          id: string
-          invoice_id: string | null
-          invoice_line_comparison_id: string | null
-          issue_type: string
-          item_name: string
-          notes: string | null
-          purchase_history_id: string | null
-          reported_at: string
-          reported_by: string | null
-          restaurant_id: string | null
-        }
-        Insert: {
-          catalog_item_id?: string | null
-          id?: string
-          invoice_id?: string | null
-          invoice_line_comparison_id?: string | null
-          issue_type: string
-          item_name: string
-          notes?: string | null
-          purchase_history_id?: string | null
-          reported_at?: string
-          reported_by?: string | null
-          restaurant_id?: string | null
-        }
-        Update: {
-          catalog_item_id?: string | null
-          id?: string
-          invoice_id?: string | null
-          invoice_line_comparison_id?: string | null
-          issue_type?: string
-          item_name?: string
-          notes?: string | null
-          purchase_history_id?: string | null
-          reported_at?: string
-          reported_by?: string | null
-          restaurant_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "delivery_issues_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "delivery_issues_purchase_history_id_fkey"
-            columns: ["purchase_history_id"]
-            isOneToOne: false
-            referencedRelation: "purchase_history"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      invoice_line_comparisons: {
-        Row: {
-          catalog_item_id: string | null
-          cost_diff: number | null
-          created_at: string | null
-          id: string
-          invoice_id: string | null
-          invoice_item_id: string | null
-          invoiced_qty: number | null
-          invoiced_total_cost: number | null
-          invoiced_unit_cost: number | null
-          item_name: string
-          po_qty: number | null
-          po_total_cost: number | null
-          po_unit_cost: number | null
-          purchase_history_id: string | null
-          purchase_history_item_id: string | null
-          purchase_order_item_id: string | null
-          qty_diff: number | null
-          smart_order_run_id: string | null
-          status: string
-          total_diff: number | null
-        }
-        Insert: {
-          catalog_item_id?: string | null
-          created_at?: string | null
-          id?: string
-          invoice_id?: string | null
-          invoice_item_id?: string | null
-          invoiced_qty?: number | null
-          invoiced_total_cost?: number | null
-          invoiced_unit_cost?: number | null
-          item_name: string
-          po_qty?: number | null
-          po_total_cost?: number | null
-          po_unit_cost?: number | null
-          purchase_history_id?: string | null
-          purchase_history_item_id?: string | null
-          purchase_order_item_id?: string | null
-          smart_order_run_id?: string | null
-          status?: string
-        }
-        Update: {
-          catalog_item_id?: string | null
-          created_at?: string | null
-          id?: string
-          invoice_id?: string | null
-          invoice_item_id?: string | null
-          invoiced_qty?: number | null
-          invoiced_total_cost?: number | null
-          invoiced_unit_cost?: number | null
-          item_name?: string
-          po_qty?: number | null
-          po_total_cost?: number | null
-          po_unit_cost?: number | null
-          purchase_history_id?: string | null
-          purchase_history_item_id?: string | null
-          purchase_order_item_id?: string | null
-          smart_order_run_id?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "invoice_line_comparisons_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_line_comparisons_invoice_item_id_fkey"
-            columns: ["invoice_item_id"]
-            isOneToOne: false
-            referencedRelation: "invoice_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_line_comparisons_purchase_history_id_fkey"
-            columns: ["purchase_history_id"]
-            isOneToOne: false
-            referencedRelation: "purchase_history"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_line_comparisons_purchase_order_item_id_fkey"
-            columns: ["purchase_order_item_id"]
-            isOneToOne: false
-            referencedRelation: "purchase_order_items"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      restaurant_counters: {
-        Row: {
-          po_sequence: number
-          restaurant_id: string
-        }
-        Insert: {
-          po_sequence?: number
-          restaurant_id: string
-        }
-        Update: {
-          po_sequence?: number
-          restaurant_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "restaurant_counters_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: true
-            referencedRelation: "restaurants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      vendor_item_mappings: {
-        Row: {
-          catalog_item_id: string
-          created_at: string
-          id: string
-          restaurant_id: string
-          updated_at: string
-          vendor_item_name: string
-          vendor_name: string
-          vendor_sku: string | null
-        }
-        Insert: {
-          catalog_item_id: string
-          created_at?: string
-          id?: string
-          restaurant_id: string
-          updated_at?: string
-          vendor_item_name: string
-          vendor_name: string
-          vendor_sku?: string | null
-        }
-        Update: {
-          catalog_item_id?: string
-          created_at?: string
-          id?: string
-          restaurant_id?: string
-          updated_at?: string
-          vendor_item_name?: string
-          vendor_name?: string
-          vendor_sku?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "vendor_item_mappings_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "vendor_item_mappings_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: false
-            referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
         ]
@@ -2154,6 +2015,29 @@ export type Database = {
           },
         ]
       }
+      restaurant_counters: {
+        Row: {
+          po_sequence: number
+          restaurant_id: string
+        }
+        Insert: {
+          po_sequence?: number
+          restaurant_id: string
+        }
+        Update: {
+          po_sequence?: number
+          restaurant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "restaurant_counters_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: true
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       restaurant_members: {
         Row: {
           created_at: string
@@ -2204,6 +2088,7 @@ export type Database = {
           currency: string
           date_format: string
           id: string
+          invoice_email: string | null
           logo_url: string | null
           phone: string | null
           restaurant_id: string
@@ -2217,6 +2102,7 @@ export type Database = {
           currency?: string
           date_format?: string
           id?: string
+          invoice_email?: string | null
           logo_url?: string | null
           phone?: string | null
           restaurant_id: string
@@ -2230,6 +2116,7 @@ export type Database = {
           currency?: string
           date_format?: string
           id?: string
+          invoice_email?: string | null
           logo_url?: string | null
           phone?: string | null
           restaurant_id?: string
@@ -2266,6 +2153,7 @@ export type Database = {
       }
       smart_order_run_items: {
         Row: {
+          brand_name: string | null
           catalog_item_id: string | null
           current_stock: number
           id: string
@@ -2278,6 +2166,7 @@ export type Database = {
           unit_cost: number | null
         }
         Insert: {
+          brand_name?: string | null
           catalog_item_id?: string | null
           current_stock?: number
           id?: string
@@ -2290,6 +2179,7 @@ export type Database = {
           unit_cost?: number | null
         }
         Update: {
+          brand_name?: string | null
           catalog_item_id?: string | null
           current_stock?: number
           id?: string
@@ -2329,7 +2219,7 @@ export type Database = {
           po_number: string | null
           restaurant_id: string
           session_id: string
-          status: string | null
+          status: string
           submitted_at: string | null
         }
         Insert: {
@@ -2342,7 +2232,7 @@ export type Database = {
           po_number?: string | null
           restaurant_id: string
           session_id: string
-          status?: string | null
+          status?: string
           submitted_at?: string | null
         }
         Update: {
@@ -2355,7 +2245,7 @@ export type Database = {
           po_number?: string | null
           restaurant_id?: string
           session_id?: string
-          status?: string | null
+          status?: string
           submitted_at?: string | null
         }
         Relationships: [
@@ -2479,66 +2369,6 @@ export type Database = {
           },
         ]
       }
-      waste_log: {
-        Row: {
-          catalog_item_id: string | null
-          created_at: string
-          id: string
-          item_name: string
-          logged_at: string
-          logged_by: string
-          notes: string | null
-          quantity: number
-          reason: string
-          restaurant_id: string
-          total_cost: number | null
-          unit_cost: number | null
-        }
-        Insert: {
-          catalog_item_id?: string | null
-          created_at?: string
-          id?: string
-          item_name: string
-          logged_at?: string
-          logged_by: string
-          notes?: string | null
-          quantity: number
-          reason: string
-          restaurant_id: string
-          total_cost?: number | null
-          unit_cost?: number | null
-        }
-        Update: {
-          catalog_item_id?: string | null
-          created_at?: string
-          id?: string
-          item_name?: string
-          logged_at?: string
-          logged_by?: string
-          notes?: string | null
-          quantity?: number
-          reason?: string
-          restaurant_id?: string
-          total_cost?: number | null
-          unit_cost?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "waste_log_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "waste_log_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: false
-            referencedRelation: "restaurants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       user_ui_state: {
         Row: {
           id: string
@@ -2632,6 +2462,98 @@ export type Database = {
           },
         ]
       }
+      vendor_item_mappings: {
+        Row: {
+          catalog_item_id: string
+          created_at: string
+          id: string
+          restaurant_id: string
+          updated_at: string
+          vendor_item_name: string
+          vendor_name: string
+          vendor_sku: string | null
+        }
+        Insert: {
+          catalog_item_id: string
+          created_at?: string
+          id?: string
+          restaurant_id: string
+          updated_at?: string
+          vendor_item_name: string
+          vendor_name: string
+          vendor_sku?: string | null
+        }
+        Update: {
+          catalog_item_id?: string
+          created_at?: string
+          id?: string
+          restaurant_id?: string
+          updated_at?: string
+          vendor_item_name?: string
+          vendor_name?: string
+          vendor_sku?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_item_mappings_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_item_mappings_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      waste_log: {
+        Row: {
+          created_at: string
+          id: string
+          item_name: string
+          logged_at: string
+          logged_by: string
+          notes: string | null
+          quantity: number
+          reason: string
+          restaurant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_name: string
+          logged_at?: string
+          logged_by: string
+          notes?: string | null
+          quantity: number
+          reason: string
+          restaurant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_name?: string
+          logged_at?: string
+          logged_by?: string
+          notes?: string | null
+          quantity?: number
+          reason?: string
+          restaurant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "waste_log_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -2640,22 +2562,6 @@ export type Database = {
       alert_pref_restaurant_id: { Args: { pref_id: string }; Returns: string }
       confirm_invoice_receipt: {
         Args: { p_invoice_id: string; p_restaurant_id: string }
-        Returns: Json
-      }
-      get_delivery_issue_pos: {
-        Args: { p_restaurant_id: string }
-        Returns: Array<{ purchase_history_id: string; po_number: string | null; issue_count: number }>
-      }
-      notify_delivery_issues: {
-        Args: { p_purchase_history_id: string }
-        Returns: Json
-      }
-      generate_po_number: {
-        Args: { p_restaurant_id: string }
-        Returns: string
-      }
-      submit_smart_order: {
-        Args: { p_run_id: string }
         Returns: Json
       }
       create_restaurant_with_owner: {
@@ -2677,6 +2583,15 @@ export type Database = {
         Args: { p_restaurant_id: string }
         Returns: undefined
       }
+      generate_po_number: { Args: { p_restaurant_id: string }; Returns: string }
+      get_delivery_issue_pos: {
+        Args: { p_restaurant_id: string }
+        Returns: {
+          issue_count: number
+          po_number: string
+          purchase_history_id: string
+        }[]
+      }
       has_restaurant_role: {
         Args: { _role: Database["public"]["Enums"]["app_role"]; r_id: string }
         Returns: boolean
@@ -2689,7 +2604,6 @@ export type Database = {
         Returns: boolean
       }
       invitation_restaurant_id: { Args: { inv_id: string }; Returns: string }
-      invoice_restaurant_id: { Args: { p_invoice_id: string }; Returns: string }
       is_member_of: { Args: { r_id: string }; Returns: boolean }
       list_category_restaurant_id: {
         Args: { lc_list_id: string }
@@ -2699,9 +2613,12 @@ export type Database = {
         Args: { p_list_id: string }
         Returns: string
       }
+      notify_delivery_issues: {
+        Args: { p_purchase_history_id: string }
+        Returns: Json
+      }
       order_restaurant_id: { Args: { o_id: string }; Returns: string }
       par_guide_restaurant_id: { Args: { pg_id: string }; Returns: string }
-      purchase_order_restaurant_id: { Args: { p_po_id: string }; Returns: string }
       purchase_history_restaurant_id: {
         Args: { ph_id: string }
         Returns: string
@@ -2712,6 +2629,7 @@ export type Database = {
         Args: { sr_id: string }
         Returns: string
       }
+      submit_smart_order: { Args: { p_run_id: string }; Returns: Json }
     }
     Enums: {
       app_role: "OWNER" | "MANAGER" | "STAFF"

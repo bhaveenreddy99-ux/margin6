@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   ArrowLeft, BookmarkPlus, CheckCircle, AlertTriangle, Package, DollarSign,
@@ -23,6 +24,7 @@ import {
   DEFAULT_QTY_TOLERANCE,
   DEFAULT_TOTAL_TOLERANCE,
   deriveInvoiceComparisonStatus,
+  threeWayQtyAllDivergent,
 } from "@/lib/invoice-comparison";
 import { resolveDocumentTotal } from "@/lib/invoice-totals";
 
@@ -99,6 +101,8 @@ export default function InvoiceReviewPage() {
         qtyAnalysis: analysis.qty,
         priceAnalysis: analysis.price,
         totalAnalysis: analysis.total,
+        receivedVsBilled: analysis.receivedVsBilled,
+        receivedDollar: analysis.receivedDollar,
       };
     }),
     [comparisons],
@@ -324,6 +328,7 @@ export default function InvoiceReviewPage() {
           invoiced_qty: invoicedQty,
           invoiced_unit_cost: invoicedCost,
           invoiced_total_cost: invoicedTotal,
+          received_qty: invoicedQty,
           status: "unmatched",
         };
       }
@@ -342,6 +347,7 @@ export default function InvoiceReviewPage() {
         status = deriveInvoiceComparisonStatus({
           po_qty: poQty,
           invoiced_qty: invoicedQty,
+          received_qty: invoicedQty,
           po_unit_cost: poCost,
           invoiced_unit_cost: invoicedCost,
           po_total_cost: poTotal,
@@ -360,6 +366,7 @@ export default function InvoiceReviewPage() {
         invoiced_qty: invoicedQty,
         invoiced_unit_cost: invoicedCost,
         invoiced_total_cost: invoicedTotal,
+        received_qty: invoicedQty,
         status,
       };
     });
@@ -384,6 +391,7 @@ export default function InvoiceReviewPage() {
         invoiced_qty: 0,
         invoiced_unit_cost: 0,
         invoiced_total_cost: 0,
+        received_qty: 0,
         status: "missing_from_invoice",
       });
     });
@@ -547,6 +555,25 @@ export default function InvoiceReviewPage() {
     }
   };
 
+  const persistReceivedQty = async (comp: any, raw: string) => {
+    const trimmed = raw.trim();
+    const num = trimmed === "" ? null : Number(trimmed);
+    const fallback = Number(comp.invoiced_qty) || 0;
+    const toSave = num != null && Number.isFinite(num) ? num : fallback;
+    const { error } = await supabase
+      .from("invoice_line_comparisons")
+      .update({ received_qty: toSave })
+      .eq("id", comp.id);
+    if (error) {
+      toast.error("Could not save received quantity");
+      console.error(error);
+      return;
+    }
+    setComparisons((prev) =>
+      prev.map((c) => (c.id === comp.id ? { ...c, received_qty: toSave } : c)),
+    );
+  };
+
   const statusBadge = (status: string) => {
     switch (status) {
       case "ok": return <Badge className="bg-success/10 text-success border-0 text-[10px]">OK</Badge>;
@@ -556,6 +583,8 @@ export default function InvoiceReviewPage() {
       case "missing_from_invoice": return <Badge className="bg-destructive/10 text-destructive border-0 text-[10px]">Missing</Badge>;
       case "extra_on_invoice": return <Badge className="bg-blue-500/10 text-blue-600 border-0 text-[10px]">Extra</Badge>;
       case "unmatched": return <Badge className="bg-muted/60 text-muted-foreground border-0 text-[10px]">Unmatched</Badge>;
+      case "received_short": return <Badge className="bg-amber-500/15 text-amber-800 dark:text-amber-200 border-0 text-[10px]">Short delivery</Badge>;
+      case "received_over": return <Badge className="bg-violet-500/15 text-violet-700 border-0 text-[10px]">Over-received</Badge>;
       default: return null;
     }
   };
@@ -664,7 +693,7 @@ export default function InvoiceReviewPage() {
         <CardHeader className="pb-3 pt-4 px-4">
           <CardTitle className="text-sm font-semibold">Line Item Comparison</CardTitle>
           <p className="text-[11px] text-muted-foreground">
-            Flags quantity variances above {DEFAULT_QTY_TOLERANCE.percent}%, unit-price variances above {DEFAULT_PRICE_TOLERANCE.percent}%, and line-total variances above {DEFAULT_TOTAL_TOLERANCE.percent}% once the total gap exceeds ${formatNum(DEFAULT_TOTAL_TOLERANCE.minAbsolute)}.
+            Three-way: ordered (PO) vs billed (invoice) vs received (actual delivery). Edit Received to record physical counts. Flags short/over delivery, PO vs invoice qty/price/total above {DEFAULT_QTY_TOLERANCE.percent}% / {DEFAULT_PRICE_TOLERANCE.percent}% / {DEFAULT_TOTAL_TOLERANCE.percent}% (totals after ${formatNum(DEFAULT_TOTAL_TOLERANCE.minAbsolute)}).
           </p>
         </CardHeader>
         <div className="overflow-x-auto">
@@ -672,8 +701,9 @@ export default function InvoiceReviewPage() {
             <TableHeader>
               <TableRow className="bg-muted/30">
                 <TableHead className="text-xs font-semibold">Item</TableHead>
-                <TableHead className="text-xs font-semibold text-right">PO Qty</TableHead>
-                <TableHead className="text-xs font-semibold text-right">Invoice Qty</TableHead>
+                <TableHead className="text-xs font-semibold text-right">Ordered</TableHead>
+                <TableHead className="text-xs font-semibold text-right">Billed</TableHead>
+                <TableHead className="text-xs font-semibold text-right">Received</TableHead>
                 <TableHead className="text-xs font-semibold text-right">PO Price</TableHead>
                 <TableHead className="text-xs font-semibold text-right">Invoice Price</TableHead>
                 <TableHead className="text-xs font-semibold text-right">PO Total</TableHead>
@@ -685,7 +715,7 @@ export default function InvoiceReviewPage() {
             <TableBody>
               {comparisons.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground text-sm py-8">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground text-sm py-8">
                     {poItems.length === 0
                       ? "No linked Smart Order — comparison not available"
                       : "No line items to compare"}
@@ -698,6 +728,8 @@ export default function InvoiceReviewPage() {
                   const qtyPctDiff = comp.qtyAnalysis.percentDifference;
                   const costDiff = comp.priceAnalysis.difference;
                   const costPctDiff = comp.priceAnalysis.percentDifference;
+                  const recvDiff = comp.receivedVsBilled?.difference;
+                  const recvPct = comp.receivedVsBilled?.percentDifference;
                   const poTotal = resolveComparisonLineTotal(comp.po_total_cost, comp.po_qty, comp.po_unit_cost);
                   const invoicedTotal = resolveComparisonLineTotal(
                     comp.invoiced_total_cost,
@@ -706,8 +738,12 @@ export default function InvoiceReviewPage() {
                   );
                   const totalDiff = comp.totalAnalysis.difference;
                   const totalPctDiff = comp.totalAnalysis.percentDifference;
+                  const threeWay = threeWayQtyAllDivergent(comp);
                   return (
-                    <TableRow key={comp.id} className={comp.derived_status !== "ok" ? "bg-warning/3" : ""}>
+                    <TableRow
+                      key={comp.id}
+                      className={`${comp.derived_status !== "ok" ? "bg-warning/3" : ""} ${threeWay ? "ring-1 ring-destructive/40 bg-destructive/[0.06]" : ""}`}
+                    >
                       <TableCell className="text-sm font-medium">
                         <div>
                           <span>{comp.item_name}</span>
@@ -796,6 +832,38 @@ export default function InvoiceReviewPage() {
                             {qtyPctDiff != null ? ` · ${qtyPctDiff.toFixed(1)}%` : ""})
                           </span>
                         )}
+                      </TableCell>
+                      <TableCell className="text-sm text-right align-top">
+                        <Input
+                          type="number"
+                          step="any"
+                          min={0}
+                          className={`h-8 w-[5.5rem] text-right font-mono text-xs px-2 ${comp.receivedVsBilled?.exceedsTolerance ? "border-amber-500/60" : ""}`}
+                          value={comp.received_qty ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            const n = v === "" ? null : Number(v);
+                            setComparisons((prev) =>
+                              prev.map((c) =>
+                                c.id === comp.id ? { ...c, received_qty: n != null && Number.isFinite(n) ? n : null } : c,
+                              ),
+                            );
+                          }}
+                          onBlur={(e) => void persistReceivedQty(comp, e.target.value)}
+                        />
+                        {recvDiff != null && comp.receivedVsBilled?.exceedsTolerance && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            ({recvDiff > 0 ? "+" : ""}{formatNum(recvDiff)}
+                            {recvPct != null ? ` · ${recvPct.toFixed(1)}%` : ""})
+                          </div>
+                        )}
+                        {comp.receivedDollar != null &&
+                          comp.receivedVsBilled?.exceedsTolerance &&
+                          Math.abs(comp.receivedDollar) > 0.005 && (
+                            <div className="text-[10px] font-mono text-amber-700 dark:text-amber-300">
+                              {comp.receivedDollar > 0 ? "Short " : "Over "}${formatNum(Math.abs(comp.receivedDollar))} at invoice price
+                            </div>
+                          )}
                       </TableCell>
                       <TableCell className="text-sm text-right font-mono text-muted-foreground">
                         {comp.po_unit_cost != null ? `$${formatNum(comp.po_unit_cost)}` : "—"}

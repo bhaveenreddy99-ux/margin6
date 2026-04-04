@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import {
   FileText, Upload, Plus, Search, Loader2, Check, AlertTriangle,
   DollarSign, Package, Calendar, Truck, Eye, Trash2,
-  Info, Plug, PenLine, Save, ClipboardCheck
+  Info, Plug, PenLine, Save, ClipboardCheck, Camera,
 } from "lucide-react";
 import { formatNum } from "@/lib/inventory-utils";
 import * as XLSX from "xlsx";
@@ -55,7 +55,7 @@ export default function InvoicesPage() {
   const [createTab, setCreateTab] = useState("manual");
   const [header, setHeader] = useState<InvoiceHeader>({
     vendor_name: "", invoice_number: "", invoice_date: new Date().toISOString().split("T")[0],
-    location_id: "", linked_smart_order_id: "",
+    po_number: "", location_id: "", linked_smart_order_id: "",
   });
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [parsing, setParsing] = useState(false);
@@ -66,7 +66,9 @@ export default function InvoicesPage() {
   const [linkedSmartOrderItems, setLinkedSmartOrderItems] = useState<any[]>([]);
   const [lastSessionItems, setLastSessionItems] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  /** Set when parse-invoice returns a PO# from a PDF (used for auto-link after save). */
+  const [parsedPoNumberFromPdf, setParsedPoNumberFromPdf] = useState<string | null>(null);
   const { matchItems } = useInvoiceMatching(catalogItems);
 
   // Editing existing draft
@@ -153,10 +155,152 @@ export default function InvoicesPage() {
     })();
   }, [header.linked_smart_order_id]);
 
+  /** After invoice rows are saved: auto-link PO when not manually linked. Never throws. */
+  const applyAutoPoLinkAfterSave = useCallback(
+    async (args: {
+      invoiceId: string;
+      restaurantId: string;
+      hadManualPoLink: boolean;
+      manualPoNumber: string | null;
+      parsedPoFromPdf: string | null;
+      vendorName: string;
+    }) => {
+      if (args.hadManualPoLink) return;
+
+      const poTrim =
+        (args.manualPoNumber?.trim() || args.parsedPoFromPdf?.trim() || "") || "";
+
+      const linkPurchaseOrder = async (poId: string, poLabel: string | null) => {
+        const { error: updErr } = await supabase
+          .from("invoices")
+          .update({ purchase_order_id: poId, updated_at: new Date().toISOString() })
+          .eq("id", args.invoiceId);
+        if (updErr) {
+          toast.warning("Invoice saved — could not attach purchase order.");
+          console.error("invoice purchase_order_id update", updErr);
+          return false;
+        }
+        toast.success(`Linked to PO ${poLabel ?? "—"}`);
+        await fetchPurchases();
+        return true;
+      };
+
+      // Method 1 — match by PO number (manual field takes precedence over parsed PDF)
+      if (poTrim) {
+        const { data: poRows, error } = await supabase
+          .from("purchase_orders")
+          .select("id, po_number, created_at")
+          .eq("restaurant_id", args.restaurantId)
+          .eq("po_number", poTrim)
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          toast.warning("Invoice saved — could not look up purchase order.");
+          console.error("purchase_orders po_number lookup", error);
+          // fall through to Method 2
+        } else if (poRows?.length) {
+          const best = poRows[0];
+          await linkPurchaseOrder(best.id, best.po_number ?? poTrim);
+          return;
+        }
+        // Not found by PO# — continue to Method 2
+      }
+
+      // Method 2 — vendor + date window (only when Method 1 did not link)
+      const fourteenDaysAgo = new Date();
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+
+      const { data: rows, error: vErr } = await supabase
+        .from("purchase_orders")
+        .select("id, po_number, vendor_name, created_at")
+        .eq("restaurant_id", args.restaurantId)
+        .gte("created_at", fourteenDaysAgo.toISOString());
+
+      if (vErr) {
+        toast.warning("Invoice saved — could not search purchase orders.");
+        console.error("purchase_orders vendor window lookup", vErr);
+        return;
+      }
+
+      const inv = args.vendorName.trim().toLowerCase();
+      const pool = rows ?? [];
+      const candidates = pool.filter((r) => {
+        const vn = r.vendor_name;
+        if (vn == null || String(vn).trim() === "") return true;
+        if (!inv) return false;
+        return String(vn).toLowerCase().includes(inv);
+      });
+
+      if (candidates.length === 0) {
+        toast.info("Invoice saved — no matching PO found");
+        return;
+      }
+      if (candidates.length > 1) {
+        toast.info("Multiple POs found — please link manually");
+        return;
+      }
+
+      await linkPurchaseOrder(candidates[0].id, candidates[0].po_number);
+    },
+    [fetchPurchases],
+  );
+
+  /** Raw file bytes → base64 (same encoding as PDF path). */
+  const fileToBase64Raw = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  };
+
+  type ParseInvoiceResult = {
+    vendor_name?: string;
+    invoice_number?: string;
+    invoice_date?: string;
+    po_number?: string | null;
+    items?: unknown[];
+    error?: string;
+  };
+
+  const applyParseInvoiceResult = (result: ParseInvoiceResult, mode: "pdf" | "image") => {
+    if (result.error) throw new Error(result.error);
+    if (result.vendor_name) setHeader((h) => ({ ...h, vendor_name: result.vendor_name as string }));
+    if (result.invoice_number) setHeader((h) => ({ ...h, invoice_number: result.invoice_number as string }));
+    if (result.invoice_date) setHeader((h) => ({ ...h, invoice_date: result.invoice_date as string }));
+    if (result.po_number != null && String(result.po_number).trim()) {
+      const po = String(result.po_number).trim();
+      setParsedPoNumberFromPdf(po);
+      setHeader((h) => ({ ...h, po_number: po }));
+    }
+    if (result.items?.length) {
+      setItems(matchItems(result.items as Parameters<typeof matchItems>[0]));
+      toast.success(`AI extracted ${result.items.length} items`);
+    } else if (mode === "image") {
+      setHeader((h) => ({
+        ...h,
+        vendor_name: "",
+        invoice_number: "",
+        invoice_date: new Date().toISOString().split("T")[0],
+        po_number: "",
+      }));
+      setItems([]);
+      setParsedPoNumberFromPdf(null);
+      toast.error("Could not read — please fill in manually");
+    } else {
+      toast.error("AI could not extract items from this PDF");
+    }
+  };
+
   // Parse CSV/Excel file
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setParsedPoNumberFromPdf(null);
 
     const isSpreadsheet = /\.(csv|xlsx|xls)$/i.test(file.name);
     const isPDF = /\.pdf$/i.test(file.name);
@@ -204,37 +348,55 @@ export default function InvoicesPage() {
     } else if (isPDF) {
       setParsing(true);
       try {
-        // Convert PDF to base64 so Claude can read the actual document content
-        const arrayBuffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = "";
-        const chunkSize = 8192;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-        }
-        const base64 = btoa(binary);
+        const base64 = await fileToBase64Raw(file);
         const { data: result, error } = await supabase.functions.invoke("parse-invoice", {
           body: { content: base64, file_type: "PDF" },
         });
         if (error) throw error;
-        if (result.error) throw new Error(result.error);
-        if (result.vendor_name) setHeader(h => ({ ...h, vendor_name: result.vendor_name }));
-        if (result.invoice_number) setHeader(h => ({ ...h, invoice_number: result.invoice_number }));
-        if (result.invoice_date) setHeader(h => ({ ...h, invoice_date: result.invoice_date }));
-        if (result.items?.length) {
-          setItems(matchItems(result.items));
-          toast.success(`AI extracted ${result.items.length} items`);
-        } else {
-          toast.error("AI could not extract items from this PDF");
-        }
-      } catch (err: any) {
-        toast.error(err.message || "Failed to parse PDF");
+        applyParseInvoiceResult((result || {}) as ParseInvoiceResult, "pdf");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to parse PDF";
+        toast.error(message);
       }
       setParsing(false);
     } else {
       toast.error("Unsupported file type. Use PDF, CSV, or Excel.");
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleTakePhotoClick = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
+      toast.error("Use Upload PDF instead on desktop");
+      return;
+    }
+    photoInputRef.current?.click();
+  };
+
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setParsedPoNumberFromPdf(null);
+    setParsing(true);
+    try {
+      const base64 = await fileToBase64Raw(file);
+      const { data: result, error } = await supabase.functions.invoke("parse-invoice", {
+        body: { content: base64, file_type: "IMAGE" },
+      });
+      if (error) {
+        toast.error("Could not read invoice — try again");
+        console.error("parse-invoice IMAGE", error);
+        return;
+      }
+      applyParseInvoiceResult((result || {}) as ParseInvoiceResult, "image");
+    } catch (err: unknown) {
+      toast.error("Could not read invoice — try again");
+      console.error("parse-invoice IMAGE", err);
+    } finally {
+      setParsing(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
   };
 
   const addManualItem = () => {
@@ -276,6 +438,10 @@ export default function InvoicesPage() {
 
     setSaving(true);
     try {
+      const capturedParsedPo = parsedPoNumberFromPdf;
+      const capturedManualPo = header.po_number.trim() || null;
+      const capturedVendor = header.vendor_name.trim();
+
       let purchaseOrderId: string | null = null;
       if (header.linked_smart_order_id) {
         const { data: po } = await supabase.from("purchase_orders").select("id").eq("smart_order_run_id", header.linked_smart_order_id.trim()).maybeSingle();
@@ -332,6 +498,15 @@ export default function InvoicesPage() {
       const { error: itemsError } = await supabase.from("invoice_items").insert(invRows);
       if (itemsError) throw itemsError;
 
+      await applyAutoPoLinkAfterSave({
+        invoiceId: purchaseId,
+        restaurantId: currentRestaurant.id,
+        hadManualPoLink: purchaseOrderId != null,
+        manualPoNumber: capturedManualPo,
+        parsedPoFromPdf: capturedParsedPo,
+        vendorName: capturedVendor,
+      });
+
       const statusLabel = status === "POSTED" ? "Posted" : status === "RECEIVED" ? "Received" : "Draft saved";
       toast.success(`Invoice ${statusLabel.toLowerCase()} successfully`);
       setCreateOpen(false);
@@ -344,21 +519,24 @@ export default function InvoicesPage() {
   };
 
   const resetCreateForm = () => {
-    setHeader({ vendor_name: "", invoice_number: "", invoice_date: new Date().toISOString().split("T")[0], location_id: "", linked_smart_order_id: "" });
+    setHeader({ vendor_name: "", invoice_number: "", invoice_date: new Date().toISOString().split("T")[0], po_number: "", location_id: "", linked_smart_order_id: "" });
     setItems([]);
     setCreateTab("manual");
     setEditingPurchaseId(null);
+    setParsedPoNumberFromPdf(null);
   };
 
   // Open existing invoice for editing (DRAFT or RECEIVED)
   const handleEditInvoice = async (p: any) => {
     const { data: phItems } = await supabase.from("invoice_items").select("*").eq("invoice_id", p.id);
     setEditingPurchaseId(p.id);
+    setParsedPoNumberFromPdf(null);
     const runId = p.smart_order_run_id || p.purchase_orders?.smart_order_run_id || "";
     setHeader({
       vendor_name: p.vendor_name || "",
       invoice_number: p.invoice_number || "",
       invoice_date: p.invoice_date || new Date().toISOString().split("T")[0],
+      po_number: typeof p.po_number === "string" ? p.po_number : "",
       location_id: p.location_id || "",
       linked_smart_order_id: runId,
     });
@@ -397,6 +575,7 @@ export default function InvoicesPage() {
   const handleVendorImport = (importedItems: InvoiceItem[], vendorName: string, invoiceNumber: string, invoiceDate: string) => {
     setItems(importedItems);
     setHeader(h => ({ ...h, vendor_name: vendorName, invoice_number: invoiceNumber, invoice_date: invoiceDate }));
+    setParsedPoNumberFromPdf(null);
     // Switch to manual tab to show the review table
     setCreateTab("manual");
   };
@@ -477,10 +656,14 @@ export default function InvoicesPage() {
             </DialogHeader>
 
             {/* Header Fields */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs font-medium">Vendor Name *</Label>
                 <Input value={header.vendor_name} onChange={e => setHeader(h => ({ ...h, vendor_name: e.target.value }))} placeholder="e.g. Sysco" className="h-9 text-sm" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">PO #</Label>
+                <Input value={header.po_number} onChange={e => setHeader(h => ({ ...h, po_number: e.target.value }))} placeholder="Optional — auto-link" className="h-9 text-sm font-mono" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs font-medium">Invoice #</Label>
@@ -547,17 +730,42 @@ export default function InvoicesPage() {
               </TabsContent>
 
               <TabsContent value="import" className="space-y-3">
-                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/40 transition-colors">
-                  <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.pdf" onChange={handleFileUpload} className="hidden" id="invoice-upload" />
-                  <label htmlFor="invoice-upload" className="cursor-pointer space-y-2">
-                    {parsing ? (
-                      <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
-                    ) : (
-                      <Upload className="h-8 w-8 mx-auto text-muted-foreground/40" />
-                    )}
-                    <p className="text-sm font-medium">{parsing ? "AI is parsing your invoice..." : "Drop or click to upload"}</p>
-                    <p className="text-xs text-muted-foreground">PDF, CSV, or Excel files supported</p>
-                  </label>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Upload PDF or spreadsheet</Label>
+                  <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/40 transition-colors">
+                    <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.pdf" onChange={handleFileUpload} className="hidden" id="invoice-upload" />
+                    <label htmlFor="invoice-upload" className="cursor-pointer space-y-2">
+                      {parsing ? (
+                        <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
+                      ) : (
+                        <Upload className="h-8 w-8 mx-auto text-muted-foreground/40" />
+                      )}
+                      <p className="text-sm font-medium">{parsing ? "AI is parsing your invoice..." : "Drop or click to upload"}</p>
+                      <p className="text-xs text-muted-foreground">PDF, CSV, or Excel files supported</p>
+                    </label>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    id="invoice-photo"
+                    onChange={handlePhotoCapture}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-2"
+                    disabled={parsing}
+                    onClick={handleTakePhotoClick}
+                  >
+                    <Camera className="h-4 w-4" />
+                    Take Photo
+                  </Button>
                 </div>
               </TabsContent>
 

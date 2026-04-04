@@ -17,12 +17,13 @@ import { toast } from "sonner";
 import {
   Building2, MapPin, Package, BookOpen,
   ShoppingCart, FileUp, Users, AlertTriangle, Plus, Trash2, Star,
-  X, Check, Pencil, Power, CalendarClock, ChevronRight,
+  X, Check, Pencil, Power, CalendarClock, ChevronRight, Mail, Copy,
 } from "lucide-react";
 import { InventoryScheduleSection } from "@/pages/app/settings/InventorySchedule";
 
 const TOP_NAV = [
   { key: "general",   label: "Business Profile",    icon: Building2,    desc: "Restaurant name, contact info, timezone & currency" },
+  { key: "invoice",   label: "Invoice Settings",    icon: Mail,         desc: "Unique address for vendor invoice delivery" },
   { key: "locations", label: "Locations",            icon: MapPin,       desc: "Manage store locations for multi-location inventory" },
   { key: "inventory", label: "Inventory",            icon: Package,      desc: "Default categories, units, and entry behavior" },
   { key: "users",     label: "Users & Permissions",  icon: Users,        desc: "Team roles and default location assignments" },
@@ -105,6 +106,7 @@ export default function SettingsPage() {
         {/* Right content */}
         <div className="flex-1 min-w-0">
           {section === "general"    && <GeneralSection restaurantId={currentRestaurant?.id} isManager={isManager} restaurantName={currentRestaurant?.name} />}
+          {section === "invoice"    && <InvoiceSection restaurantId={currentRestaurant?.id} isManager={isManager} restaurantName={currentRestaurant?.name} />}
           {section === "locations"  && <LocationsSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "inventory"  && <InventorySection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "par"        && <PARSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
@@ -121,7 +123,15 @@ export default function SettingsPage() {
 
 /* ===== 1) General ===== */
 function GeneralSection({ restaurantId, isManager, restaurantName }: { restaurantId?: string; isManager: boolean; restaurantName?: string }) {
-  const [form, setForm] = useState({ business_email: "", phone: "", address: "", currency: "USD", timezone: "America/New_York", date_format: "MM/DD/YYYY" });
+  const [form, setForm] = useState({
+    business_email: "",
+    phone: "",
+    address: "",
+    currency: "USD",
+    timezone: "America/New_York",
+    date_format: "MM/DD/YYYY",
+    invoice_email: null as string | null,
+  });
   const [name, setName] = useState(restaurantName || "");
   const [saving, setSaving] = useState(false);
 
@@ -130,7 +140,15 @@ function GeneralSection({ restaurantId, isManager, restaurantName }: { restauran
     setName(restaurantName || "");
     supabase.from("restaurant_settings").select("*").eq("restaurant_id", restaurantId).maybeSingle().then(({ data }) => {
       if (data) {
-        setForm({ business_email: data.business_email || "", phone: data.phone || "", address: data.address || "", currency: data.currency, timezone: data.timezone, date_format: data.date_format });
+        setForm({
+          business_email: data.business_email || "",
+          phone: data.phone || "",
+          address: data.address || "",
+          currency: data.currency,
+          timezone: data.timezone,
+          date_format: data.date_format,
+          invoice_email: data.invoice_email ?? null,
+        });
       }
     });
   }, [restaurantId, restaurantName]);
@@ -167,6 +185,204 @@ function GeneralSection({ restaurantId, isManager, restaurantName }: { restauran
         {isManager && <Button onClick={handleSave} disabled={saving} className="bg-gradient-amber shadow-amber mt-2">{saving ? "Saving…" : "Save Changes"}</Button>}
       </CardContent>
     </Card>
+  );
+}
+
+const INVOICE_EMAIL_DOMAIN = "invoices.restaurantiq.com";
+
+function slugifyRestaurantNameForInvoice(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 20);
+  return slug || "restaurant";
+}
+
+function randomInvoiceSuffix(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const arr = new Uint8Array(6);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (x) => chars[x % chars.length]).join("");
+}
+
+/* ===== 1b) Invoice (vendor delivery) ===== */
+function InvoiceSection({
+  restaurantId,
+  isManager,
+  restaurantName,
+}: {
+  restaurantId?: string;
+  isManager: boolean;
+  restaurantName?: string;
+}) {
+  const [invoiceEmail, setInvoiceEmail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [usFoodsOpen, setUsFoodsOpen] = useState(false);
+  const [pfgOpen, setPfgOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!restaurantId) return;
+    setLoading(true);
+    const { data } = await supabase.from("restaurant_settings").select("invoice_email").eq("restaurant_id", restaurantId).maybeSingle();
+    setInvoiceEmail(data?.invoice_email ?? null);
+    setLoading(false);
+  }, [restaurantId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const copyAddress = async () => {
+    if (!invoiceEmail) return;
+    try {
+      await navigator.clipboard.writeText(invoiceEmail);
+      toast.success("Address copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!restaurantId || !isManager) return;
+    setGenerating(true);
+    try {
+      const slug = slugifyRestaurantNameForInvoice(restaurantName || "restaurant");
+      let assigned: string | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const candidate = `${slug}-${randomInvoiceSuffix()}@${INVOICE_EMAIL_DOMAIN}`;
+        const { data: existing } = await supabase.from("restaurant_settings").select("restaurant_id").eq("restaurant_id", restaurantId).maybeSingle();
+        if (existing) {
+          const { error } = await supabase.from("restaurant_settings").update({ invoice_email: candidate }).eq("restaurant_id", restaurantId);
+          if (!error) {
+            assigned = candidate;
+            break;
+          }
+          if ((error as { code?: string }).code === "23505") continue;
+          throw error;
+        } else {
+          const { error } = await supabase.from("restaurant_settings").insert({
+            restaurant_id: restaurantId,
+            invoice_email: candidate,
+            currency: "USD",
+            timezone: "America/New_York",
+            date_format: "MM/DD/YYYY",
+          });
+          if (!error) {
+            assigned = candidate;
+            break;
+          }
+          if ((error as { code?: string }).code === "23505") continue;
+          throw error;
+        }
+      }
+      if (!assigned) throw new Error("Could not assign a unique invoice email");
+      setInvoiceEmail(assigned);
+      toast.success("Invoice email created");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create email");
+    }
+    setGenerating(false);
+  };
+
+  if (!restaurantId) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-base">Invoice Settings</CardTitle></CardHeader>
+        <CardContent><p className="text-sm text-muted-foreground">Select a restaurant to view invoice settings.</p></CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Invoice Settings</CardTitle>
+          <CardDescription>Unique address for distributors to send invoices into RestaurantIQ</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : invoiceEmail ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="text-sm bg-muted px-2.5 py-1.5 rounded-md font-mono break-all">{invoiceEmail}</code>
+              <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={copyAddress}>
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">No invoice email has been assigned yet.</p>
+              {isManager && (
+                <Button type="button" size="sm" className="bg-gradient-amber shadow-amber" disabled={generating} onClick={handleGenerate}>
+                  {generating ? "Creating…" : "Generate invoice email"}
+                </Button>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">How to receive invoices automatically — Sysco</p>
+            <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1.5">
+              <li>Copy your unique email address above</li>
+              <li>Log into Sysco Shop at sysco.com</li>
+              <li>Go to Account → Invoice Preferences</li>
+              <li>Replace invoice email with your RestaurantIQ address</li>
+              <li>Click Save</li>
+            </ol>
+            <p className="text-sm text-muted-foreground">Your next Sysco invoice will arrive automatically.</p>
+          </div>
+
+          <Collapsible open={usFoodsOpen} onOpenChange={setUsFoodsOpen}>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-medium hover:bg-muted/50 transition-colors">
+                <span>US Foods</span>
+                <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${usFoodsOpen ? "rotate-90" : ""}`} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+                <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1.5">
+                  <li>Copy your unique email address above</li>
+                  <li>Log into US Foods at usfoods.com</li>
+                  <li>Open your account settings and find invoice or document delivery preferences</li>
+                  <li>Set the invoice email to your RestaurantIQ address</li>
+                  <li>Save your changes</li>
+                </ol>
+                <p className="text-sm text-muted-foreground">Your next US Foods invoice will arrive automatically.</p>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible open={pfgOpen} onOpenChange={setPfgOpen}>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-medium hover:bg-muted/50 transition-colors">
+                <span>PFG (Performance Foodservice)</span>
+                <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${pfgOpen ? "rotate-90" : ""}`} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+                <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1.5">
+                  <li>Copy your unique email address above</li>
+                  <li>Log into Performance Foodservice at pfgc.com</li>
+                  <li>Open your account profile and locate invoice or e-document preferences</li>
+                  <li>Set the invoice email to your RestaurantIQ address</li>
+                  <li>Save your changes</li>
+                </ol>
+                <p className="text-sm text-muted-foreground">Your next PFG invoice will arrive automatically.</p>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

@@ -3,6 +3,49 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/** Same instructions for PDF document + invoice photo (vision). */
+const EXTRACT_INVOICE_PROMPT =
+  "Extract all invoice line items from this invoice PDF. Use the extract_invoice tool. Include every product line item with its SKU/product number, description, brand, quantity shipped (use SHIP qty not ORDER qty), unit price, and line total. For Performance Foodservice invoices: vendor_name='Performance Foodservice', invoice_number is the INVOICE field, invoice_date is the DELV DATE field in YYYY-MM-DD format. Skip rows that are headers, subtotals, tax lines, or freight unless they have a product SKU.";
+
+/** Max decoded image size (bytes) — aligns with typical vision API limits. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function decodeBase64ToBytes(b64: string): Uint8Array {
+  const normalized = b64.replace(/\s/g, "");
+  const binary = atob(normalized);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function detectImageMediaType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return "image/gif";
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -35,7 +78,7 @@ Deno.serve(async (req) => {
     }
 
     // Build message content based on file type
-    let messageContent: any[];
+    let messageContent: unknown[];
     if (file_type === "PDF") {
       messageContent = [
         {
@@ -48,7 +91,57 @@ Deno.serve(async (req) => {
         },
         {
           type: "text",
-          text: "Extract all invoice line items from this invoice PDF. Use the extract_invoice tool. Include every product line item with its SKU/product number, description, brand, quantity shipped (use SHIP qty not ORDER qty), unit price, and line total. For Performance Foodservice invoices: vendor_name='Performance Foodservice', invoice_number is the INVOICE field, invoice_date is the DELV DATE field in YYYY-MM-DD format. Skip rows that are headers, subtotals, tax lines, or freight unless they have a product SKU.",
+          text: EXTRACT_INVOICE_PROMPT,
+        },
+      ];
+    } else if (file_type === "IMAGE") {
+      let imageBytes: Uint8Array;
+      try {
+        imageBytes = decodeBase64ToBytes(String(content));
+      } catch {
+        return new Response(JSON.stringify({ error: "Invalid image — could not decode base64" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (imageBytes.length === 0) {
+        return new Response(JSON.stringify({ error: "Invalid image — empty file" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (imageBytes.length > MAX_IMAGE_BYTES) {
+        return new Response(
+          JSON.stringify({ error: `Image too large — max ${Math.floor(MAX_IMAGE_BYTES / (1024 * 1024))}MB` }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      const mediaType = detectImageMediaType(imageBytes);
+      if (!mediaType) {
+        return new Response(
+          JSON.stringify({ error: "Invalid image — use JPEG, PNG, WebP, or GIF" }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      const normalizedB64 = String(content).replace(/\s/g, "");
+      messageContent = [
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: mediaType,
+            data: normalizedB64,
+          },
+        },
+        {
+          type: "text",
+          text: EXTRACT_INVOICE_PROMPT,
         },
       ];
     } else {
@@ -147,7 +240,8 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     console.error("Parse invoice error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
