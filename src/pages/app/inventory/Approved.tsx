@@ -12,9 +12,16 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
-import { buildParGuideLevelMaps, resolveParLevelFromGuideMaps } from "@/domain/inventory/parGuideLevels";
 import { getRisk, computeOrderQty, type RiskThresholds } from "@/lib/inventory-utils";
 import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
+import type {
+  InventorySessionListRow,
+} from "@/domain/inventory/enterInventoryTypes";
+import {
+  loadSessionItemsWithApprovedPar,
+  type SessionItemWithApprovedPar,
+} from "@/domain/inventory/sessionSelectors";
+import { moveApprovedInventorySessionToReview } from "@/domain/inventory/sessionWorkflow";
 
 function formatDateTime(isoString: string) {
   const d = new Date(isoString);
@@ -27,9 +34,9 @@ export default function ApprovedPage() {
   const { currentRestaurant, currentLocation } = useRestaurant();
   const navigate = useNavigate();
   const { lastOrderDates } = useLastOrderDates(currentRestaurant?.id, currentLocation?.id);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<InventorySessionListRow[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
-  const [sessionItems, setSessionItems] = useState<Record<string, any[]>>({});
+  const [sessionItems, setSessionItems] = useState<Record<string, SessionItemWithApprovedPar[]>>({});
   const [loadingSession, setLoadingSession] = useState<string | null>(null);
   const [decliningId, setDecliningId] = useState<string | null>(null);
   const [localSuggestedOrder, setLocalSuggestedOrder] = useState<Record<string, string>>({});
@@ -42,9 +49,12 @@ export default function ApprovedPage() {
 
   const handleDecline = async (sessionId: string) => {
     setDecliningId(sessionId);
-    const { error } = await supabase.from("inventory_sessions").update({ status: "IN_REVIEW", updated_at: new Date().toISOString() }).eq("id", sessionId);
+    const result = await moveApprovedInventorySessionToReview({
+      supabase,
+      sessionId,
+    });
     setDecliningId(null);
-    if (error) { toast.error(error.message); return; }
+    if (!result.ok) { toast.error(result.errorMessage); return; }
     toast.success("Session moved back to Review");
     setSessions(prev => prev.filter(s => s.id !== sessionId));
   };
@@ -66,7 +76,7 @@ export default function ApprovedPage() {
       .then(({ data }) => { setRiskThresholds(riskThresholdsFromSettings(data)); });
   }, [currentRestaurant]);
 
-  const loadSessionItems = async (session: any) => {
+  const loadSessionItems = async (session: InventorySessionListRow) => {
     // Toggle collapse if already loaded
     if (sessionItems[session.id]) {
       setExpandedSession(prev => prev === session.id ? null : session.id);
@@ -75,36 +85,25 @@ export default function ApprovedPage() {
 
     setLoadingSession(session.id);
 
-    const [{ data: items }, { data: guides }] = await Promise.all([
-      supabase.from("inventory_session_items").select("*").eq("session_id", session.id),
-      currentRestaurant
-        ? supabase.from("par_guides").select("id").eq("restaurant_id", currentRestaurant.id)
-            .eq("inventory_list_id", session.inventory_list_id).order("updated_at", { ascending: false }).limit(1)
-        : Promise.resolve({ data: null }),
-    ]);
-
-    let parMaps: ReturnType<typeof buildParGuideLevelMaps> | null = null;
-    if (guides && guides.length > 0) {
-      const { data: parItems } = await supabase
-        .from("par_guide_items")
-        .select("item_name, par_level, catalog_item_id")
-        .eq("par_guide_id", guides[0].id);
-      parMaps = buildParGuideLevelMaps(parItems || []);
+    if (!currentRestaurant?.id) {
+      setLoadingSession(null);
+      return;
     }
 
-    const enriched = (items || []).map(item => ({
-      ...item,
-      approved_par: parMaps
-        ? resolveParLevelFromGuideMaps(
-            { catalog_item_id: item.catalog_item_id, item_name: item.item_name },
-            parMaps,
-            Number(item.par_level) || 0,
-          )
-        : (Number(item.par_level) || null),
-      catalog_item_id: item.catalog_item_id || null,
-    }));
+    const { items, errorMessage } = await loadSessionItemsWithApprovedPar({
+      supabase,
+      restaurantId: currentRestaurant.id,
+      inventoryListId: session.inventory_list_id,
+      sessionId: session.id,
+    });
 
-    setSessionItems(prev => ({ ...prev, [session.id]: enriched }));
+    if (errorMessage || !items) {
+      toast.error(errorMessage ?? "Could not load session items");
+      setLoadingSession(null);
+      return;
+    }
+
+    setSessionItems(prev => ({ ...prev, [session.id]: items }));
     setExpandedSession(session.id);
     setLoadingSession(null);
   };

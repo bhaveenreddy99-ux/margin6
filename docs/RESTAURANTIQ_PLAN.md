@@ -3,31 +3,24 @@ RestaurantIQ — Master Product & Architecture Plan
 
 RestaurantIQ is a multi-restaurant back-of-house operations platform.
 
-It is NOT:
-
-POS
-customer ordering
-reservations
-front-of-house
 
 It IS:
-
+list management 
 inventory management
 PAR management
 smart ordering
-purchasing
+purchasing history 
 invoice matching
 receiving workflow
 waste tracking
 alerts & notifications
-analytics & dashboards
+analytics & dashboards, comparing locations in reports 
 
 Primary users:
 
 restaurant owners
 managers
-kitchen leads
-inventory staff
+employees 
 
 Primary goal:
 Control food cost and inventory across multiple restaurants.
@@ -39,7 +32,11 @@ count faster
 know what to order
 catch supplier price changes
 detect low/high stock
-trust inventory numbers
+trust inventory numbers by saving 2 to 5% of profit 
+sending app email notifications to manger and owner about price changes and missing items loss and profit
+inventory schedule only 
+
+
 2. Core Workflow (Canonical)
 
 This is the real-life canonical workflow.

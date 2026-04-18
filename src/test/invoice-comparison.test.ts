@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeInvoiceComparison,
   deriveInvoiceComparisonStatus,
+  receivedVsBilledDollarVariance,
 } from "@/lib/invoice-comparison";
 
 describe("invoice comparison tolerances", () => {
@@ -120,5 +121,27 @@ describe("invoice comparison tolerances", () => {
         invoiced_unit_cost: 6,
       }),
     ).toBe("received_short");
+  });
+
+  it("keeps received variance null-aware when received quantity is blank", () => {
+    expect(receivedVsBilledDollarVariance(10, null, 5)).toBeNull();
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 10,
+        invoiced_qty: 10,
+        received_qty: null,
+        po_unit_cost: 5,
+        invoiced_unit_cost: 5,
+      }),
+    ).not.toBe("received_short");
+    expect(
+      deriveInvoiceComparisonStatus({
+        po_qty: 10,
+        invoiced_qty: 10,
+        received_qty: null,
+        po_unit_cost: 5,
+        invoiced_unit_cost: 5,
+      }),
+    ).not.toBe("received_over");
   });
 });

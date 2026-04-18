@@ -18,15 +18,24 @@ import { getRisk, computeOrderQty, type RiskThresholds } from "@/lib/inventory-u
 import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
+import type {
+  InventoryCatalogItemRow,
+  InventorySessionListRow,
+} from "@/domain/inventory/enterInventoryTypes";
 import {
-  buildParGuideLevelMaps,
-  resolveGuideParFromMaps,
-  resolveParLevelFromGuideMaps,
-} from "@/domain/inventory/parGuideLevels";
+  loadSessionItemsWithApprovedPar,
+  type SessionItemWithApprovedPar,
+} from "@/domain/inventory/sessionSelectors";
+import {
+  approveInventorySession,
+  sendInventorySessionBackToInProgress,
+} from "@/domain/inventory/sessionWorkflow";
 
 type FilterTab = "all" | "critical" | "low" | "ok" | "nopar";
-
-const normalizeItemName = (value: string | null | undefined) => (value || "").trim().toLowerCase();
+type ReviewCatalogItem = Pick<
+  InventoryCatalogItemRow,
+  "id" | "item_name" | "product_number" | "vendor_sku"
+>;
 
 export default function ReviewPage() {
   const [searchParams] = useSearchParams();
@@ -35,13 +44,11 @@ export default function ReviewPage() {
   const { currentRestaurant, currentLocation } = useRestaurant();
   const { user } = useAuth();
   const { lastOrderDates } = useLastOrderDates(currentRestaurant?.id, currentLocation?.id);
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [catalogItems, setCatalogItems] = useState<any[]>([]);
-  const [viewItems, setViewItems] = useState<any[] | null>(null);
-  const [viewSession, setViewSession] = useState<any>(null);
+  const [sessions, setSessions] = useState<InventorySessionListRow[]>([]);
+  const [catalogItems, setCatalogItems] = useState<ReviewCatalogItem[]>([]);
+  const [viewItems, setViewItems] = useState<SessionItemWithApprovedPar[] | null>(null);
+  const [viewSession, setViewSession] = useState<InventorySessionListRow | null>(null);
   const [localItems, setLocalItems] = useState<Record<string, number>>({});
-  const [localPar, setLocalPar] = useState<Record<string, number | null>>({});
-  const [localPrice, setLocalPrice] = useState<Record<string, number | null>>({});
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -55,8 +62,8 @@ export default function ReviewPage() {
     yellowThresholdPercent: 100,
   });
 
-  const fetchSessions = async () => {
-    if (!currentRestaurant) return;
+  const fetchSessions = useCallback(async () => {
+    if (!currentRestaurant?.id) return;
     const { data } = await supabase
       .from("inventory_sessions")
       .select("*, inventory_lists(name)")
@@ -64,12 +71,12 @@ export default function ReviewPage() {
       .eq("status", "IN_REVIEW")
       .order("updated_at", { ascending: false });
     if (data) setSessions(data);
-  };
+  }, [currentRestaurant?.id]);
 
-  useEffect(() => { fetchSessions(); }, [currentRestaurant]);
+  useEffect(() => { void fetchSessions(); }, [fetchSessions]);
 
   useEffect(() => {
-    if (!currentRestaurant) return;
+    if (!currentRestaurant?.id) return;
     supabase
       .from("smart_order_settings")
       .select("red_threshold, yellow_threshold")
@@ -85,166 +92,78 @@ export default function ReviewPage() {
       .then(({ data }) => { if (data) setCatalogItems(data); });
   }, [currentRestaurant]);
 
-  const autoCreateSmartOrder = async (sessionId: string, restaurantId: string, userId: string): Promise<string | null> => {
-    try {
-      const { data: session } = await supabase.from("inventory_sessions").select("*").eq("id", sessionId).single();
-      if (!session) return null;
-      const { data: sessionItems } = await supabase.from("inventory_session_items").select("*").eq("session_id", sessionId);
-      if (!sessionItems || sessionItems.length === 0) return null;
-      const { data: latestGuide } = await supabase.from("par_guides").select("id")
-        .eq("restaurant_id", restaurantId).eq("inventory_list_id", session.inventory_list_id)
-        .order("updated_at", { ascending: false }).limit(1)
-        .maybeSingle();
-      const parMaps = latestGuide
-        ? buildParGuideLevelMaps(
-            (await supabase
-              .from("par_guide_items")
-              .select("item_name, par_level, catalog_item_id")
-              .eq("par_guide_id", latestGuide.id)).data || [],
-          )
-        : null;
-      const computed = sessionItems.map(i => {
-        const sessionPar = Number(i.par_level ?? 0);
-        const parLevel = latestGuide
-          ? resolveParLevelFromGuideMaps(
-              { catalog_item_id: i.catalog_item_id, item_name: i.item_name },
-              parMaps,
-              sessionPar,
-            )
-          : sessionPar;
-        const currentStock = Number(i.current_stock ?? 0);
-        return {
-          ...i,
-          parLevel,
-          currentStock,
-          risk: getRisk(currentStock, parLevel, riskThresholds).level,
-          suggestedOrder: computeOrderQty(currentStock, parLevel, i.unit, i.pack_size),
-        };
-      });
-      const redCount = computed.filter(i => i.risk === "RED").length;
-      const yellowCount = computed.filter(i => i.risk === "YELLOW").length;
-      const { data: run, error: runError } = await supabase.from("smart_order_runs").insert({
-        restaurant_id: restaurantId, session_id: sessionId, inventory_list_id: session.inventory_list_id,
-        par_guide_id: latestGuide?.id || null, created_by: userId,
-      }).select().single();
-      if (runError || !run) return null;
-      const runLines = computed.map(i => ({
-        run_id: run.id,
-        catalog_item_id: i.catalog_item_id || null,
-        item_name: i.item_name,
-        suggested_order: i.suggestedOrder,
-        risk: i.risk,
-        current_stock: i.currentStock,
-        par_level: i.parLevel,
-        unit_cost: i.unit_cost || null,
-        pack_size: i.pack_size || null,
-      }));
-      let lineErr = (await supabase.from("smart_order_run_items").insert(runLines)).error;
-      if (lineErr) {
-        console.error("[Review autoCreateSmartOrder] insert:", lineErr.message);
-        const stripped = runLines.map(({ catalog_item_id: _c, ...rest }) => rest);
-        lineErr = (await supabase.from("smart_order_run_items").insert(stripped)).error;
-        if (lineErr) console.error("[Review autoCreateSmartOrder] retry:", lineErr.message);
-      }
-      if (redCount > 0 || yellowCount > 0) {
-        const { data: prefs } = await supabase.from("notification_preferences")
-          .select("*, alert_recipients(user_id)").eq("restaurant_id", restaurantId).eq("channel_in_app", true).limit(1).single();
-        if (prefs) {
-          const { data: members } = await supabase.from("restaurant_members").select("user_id, role").eq("restaurant_id", restaurantId);
-          let uids: string[] = [];
-          if (prefs.recipients_mode === "OWNERS_MANAGERS") uids = (members || []).filter(m => m.role === "OWNER" || m.role === "MANAGER").map(m => m.user_id);
-          else if (prefs.recipients_mode === "ALL") uids = (members || []).map(m => m.user_id);
-          else if (prefs.recipients_mode === "CUSTOM") uids = (prefs.alert_recipients || []).map((r: any) => r.user_id);
-          if (uids.length > 0) await supabase.from("notifications").insert(uids.map(uid => ({
-            restaurant_id: restaurantId, user_id: uid, type: "LOW_STOCK",
-            severity: (redCount > 0 ? "CRITICAL" : "WARNING") as any,
-            title: `Inventory Approved — ${redCount + yellowCount} items need attention`,
-            message: `${redCount} critical, ${yellowCount} low stock items`,
-            data: { session_id: sessionId, run_id: run.id } as any,
-          })));
-        }
-      }
-      return run.id;
-    } catch (err) { console.error(err); return null; }
-  };
-
   const handleApprove = async (sessionId: string) => {
+    if (!currentRestaurant?.id || !user?.id) return;
     setApproving(true);
-    const { error } = await supabase.from("inventory_sessions").update({
-      status: "APPROVED", approved_at: new Date().toISOString(), approved_by: user?.id, updated_at: new Date().toISOString(),
-    }).eq("id", sessionId);
+
+    const result = await approveInventorySession({
+      supabase,
+      sessionId,
+      restaurantId: currentRestaurant.id,
+      userId: user.id,
+      riskThresholds,
+    });
+
     setApproving(false);
-    if (error) { toast.error(error.message); return; }
-    let smartOrderRunId: string | null = null;
-    if (currentRestaurant && user) {
-      smartOrderRunId = await autoCreateSmartOrder(sessionId, currentRestaurant.id, user.id);
+    if (!result.ok) {
+      toast.error(result.errorMessage);
+      return;
     }
-    if (smartOrderRunId) {
+    if (result.smartOrderErrorMessage) {
+      toast.error(result.smartOrderErrorMessage);
+    }
+    if (result.smartOrderRunId) {
       toast.success("Session approved", {
         description: "Smart order draft created.",
         action: {
           label: "Open Smart Order",
-          onClick: () => navigate(`/app/smart-order?viewRun=${smartOrderRunId}`),
+          onClick: () => navigate(`/app/smart-order?viewRun=${result.smartOrderRunId}`),
         },
       });
     } else {
       toast.success("Session approved!");
     }
-    if (viewSession?.id === sessionId) { setViewItems(null); setViewSession(null); setLocalItems({}); setLocalPar({}); setLocalPrice({}); }
+    if (result.catalogLinksStripped) {
+      toast.info("Saved order lines; some catalog links were cleared due to invalid references.");
+    }
+    if (viewSession?.id === sessionId) { setViewItems(null); setViewSession(null); setLocalItems({}); }
     fetchSessions();
   };
 
   const handleDecline = async () => {
     if (!declineSessionId) return;
     setDeclining(true);
-    const { error } = await supabase.from("inventory_sessions").update({
-      status: "IN_PROGRESS", updated_at: new Date().toISOString(),
-    }).eq("id", declineSessionId);
+    const result = await sendInventorySessionBackToInProgress({
+      supabase,
+      sessionId: declineSessionId,
+    });
     setDeclining(false);
-    if (error) { toast.error(error.message); return; }
+    if (!result.ok) { toast.error(result.errorMessage); return; }
     toast.success(declineNote.trim() ? `Sent back: "${declineNote.trim()}"` : "Session sent back for recount");
-    if (viewSession?.id === declineSessionId) { setViewItems(null); setViewSession(null); setLocalPar({}); setLocalPrice({}); }
+    if (viewSession?.id === declineSessionId) { setViewItems(null); setViewSession(null); }
     setDeclineSessionId(null); setDeclineNote("");
     fetchSessions();
   };
 
-  const openSessionForReview = useCallback(async (session: any): Promise<boolean> => {
-    setLocalItems({}); setLocalPar({}); setLocalPrice({}); setActiveFilter("all"); setSearchQuery(""); setCollapsedCategories(new Set());
-    const { data, error } = await supabase.from("inventory_session_items").select("*").eq("session_id", session.id);
-    if (error) {
+  const openSessionForReview = useCallback(async (session: InventorySessionListRow): Promise<boolean> => {
+    if (!currentRestaurant?.id) return false;
+    setLocalItems({}); setActiveFilter("all"); setSearchQuery(""); setCollapsedCategories(new Set());
+    const { items, errorMessage } = await loadSessionItemsWithApprovedPar({
+      supabase,
+      restaurantId: currentRestaurant.id,
+      inventoryListId: session.inventory_list_id,
+      sessionId: session.id,
+    });
+    if (errorMessage || !items) {
       toast.error("Could not load session");
       return false;
     }
-    if (currentRestaurant) {
-      const { data: guides } = await supabase.from("par_guides").select("id")
-        .eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", session.inventory_list_id);
-      if (guides?.length) {
-        const { data: parData } = await supabase
-          .from("par_guide_items")
-          .select("item_name, par_level, catalog_item_id")
-          .in("par_guide_id", guides.map(g => g.id));
-        if (parData) {
-          const maps = buildParGuideLevelMaps(parData);
-          setViewItems(
-            (data || []).map((i) => ({
-              ...i,
-              approved_par: resolveGuideParFromMaps(
-                { catalog_item_id: i.catalog_item_id, item_name: i.item_name },
-                maps,
-              ),
-            })),
-          );
-          setViewSession(session);
-          return true;
-        }
-      }
-    }
-    setViewItems((data || []).map(i => ({ ...i, approved_par: null })));
+    setViewItems(items);
     setViewSession(session);
     return true;
-  }, [currentRestaurant]);
+  }, [currentRestaurant?.id]);
 
-  const handleView = async (session: any) => {
+  const handleView = async (session: InventorySessionListRow) => {
     await openSessionForReview(session);
   };
 
@@ -254,7 +173,7 @@ export default function ReviewPage() {
       setIsResolvingSessionParam(false);
       return;
     }
-    if (!currentRestaurant) return;
+    if (!currentRestaurant?.id) return;
 
     let cancelled = false;
     setIsResolvingSessionParam(true);
@@ -322,7 +241,7 @@ export default function ReviewPage() {
       else acc.nopar++;
       return acc;
     }, { critical: 0, low: 0, ok: 0, nopar: 0 });
-  }, [viewItems]);
+  }, [riskThresholds, viewItems]);
 
   const filteredItems = useMemo(() => {
     if (!viewItems) return [];
@@ -340,10 +259,10 @@ export default function ReviewPage() {
       items = items.filter(i => i.item_name.toLowerCase().includes(q) || (i.category || "").toLowerCase().includes(q));
     }
     return items;
-  }, [viewItems, activeFilter, searchQuery]);
+  }, [viewItems, activeFilter, searchQuery, riskThresholds]);
 
   const groupedByCategory = useMemo(() => {
-    const groups: Record<string, any[]> = {};
+    const groups: Record<string, SessionItemWithApprovedPar[]> = {};
     filteredItems.forEach(item => {
       const cat = item.category || "Uncategorized";
       if (!groups[cat]) groups[cat] = [];
@@ -366,7 +285,7 @@ export default function ReviewPage() {
             <div className="flex items-center gap-3 min-w-0">
               <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-lg"
                 onClick={() => {
-                  setViewItems(null); setViewSession(null); setLocalItems({}); setLocalPar({}); setLocalPrice({});
+                  setViewItems(null); setViewSession(null); setLocalItems({});
                   navigate("/app/inventory/enter");
                 }}>
                 <ArrowLeft className="h-4 w-4" />

@@ -97,6 +97,13 @@ export default function InvoiceReviewPage() {
     () => buildDerivedComparisonRows(comparisons),
     [comparisons],
   );
+  const firstIncompleteComparisonId = useMemo(() => {
+    const incomplete = comparisons.find((comparison) => {
+      const invoicedQty = Number(comparison.invoiced_qty);
+      return comparison.received_qty == null && Number.isFinite(invoicedQty) && invoicedQty > 0;
+    });
+    return incomplete?.id ?? null;
+  }, [comparisons]);
 
   // Report issue sheet
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
@@ -108,6 +115,7 @@ export default function InvoiceReviewPage() {
     setConfirmResult,
     confirming,
     handleConfirmReceipt,
+    receivedMissingCount,
     reportSaving,
     handleSaveIssue,
     savingMappings,
@@ -118,6 +126,7 @@ export default function InvoiceReviewPage() {
     currentRestaurantId: currentRestaurant?.id,
     reviewDocKind,
     invoice,
+    comparisons,
     lineItemById,
     catalogOverrides,
     reportItem,
@@ -236,18 +245,35 @@ export default function InvoiceReviewPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-end gap-2">
+          {receivedMissingCount > 0 && (
+            <div className="max-w-md rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-right">
+              <p className="text-xs text-warning">
+                {receivedMissingCount} line{receivedMissingCount === 1 ? "" : "s"} are missing received quantity. Enter 0 for items you did not receive, or fill in the actual delivered amount before confirming.
+              </p>
+              {firstIncompleteComparisonId && (
+                <a
+                  href={`#${firstIncompleteComparisonId}`}
+                  className="mt-1 inline-block text-[11px] font-medium text-warning underline underline-offset-2"
+                >
+                  Jump to first incomplete line
+                </a>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
           {receiptStatusBadge(invoice?.receipt_status || "pending")}
           <Button
             size="sm"
             variant="default"
             className="gap-1.5"
-            disabled={confirming || invoice?.receipt_status === "confirmed"}
+            disabled={confirming || invoice?.receipt_status === "confirmed" || receivedMissingCount > 0}
             onClick={handleConfirmReceipt}
           >
             {confirming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
             Post Invoice
           </Button>
+          </div>
         </div>
       </div>
 
@@ -348,6 +374,7 @@ export default function InvoiceReviewPage() {
                   return (
                     <TableRow
                       key={comp.id}
+                      id={comp.id}
                       className={`${comp.derived_status !== "ok" ? "bg-warning/3" : ""} ${threeWay ? "ring-1 ring-destructive/40 bg-destructive/[0.06]" : ""}`}
                     >
                       <TableCell className="text-sm font-medium">

@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type {
@@ -18,6 +18,7 @@ type UseInvoiceReviewActionsArgs = {
   currentRestaurantId?: string;
   reviewDocKind: InvoiceReviewDocKind;
   invoice: InvoiceReviewDocument | null;
+  comparisons: InvoiceReviewComparison[];
   lineItemById: Record<string, InvoiceReviewLineItem>;
   catalogOverrides: Record<string, string>;
   reportItem: InvoiceReviewComparison | null;
@@ -40,11 +41,19 @@ function getErrorMessage(error: unknown) {
   return String(error);
 }
 
+function countMissingReceivedQty(comparisons: InvoiceReviewComparison[]): number {
+  return comparisons.filter((comparison) => {
+    const invoicedQty = Number(comparison.invoiced_qty);
+    return comparison.received_qty == null && Number.isFinite(invoicedQty) && invoicedQty > 0;
+  }).length;
+}
+
 export function useInvoiceReviewActions({
   id,
   currentRestaurantId,
   reviewDocKind,
   invoice,
+  comparisons,
   lineItemById,
   catalogOverrides,
   reportItem,
@@ -62,9 +71,18 @@ export function useInvoiceReviewActions({
   const [confirmResult, setConfirmResult] = useState<ConfirmInvoiceReceiptResult | null>(null);
   const [savingMappings, setSavingMappings] = useState<Record<string, boolean>>({});
   const [reportSaving, setReportSaving] = useState(false);
+  const [receivedMissingCount, setReceivedMissingCount] = useState(0);
+
+  useEffect(() => {
+    setReceivedMissingCount(countMissingReceivedQty(comparisons));
+  }, [comparisons]);
 
   const handleConfirmReceipt = async () => {
     if (!id || !currentRestaurantId) return;
+
+    const missingCount = countMissingReceivedQty(comparisons);
+    setReceivedMissingCount(missingCount);
+    if (missingCount > 0) return;
 
     setConfirming(true);
     try {
@@ -243,8 +261,8 @@ export function useInvoiceReviewActions({
   const persistReceivedQty = async (comparison: InvoiceReviewComparison, raw: string) => {
     const trimmed = raw.trim();
     const numeric = trimmed === "" ? null : Number(trimmed);
-    const fallback = Number(comparison.invoiced_qty) || 0;
-    const toSave = numeric != null && Number.isFinite(numeric) ? numeric : fallback;
+    const invalidNumber = trimmed !== "" && !Number.isFinite(numeric);
+    const toSave = numeric != null && Number.isFinite(numeric) ? numeric : null;
     const { error } = await supabase
       .from("invoice_line_comparisons")
       .update({ received_qty: toSave })
@@ -256,9 +274,17 @@ export function useInvoiceReviewActions({
       return;
     }
 
+    if (invalidNumber) {
+      toast.error("Received quantity must be a number — left blank");
+    }
+
+    const nextComparisons = comparisons.map((row) =>
+      row.id === comparison.id ? { ...row, received_qty: toSave } : row,
+    );
     setComparisons((prev) =>
       prev.map((row) => (row.id === comparison.id ? { ...row, received_qty: toSave } : row)),
     );
+    setReceivedMissingCount(countMissingReceivedQty(nextComparisons));
   };
 
   return {
@@ -271,5 +297,6 @@ export function useInvoiceReviewActions({
     savingMappings,
     handleSaveMapping,
     persistReceivedQty,
+    receivedMissingCount,
   };
 }

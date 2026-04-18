@@ -2,13 +2,10 @@ import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { DEFAULT_CATEGORIES } from "@/lib/constants";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import type { Json } from "@/integrations/supabase/types";
+import { useRestaurant } from "@/contexts/RestaurantContext";
 import {
   buildCatalogSeedRows,
   buildParOnlySeedRows,
-  buildSmartOrderComputedItems,
-  buildSmartOrderRiskCounts,
-  buildSmartOrderRunItems,
   isInventorySessionItemsCatalogIdSchemaError,
   normalizeItemName,
   sessionRowsToItemState,
@@ -17,13 +14,21 @@ import type {
   InventoryCatalogItemRow,
   InventorySessionItemRow,
   InventorySessionListRow,
-  NotificationPreferenceRow,
   ParGuideItemRow,
   ParGuideRow,
   ProfileRow,
   SessionStatus,
 } from "@/domain/inventory/enterInventoryTypes";
 import type { RiskThresholds } from "@/lib/inventory-utils";
+import {
+  approveInventorySession,
+  createInventorySession,
+  duplicateInventorySession,
+  moveApprovedInventorySessionToReview,
+  sendInventorySessionBackToInProgress,
+  submitInventorySessionForReview,
+} from "@/domain/inventory/sessionWorkflow";
+import { createSmartOrderFromSession } from "@/domain/inventory/smartOrderFromSession";
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>;
 
@@ -174,6 +179,7 @@ export function useEnterInventoryActions({
   setManagerParEditItem,
   setManagerPriceEditItem,
 }: UseEnterInventoryActionsArgs) {
+  const { currentLocation } = useRestaurant();
   const isApprovingRef = useRef(false);
 
   const [startingListId, setStartingListId] = useState<string | null>(null);
@@ -365,19 +371,14 @@ export function useEnterInventoryActions({
     setStartingListId(listIdTrimmed);
 
     try {
-      const { data, error } = (await supabase
-        .from("inventory_sessions")
-        .insert({
-          restaurant_id: currentRestaurantId,
-          inventory_list_id: listIdTrimmed,
-          name: name.trim(),
-          created_by: userId,
-        })
-        .select()
-        .single()) as unknown as {
-        data: InventorySessionListRow | null;
-        error: { message: string } | null;
-      };
+      const { data, error } = await createInventorySession({
+        supabase,
+        restaurantId: currentRestaurantId,
+        inventoryListId: listIdTrimmed,
+        name: name.trim(),
+        userId,
+        locationId: currentLocation?.id ?? null,
+      });
 
       if (error || !data) {
         toast.error(error?.message ?? "Could not create session.");
@@ -569,12 +570,12 @@ export function useEnterInventoryActions({
 
   const handleSubmitForReview = async () => {
     if (!activeSession || activeSession.status !== "IN_PROGRESS") return;
-    const { error } = await supabase
-      .from("inventory_sessions")
-      .update({ status: "IN_REVIEW", updated_at: new Date().toISOString() })
-      .eq("id", activeSession.id);
-    if (error) {
-      toast.error(error.message);
+    const result = await submitInventorySessionForReview({
+      supabase,
+      sessionId: activeSession.id,
+    });
+    if (!result.ok) {
+      toast.error(result.errorMessage);
       return;
     }
 
@@ -689,184 +690,41 @@ export function useEnterInventoryActions({
     return data?.id ?? null;
   };
 
-  const autoCreateSmartOrder = async (sessionId: string): Promise<string | null> => {
-    if (!currentRestaurantId || !userId) return null;
-
-    try {
-      const { data: session } = (await supabase
-        .from("inventory_sessions")
-        .select("*")
-        .eq("id", sessionId)
-        .single()) as unknown as {
-        data: InventorySessionListRow | null;
-      };
-      if (!session) return null;
-
-      const { data: sessionItems } = (await supabase
-        .from("inventory_session_items")
-        .select("*")
-        .eq("session_id", sessionId)) as unknown as {
-        data: InventorySessionItemRow[] | null;
-      };
-      if (!sessionItems || sessionItems.length === 0) return null;
-
-      const latestGuide = (await supabase
-        .from("par_guides")
-        .select("id")
-        .eq("restaurant_id", currentRestaurantId)
-        .eq("inventory_list_id", session.inventory_list_id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()) as unknown as {
-        data: Pick<ParGuideRow, "id"> | null;
-      };
-
-      const parItemsForGuide = latestGuide.data
-        ? ((await supabase
-            .from("par_guide_items")
-            .select("item_name, par_level, catalog_item_id")
-            .eq("par_guide_id", latestGuide.data.id)) as unknown as {
-            data: Array<Pick<ParGuideItemRow, "item_name" | "par_level" | "catalog_item_id">> | null;
-          }).data ?? []
-        : [];
-
-      const computed = buildSmartOrderComputedItems({
-        sessionItems,
-        parMaps: latestGuide.data ? buildParOnlyMaps(parItemsForGuide) : null,
-        riskThresholds,
-      });
-      const { redCount, yellowCount } = buildSmartOrderRiskCounts(computed);
-
-      const { data: run, error: runError } = (await supabase
-        .from("smart_order_runs")
-        .insert({
-          restaurant_id: currentRestaurantId,
-          session_id: sessionId,
-          inventory_list_id: session.inventory_list_id,
-          par_guide_id: latestGuide.data?.id || null,
-          created_by: userId,
-        })
-        .select()
-        .single()) as unknown as {
-        data: { id: string } | null;
-        error: { message: string } | null;
-      };
-
-      if (runError || !run) return null;
-
-      const runItems = buildSmartOrderRunItems(run.id, computed);
-      let itemsErr = (await supabase.from("smart_order_run_items").insert(runItems)).error;
-      if (itemsErr) {
-        const withoutCatalog = runItems.map(({ catalog_item_id: _removed, ...row }) => row);
-        itemsErr = (await supabase.from("smart_order_run_items").insert(withoutCatalog)).error;
-        if (itemsErr) {
-          // Clean up the orphaned run so we don't leave a broken smart order
-          await supabase.from("smart_order_runs").delete().eq("id", run.id);
-          toast.error("Smart order could not be saved — please create it manually from the approved session.");
-          return null;
-        }
-      }
-
-      if (redCount > 0 || yellowCount > 0) {
-        const { data: prefs } = (await supabase
-          .from("notification_preferences")
-          .select("*, alert_recipients(user_id)")
-          .eq("restaurant_id", currentRestaurantId)
-          .eq("channel_in_app", true)
-          .limit(1)
-          .single()) as unknown as {
-          data: NotificationPreferenceRow | null;
-        };
-
-        if (prefs) {
-          const { data: members } = (await supabase
-            .from("restaurant_members")
-            .select("user_id, role")
-            .eq("restaurant_id", currentRestaurantId)) as unknown as {
-            data: Array<Pick<NotificationMemberRow, "user_id" | "role">> | null;
-          };
-
-          let targetUserIds: string[] = [];
-          if (prefs.recipients_mode === "OWNERS_MANAGERS") {
-            targetUserIds = (members ?? [])
-              .filter((member) => member.role === "OWNER" || member.role === "MANAGER")
-              .map((member) => member.user_id);
-          } else if (prefs.recipients_mode === "ALL") {
-            targetUserIds = (members ?? []).map((member) => member.user_id);
-          } else if (prefs.recipients_mode === "CUSTOM") {
-            targetUserIds = (prefs.alert_recipients ?? []).map((recipient) => recipient.user_id);
-          }
-
-          if (targetUserIds.length > 0) {
-            await supabase.from("notifications").insert(
-              targetUserIds.map((targetUserId) => ({
-                restaurant_id: currentRestaurantId,
-                user_id: targetUserId,
-                type: "LOW_STOCK",
-                severity: (redCount > 0 ? "CRITICAL" : "WARNING") as "CRITICAL" | "WARNING",
-                title: `Inventory Approved — ${redCount + yellowCount} item${
-                  redCount + yellowCount > 1 ? "s" : ""
-                } need attention`,
-                message: `${redCount} high risk, ${yellowCount} medium risk items detected`,
-                data: {
-                  session_id: sessionId,
-                  run_id: run.id,
-                  red: redCount,
-                  yellow: yellowCount,
-                } satisfies Json,
-              })),
-            );
-          }
-        }
-      }
-
-      return run.id;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      toast.error(`Could not create smart order: ${msg}`);
-      return null;
-    }
-  };
-
   const handleApprove = async (sessionId: string) => {
     if (!currentRestaurantId || !userId) return;
     if (isApprovingRef.current) return;
     isApprovingRef.current = true;
 
     try {
-      // Create smart order BEFORE marking session approved so we never end up
-      // with an approved session that has a broken/empty smart order run.
-      const smartOrderRunId = await autoCreateSmartOrder(sessionId);
+      const result = await approveInventorySession({
+        supabase,
+        sessionId,
+        restaurantId: currentRestaurantId,
+        userId,
+        riskThresholds,
+      });
 
-      const { error } = await supabase
-        .from("inventory_sessions")
-        .update({
-          status: "APPROVED",
-          approved_at: new Date().toISOString(),
-          approved_by: userId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", sessionId);
-
-      if (error) {
-        toast.error(error.message);
-        // Clean up the run we just created since approval failed
-        if (smartOrderRunId) {
-          await supabase.from("smart_order_runs").delete().eq("id", smartOrderRunId);
-        }
+      if (!result.ok) {
+        toast.error(result.errorMessage);
         return;
       }
 
-      if (smartOrderRunId) {
+      if (result.smartOrderErrorMessage) {
+        toast.error(result.smartOrderErrorMessage);
+      }
+      if (result.smartOrderRunId) {
         toast.success("Session approved", {
           description: "Smart order draft created.",
           action: {
             label: "Open Smart Order",
-            onClick: () => navigateTo(`/app/smart-order?viewRun=${smartOrderRunId}`),
+            onClick: () => navigateTo(`/app/smart-order?viewRun=${result.smartOrderRunId}`),
           },
         });
       } else {
         toast.success("Session approved!");
+      }
+      if (result.catalogLinksStripped) {
+        toast.info("Saved order lines; some catalog links were cleared due to invalid references.");
       }
       await refreshSessions();
     } finally {
@@ -875,11 +733,11 @@ export function useEnterInventoryActions({
   };
 
   const handleReject = async (sessionId: string) => {
-    const { error } = await supabase
-      .from("inventory_sessions")
-      .update({ status: "IN_PROGRESS", updated_at: new Date().toISOString() })
-      .eq("id", sessionId);
-    if (error) toast.error(error.message);
+    const result = await sendInventorySessionBackToInProgress({
+      supabase,
+      sessionId,
+    });
+    if (!result.ok) toast.error(result.errorMessage);
     else {
       toast.success("Session sent back");
       await refreshSessions();
@@ -887,11 +745,11 @@ export function useEnterInventoryActions({
   };
 
   const handleDeclineToReview = async (sessionId: string) => {
-    const { error } = await supabase
-      .from("inventory_sessions")
-      .update({ status: "IN_REVIEW", updated_at: new Date().toISOString() })
-      .eq("id", sessionId);
-    if (error) toast.error(error.message);
+    const result = await moveApprovedInventorySessionToReview({
+      supabase,
+      sessionId,
+    });
+    if (!result.ok) toast.error(result.errorMessage);
     else {
       toast.success("Session moved back to Review");
       await refreshSessions();
@@ -900,36 +758,16 @@ export function useEnterInventoryActions({
 
   const handleDuplicate = async (session: InventorySessionListRow) => {
     if (!currentRestaurantId || !userId) return;
-    const { data: newSession, error } = (await supabase
-      .from("inventory_sessions")
-      .insert({
-        restaurant_id: currentRestaurantId,
-        inventory_list_id: session.inventory_list_id,
-        name: `${session.name} (copy)`,
-        created_by: userId,
-      })
-      .select()
-      .single()) as unknown as {
-      data: InventorySessionListRow | null;
-      error: { message: string } | null;
-    };
-    if (error || !newSession) {
-      toast.error(error?.message ?? "Could not duplicate session.");
+    const result = await duplicateInventorySession({
+      supabase,
+      restaurantId: currentRestaurantId,
+      sourceSession: session,
+      userId,
+      fallbackLocationId: currentLocation?.id ?? null,
+    });
+    if (!result.ok || !result.data) {
+      toast.error(result.errorMessage ?? "Could not duplicate session.");
       return;
-    }
-
-    const { data: sourceItems } = (await supabase
-      .from("inventory_session_items")
-      .select("*")
-      .eq("session_id", session.id)) as unknown as {
-      data: InventorySessionItemRow[] | null;
-    };
-    if (sourceItems && sourceItems.length > 0) {
-      const duplicatedItems = sourceItems.map(({ id, session_id, ...row }) => ({
-        ...row,
-        session_id: newSession.id,
-      }));
-      await supabase.from("inventory_session_items").insert(duplicatedItems);
     }
     toast.success("Session duplicated");
     await refreshSessions();
@@ -944,69 +782,28 @@ export function useEnterInventoryActions({
     if (!smartOrderSession || !smartOrderSelectedPar || !currentRestaurantId || !userId) return;
     setSmartOrderCreating(true);
 
-    const { data: sessionItems } = (await supabase
-      .from("inventory_session_items")
-      .select("*")
-      .eq("session_id", smartOrderSession.id)) as unknown as {
-      data: InventorySessionItemRow[] | null;
-    };
-    const { data: parItemsData } = (await supabase
-      .from("par_guide_items")
-      .select("*")
-      .eq("par_guide_id", smartOrderSelectedPar)) as unknown as {
-      data: ParGuideItemRow[] | null;
-    };
-
-    if (!sessionItems) {
-      toast.error("No session items found");
-      setSmartOrderCreating(false);
-      return;
-    }
-
-    const computed = buildSmartOrderComputedItems({
-      sessionItems,
-      parMaps: buildParOnlyMaps(parItemsData ?? []),
+    const result = await createSmartOrderFromSession({
+      supabase,
+      sessionId: smartOrderSession.id,
+      restaurantId: currentRestaurantId,
+      userId,
       riskThresholds,
+      parGuideId: smartOrderSelectedPar,
+      mode: "manual",
     });
 
-    const { data: run, error } = (await supabase
-      .from("smart_order_runs")
-      .insert({
-        restaurant_id: currentRestaurantId,
-        session_id: smartOrderSession.id,
-        inventory_list_id: smartOrderSession.inventory_list_id,
-        par_guide_id: smartOrderSelectedPar,
-        created_by: userId,
-      })
-      .select()
-      .single()) as unknown as {
-      data: { id: string } | null;
-      error: { message: string } | null;
-    };
-    if (error || !run) {
-      toast.error(error?.message ?? "Could not create smart order.");
-      setSmartOrderCreating(false);
+    setSmartOrderCreating(false);
+    if (!result.runId) {
+      toast.error(result.errorMessage ?? "Could not create smart order.");
       return;
     }
 
-    const runItems = buildSmartOrderRunItems(run.id, computed);
-    let manualItemsErr = (await supabase.from("smart_order_run_items").insert(runItems)).error;
-    if (manualItemsErr) {
-      console.error("[handleCreateSmartOrder] insert:", manualItemsErr.message);
-      const withoutCatalog = runItems.map(({ catalog_item_id: _removed, ...row }) => row);
-      manualItemsErr = (await supabase.from("smart_order_run_items").insert(withoutCatalog)).error;
-      if (manualItemsErr) {
-        toast.error(`Could not save order lines: ${manualItemsErr.message}`);
-        setSmartOrderCreating(false);
-        return;
-      }
+    if (result.catalogLinksStripped) {
       toast.info("Saved order lines; some catalog links were cleared due to invalid references.");
     }
-
     toast.success("Smart order created — submit from Smart Order to generate the purchase order.");
     setSmartOrderSession(null);
-    setSmartOrderCreating(false);
-    navigateTo(`/app/smart-order?viewRun=${run.id}`);
+    navigateTo(`/app/smart-order?viewRun=${result.runId}`);
   };
 
   const handleSaveEditItemDetails = async () => {
@@ -1355,22 +1152,5 @@ export function useEnterInventoryActions({
     handleStaffPriceChangeRequestSubmit,
     handleManagerParLevelSave,
     handleManagerPriceSave,
-  };
-}
-
-function buildParOnlyMaps(
-  parItems: Array<Pick<ParGuideItemRow, "item_name" | "par_level" | "catalog_item_id">>,
-) {
-  return {
-    byCatalogId: Object.fromEntries(
-      parItems
-        .filter((item) => item.catalog_item_id)
-        .map((item) => [item.catalog_item_id as string, Number(item.par_level ?? 0)]),
-    ),
-    byNormalizedName: Object.fromEntries(
-      parItems
-        .filter((item) => normalizeItemName(item.item_name))
-        .map((item) => [normalizeItemName(item.item_name), Number(item.par_level ?? 0)]),
-    ),
   };
 }

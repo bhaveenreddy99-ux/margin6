@@ -2744,6 +2744,20 @@ export type Database = {
       }
       reminder_restaurant_id: { Args: { r_id: string }; Returns: string }
       session_restaurant_id: { Args: { s_id: string }; Returns: string }
+      approve_inventory_session_atomic: {
+        Args: {
+          p_par_guide_id?: string | null
+          p_run_items?: Json
+          p_session_id: string
+          p_user_id: string
+        }
+        /** PostgREST returns one row per set-returning function as a JSON array. */
+        Returns: {
+          catalog_links_stripped: boolean
+          location_id: string | null
+          run_id: string
+        }[]
+      }
       smart_order_run_restaurant_id: {
         Args: { sr_id: string }
         Returns: string
