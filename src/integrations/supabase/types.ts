@@ -577,8 +577,9 @@ export type Database = {
       inventory_session_items: {
         Row: {
           brand_name: string | null
+          catalog_item_id: string | null
           category: string | null
-          current_stock: number
+          current_stock: number | null
           id: string
           item_name: string
           lead_time_days: number | null
@@ -593,8 +594,9 @@ export type Database = {
         }
         Insert: {
           brand_name?: string | null
+          catalog_item_id?: string | null
           category?: string | null
-          current_stock?: number
+          current_stock?: number | null
           id?: string
           item_name: string
           lead_time_days?: number | null
@@ -609,8 +611,9 @@ export type Database = {
         }
         Update: {
           brand_name?: string | null
+          catalog_item_id?: string | null
           category?: string | null
-          current_stock?: number
+          current_stock?: number | null
           id?: string
           item_name?: string
           lead_time_days?: number | null
@@ -813,7 +816,7 @@ export type Database = {
           match_status: string | null
           pack_size: string | null
           product_number: string | null
-          quantity_invoiced: number | null
+          quantity: number | null
           total_cost: number | null
           unit: string | null
           unit_cost: number | null
@@ -828,7 +831,7 @@ export type Database = {
           match_status?: string | null
           pack_size?: string | null
           product_number?: string | null
-          quantity_invoiced?: number | null
+          quantity?: number | null
           total_cost?: number | null
           unit?: string | null
           unit_cost?: number | null
@@ -843,7 +846,7 @@ export type Database = {
           match_status?: string | null
           pack_size?: string | null
           product_number?: string | null
-          quantity_invoiced?: number | null
+          quantity?: number | null
           total_cost?: number | null
           unit?: string | null
           unit_cost?: number | null
@@ -871,51 +874,69 @@ export type Database = {
           cost_diff: number | null
           created_at: string | null
           id: string
+          invoice_id: string | null
+          invoice_item_id: string | null
           invoiced_qty: number | null
+          invoiced_total_cost: number | null
           invoiced_unit_cost: number | null
           item_name: string
           po_qty: number | null
+          po_total_cost: number | null
           po_unit_cost: number | null
-          purchase_history_id: string
+          purchase_history_id: string | null
           purchase_history_item_id: string | null
+          purchase_order_item_id: string | null
           qty_diff: number | null
           received_qty: number | null
           smart_order_run_id: string | null
           status: string | null
+          total_diff: number | null
         }
         Insert: {
           catalog_item_id?: string | null
           cost_diff?: number | null
           created_at?: string | null
           id?: string
+          invoice_id?: string | null
+          invoice_item_id?: string | null
           invoiced_qty?: number | null
+          invoiced_total_cost?: number | null
           invoiced_unit_cost?: number | null
           item_name: string
           po_qty?: number | null
+          po_total_cost?: number | null
           po_unit_cost?: number | null
-          purchase_history_id: string
+          purchase_history_id?: string | null
           purchase_history_item_id?: string | null
+          purchase_order_item_id?: string | null
           qty_diff?: number | null
           received_qty?: number | null
           smart_order_run_id?: string | null
           status?: string | null
+          total_diff?: number | null
         }
         Update: {
           catalog_item_id?: string | null
           cost_diff?: number | null
           created_at?: string | null
           id?: string
+          invoice_id?: string | null
+          invoice_item_id?: string | null
           invoiced_qty?: number | null
+          invoiced_total_cost?: number | null
           invoiced_unit_cost?: number | null
           item_name?: string
           po_qty?: number | null
+          po_total_cost?: number | null
           po_unit_cost?: number | null
-          purchase_history_id?: string
+          purchase_history_id?: string | null
           purchase_history_item_id?: string | null
+          purchase_order_item_id?: string | null
           qty_diff?: number | null
           received_qty?: number | null
           smart_order_run_id?: string | null
           status?: string | null
+          total_diff?: number | null
         }
         Relationships: [
           {
@@ -923,6 +944,20 @@ export type Database = {
             columns: ["catalog_item_id"]
             isOneToOne: false
             referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_comparisons_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_comparisons_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_items"
             referencedColumns: ["id"]
           },
           {
@@ -940,10 +975,68 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "invoice_line_comparisons_purchase_order_item_id_fkey"
+            columns: ["purchase_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "invoice_line_comparisons_smart_order_run_id_fkey"
             columns: ["smart_order_run_id"]
             isOneToOne: false
             referencedRelation: "smart_order_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_ingestions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_id: string
+          mime_type: string | null
+          original_filename: string | null
+          restaurant_id: string
+          source_kind: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id: string
+          mime_type?: string | null
+          original_filename?: string | null
+          restaurant_id: string
+          source_kind: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string
+          mime_type?: string | null
+          original_filename?: string | null
+          restaurant_id?: string
+          source_kind?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_ingestions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_ingestions_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
         ]
@@ -1426,6 +1519,7 @@ export type Database = {
       par_guide_items: {
         Row: {
           brand_name: string | null
+          catalog_item_id: string | null
           category: string | null
           id: string
           item_name: string
@@ -1435,6 +1529,7 @@ export type Database = {
         }
         Insert: {
           brand_name?: string | null
+          catalog_item_id?: string | null
           category?: string | null
           id?: string
           item_name: string
@@ -1444,6 +1539,7 @@ export type Database = {
         }
         Update: {
           brand_name?: string | null
+          catalog_item_id?: string | null
           category?: string | null
           id?: string
           item_name?: string
@@ -1452,6 +1548,13 @@ export type Database = {
           unit?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "par_guide_items_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "par_guide_items_par_guide_id_fkey"
             columns: ["par_guide_id"]
@@ -2512,6 +2615,7 @@ export type Database = {
       }
       waste_log: {
         Row: {
+          catalog_item_id: string | null
           created_at: string
           id: string
           item_name: string
@@ -2521,8 +2625,11 @@ export type Database = {
           quantity: number
           reason: string
           restaurant_id: string
+          total_cost: number | null
+          unit_cost: number | null
         }
         Insert: {
+          catalog_item_id?: string | null
           created_at?: string
           id?: string
           item_name: string
@@ -2532,8 +2639,11 @@ export type Database = {
           quantity: number
           reason: string
           restaurant_id: string
+          total_cost?: number | null
+          unit_cost?: number | null
         }
         Update: {
+          catalog_item_id?: string | null
           created_at?: string
           id?: string
           item_name?: string
@@ -2543,8 +2653,17 @@ export type Database = {
           quantity?: number
           reason?: string
           restaurant_id?: string
+          total_cost?: number | null
+          unit_cost?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "waste_log_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "waste_log_restaurant_id_fkey"
             columns: ["restaurant_id"]

@@ -13,28 +13,20 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { CheckCircle, XCircle, Eye, ClipboardCheck, MoreHorizontal, ArrowLeft, Search, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getRisk, computeRiskLevel, computeOrderQty } from "@/lib/inventory-utils";
+import { CheckCircle, XCircle, Eye, ClipboardCheck, ArrowLeft, Search, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { getRisk, computeOrderQty, type RiskThresholds } from "@/lib/inventory-utils";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
+import {
+  buildParGuideLevelMaps,
+  resolveGuideParFromMaps,
+  resolveParLevelFromGuideMaps,
+} from "@/domain/inventory/parGuideLevels";
 
 type FilterTab = "all" | "critical" | "low" | "ok" | "nopar";
 
 const normalizeItemName = (value: string | null | undefined) => (value || "").trim().toLowerCase();
-
-function buildParLevelMapFromGuide(
-  guideItems: Array<{ item_name: string | null; par_level: number | string | null | undefined }>,
-): Record<string, number> {
-  const map: Record<string, number> = {};
-  for (const row of guideItems) {
-    const key = normalizeItemName(row.item_name);
-    if (!key) continue;
-    const n = Number(row.par_level ?? 0);
-    map[key] = Number.isFinite(n) ? n : 0;
-  }
-  return map;
-}
 
 export default function ReviewPage() {
   const [searchParams] = useSearchParams();
@@ -58,6 +50,10 @@ export default function ReviewPage() {
   const [declining, setDeclining] = useState(false);
   const [approving, setApproving] = useState(false);
   const [isResolvingSessionParam, setIsResolvingSessionParam] = useState(() => !!sessionFromUrl);
+  const [riskThresholds, setRiskThresholds] = useState<RiskThresholds>({
+    redThresholdPercent: 50,
+    yellowThresholdPercent: 100,
+  });
 
   const fetchSessions = async () => {
     if (!currentRestaurant) return;
@@ -74,34 +70,56 @@ export default function ReviewPage() {
 
   useEffect(() => {
     if (!currentRestaurant) return;
+    supabase
+      .from("smart_order_settings")
+      .select("red_threshold, yellow_threshold")
+      .eq("restaurant_id", currentRestaurant.id)
+      .maybeSingle()
+      .then(({ data }) => { setRiskThresholds(riskThresholdsFromSettings(data)); });
+  }, [currentRestaurant]);
+
+  useEffect(() => {
+    if (!currentRestaurant) return;
     supabase.from("inventory_catalog_items").select("id, item_name, product_number, vendor_sku")
       .eq("restaurant_id", currentRestaurant.id)
       .then(({ data }) => { if (data) setCatalogItems(data); });
   }, [currentRestaurant]);
 
-  const autoCreateSmartOrder = async (sessionId: string, restaurantId: string, userId: string) => {
+  const autoCreateSmartOrder = async (sessionId: string, restaurantId: string, userId: string): Promise<string | null> => {
     try {
       const { data: session } = await supabase.from("inventory_sessions").select("*").eq("id", sessionId).single();
-      if (!session) return;
+      if (!session) return null;
       const { data: sessionItems } = await supabase.from("inventory_session_items").select("*").eq("session_id", sessionId);
-      if (!sessionItems || sessionItems.length === 0) return;
+      if (!sessionItems || sessionItems.length === 0) return null;
       const { data: latestGuide } = await supabase.from("par_guides").select("id")
         .eq("restaurant_id", restaurantId).eq("inventory_list_id", session.inventory_list_id)
         .order("updated_at", { ascending: false }).limit(1)
         .maybeSingle();
-      let parMap: Record<string, number> = {};
-      if (latestGuide) {
-        const { data: guideItems } = await supabase.from("par_guide_items").select("item_name, par_level").eq("par_guide_id", latestGuide.id);
-        parMap = buildParLevelMapFromGuide(guideItems || []);
-      }
+      const parMaps = latestGuide
+        ? buildParGuideLevelMaps(
+            (await supabase
+              .from("par_guide_items")
+              .select("item_name, par_level, catalog_item_id")
+              .eq("par_guide_id", latestGuide.id)).data || [],
+          )
+        : null;
       const computed = sessionItems.map(i => {
-        const key = normalizeItemName(i.item_name);
         const sessionPar = Number(i.par_level ?? 0);
         const parLevel = latestGuide
-          ? (key in parMap ? parMap[key] : sessionPar)
+          ? resolveParLevelFromGuideMaps(
+              { catalog_item_id: i.catalog_item_id, item_name: i.item_name },
+              parMaps,
+              sessionPar,
+            )
           : sessionPar;
         const currentStock = Number(i.current_stock ?? 0);
-        return { ...i, parLevel, currentStock, risk: computeRiskLevel(currentStock, parLevel), suggestedOrder: computeOrderQty(currentStock, parLevel, i.unit, i.pack_size) };
+        return {
+          ...i,
+          parLevel,
+          currentStock,
+          risk: getRisk(currentStock, parLevel, riskThresholds).level,
+          suggestedOrder: computeOrderQty(currentStock, parLevel, i.unit, i.pack_size),
+        };
       });
       const redCount = computed.filter(i => i.risk === "RED").length;
       const yellowCount = computed.filter(i => i.risk === "YELLOW").length;
@@ -109,7 +127,7 @@ export default function ReviewPage() {
         restaurant_id: restaurantId, session_id: sessionId, inventory_list_id: session.inventory_list_id,
         par_guide_id: latestGuide?.id || null, created_by: userId,
       }).select().single();
-      if (runError || !run) return;
+      if (runError || !run) return null;
       const runLines = computed.map(i => ({
         run_id: run.id,
         catalog_item_id: i.catalog_item_id || null,
@@ -146,7 +164,8 @@ export default function ReviewPage() {
           })));
         }
       }
-    } catch (err) { console.error(err); }
+      return run.id;
+    } catch (err) { console.error(err); return null; }
   };
 
   const handleApprove = async (sessionId: string) => {
@@ -156,8 +175,21 @@ export default function ReviewPage() {
     }).eq("id", sessionId);
     setApproving(false);
     if (error) { toast.error(error.message); return; }
-    if (currentRestaurant && user) await autoCreateSmartOrder(sessionId, currentRestaurant.id, user.id);
-    toast.success("Session approved!");
+    let smartOrderRunId: string | null = null;
+    if (currentRestaurant && user) {
+      smartOrderRunId = await autoCreateSmartOrder(sessionId, currentRestaurant.id, user.id);
+    }
+    if (smartOrderRunId) {
+      toast.success("Session approved", {
+        description: "Smart order draft created.",
+        action: {
+          label: "Open Smart Order",
+          onClick: () => navigate(`/app/smart-order?viewRun=${smartOrderRunId}`),
+        },
+      });
+    } else {
+      toast.success("Session approved!");
+    }
     if (viewSession?.id === sessionId) { setViewItems(null); setViewSession(null); setLocalItems({}); setLocalPar({}); setLocalPrice({}); }
     fetchSessions();
   };
@@ -187,12 +219,21 @@ export default function ReviewPage() {
       const { data: guides } = await supabase.from("par_guides").select("id")
         .eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", session.inventory_list_id);
       if (guides?.length) {
-        const { data: parData } = await supabase.from("par_guide_items").select("item_name, par_level")
+        const { data: parData } = await supabase
+          .from("par_guide_items")
+          .select("item_name, par_level, catalog_item_id")
           .in("par_guide_id", guides.map(g => g.id));
         if (parData) {
-          const parMap: Record<string, number> = {};
-          parData.forEach(p => { parMap[p.item_name] = Number(p.par_level); });
-          setViewItems((data || []).map(i => ({ ...i, approved_par: parMap[i.item_name] ?? null })));
+          const maps = buildParGuideLevelMaps(parData);
+          setViewItems(
+            (data || []).map((i) => ({
+              ...i,
+              approved_par: resolveGuideParFromMaps(
+                { catalog_item_id: i.catalog_item_id, item_name: i.item_name },
+                maps,
+              ),
+            })),
+          );
           setViewSession(session);
           return true;
         }
@@ -274,7 +315,7 @@ export default function ReviewPage() {
   const riskCounts = useMemo(() => {
     if (!viewItems) return { critical: 0, low: 0, ok: 0, nopar: 0 };
     return viewItems.reduce((acc, item) => {
-      const r = getRisk(Number(item.current_stock), item.approved_par);
+      const r = getRisk(Number(item.current_stock), item.approved_par, riskThresholds);
       if (r.level === "RED") acc.critical++;
       else if (r.level === "YELLOW") acc.low++;
       else if (r.level === "GREEN") acc.ok++;
@@ -287,7 +328,7 @@ export default function ReviewPage() {
     if (!viewItems) return [];
     let items = viewItems;
     if (activeFilter !== "all") items = items.filter(item => {
-      const r = getRisk(Number(item.current_stock), item.approved_par);
+      const r = getRisk(Number(item.current_stock), item.approved_par, riskThresholds);
       if (activeFilter === "critical") return r.level === "RED";
       if (activeFilter === "low") return r.level === "YELLOW";
       if (activeFilter === "ok") return r.level === "GREEN";
@@ -395,8 +436,8 @@ export default function ReviewPage() {
             <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">No items match this filter.</div>
           ) : groupedByCategory.map(([category, items]) => {
             const isCollapsed = collapsedCategories.has(category);
-            const catCritical = items.filter(i => getRisk(Number(i.current_stock), i.approved_par).level === "RED").length;
-            const catLow = items.filter(i => getRisk(Number(i.current_stock), i.approved_par).level === "YELLOW").length;
+            const catCritical = items.filter(i => getRisk(Number(i.current_stock), i.approved_par, riskThresholds).level === "RED").length;
+            const catLow = items.filter(i => getRisk(Number(i.current_stock), i.approved_par, riskThresholds).level === "YELLOW").length;
             return (
               <Collapsible key={category} open={!isCollapsed} onOpenChange={() => {
                 setCollapsedCategories(prev => { const n = new Set(prev); if (n.has(category)) n.delete(category); else n.add(category); return n; });
@@ -427,7 +468,7 @@ export default function ReviewPage() {
                     <TableBody>
                       {items.map(item => {
                         const stock = localItems[item.id] !== undefined ? localItems[item.id] : Number(item.current_stock ?? 0);
-                        const risk = getRisk(stock, item.approved_par);
+                        const risk = getRisk(stock, item.approved_par, riskThresholds);
                         const need = computeOrderQty(stock, item.approved_par, item.unit, item.pack_size);
                         const lastOrdered = (() => {
                           const ci = catalogItems.find(c => c.item_name === item.item_name);

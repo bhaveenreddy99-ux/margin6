@@ -21,8 +21,10 @@ import ReviewPage from "@/pages/app/inventory/Review";
 import ApprovedPage from "@/pages/app/inventory/Approved";
 import ImportPage from "@/pages/app/inventory/Import";
 import SmartOrderPage from "@/pages/app/SmartOrder";
+import ParHubPage from "@/pages/app/ParHub";
 import PARManagementPage from "@/pages/app/PARManagement";
 import PARSuggestionsPage from "@/pages/app/PARSuggestions";
+import RecipesPage from "@/pages/app/Recipes";
 
 import InvoicesPage from "@/pages/app/Invoices";
 import InvoiceReviewPage from "@/pages/app/InvoiceReview";
@@ -66,9 +68,12 @@ const App = () => (
                 <Route path="inventory/approved" element={<ApprovedPage />} />
                 <Route path="inventory/import/:listId" element={<ImportPage />} />
                 <Route path="smart-order" element={<SmartOrderPage />} />
-                <Route path="par" element={<PARManagementPage />} />
-                <Route path="par/suggestions" element={<PARSuggestionsPage />} />
+                <Route path="par" element={<ParHubPage />}>
+                  <Route index element={<PARManagementPage />} />
+                  <Route path="suggestions" element={<PARSuggestionsPage />} />
+                </Route>
                 
+                <Route path="recipes" element={<RecipesPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="invoices/:id/review" element={<InvoiceReviewPage />} />
                 <Route path="orders" element={<Navigate to="/app/invoices" replace />} />

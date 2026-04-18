@@ -1,4 +1,4 @@
-RestaurantIQ — Product & Architecture Plan
+RestaurantIQ — Master Product & Architecture Plan
 1. Product Definition
 
 RestaurantIQ is a multi-restaurant back-of-house operations platform.
@@ -6,7 +6,7 @@ RestaurantIQ is a multi-restaurant back-of-house operations platform.
 It is NOT:
 
 POS
-customer ordering system
+customer ordering
 reservations
 front-of-house
 
@@ -15,12 +15,12 @@ It IS:
 inventory management
 PAR management
 smart ordering
-purchase tracking
+purchasing
 invoice matching
 receiving workflow
 waste tracking
-notifications
-analytics
+alerts & notifications
+analytics & dashboards
 
 Primary users:
 
@@ -29,19 +29,26 @@ managers
 kitchen leads
 inventory staff
 
-The goal:
-control food cost and inventory across multiple restaurants
+Primary goal:
+Control food cost and inventory across multiple restaurants.
 
-2. Core Workflow (Real Life)
+Primary wedge:
+RestaurantIQ helps restaurants:
 
-This is the canonical workflow.
+count faster
+know what to order
+catch supplier price changes
+detect low/high stock
+trust inventory numbers
+2. Core Workflow (Canonical)
+
+This is the real-life canonical workflow.
 
 Step 1 — Item Master
 
-Restaurant creates item catalog:
+Restaurant creates catalog:
 
 item name
-item number
 pack size
 UOM
 vendor
@@ -54,7 +61,7 @@ inventory_lists
 list_categories
 Step 2 — PAR Setup
 
-User defines PAR levels
+User defines PAR levels.
 
 Tables:
 
@@ -62,7 +69,7 @@ par_guides
 par_guide_items
 Step 3 — Inventory Count
 
-Staff counts inventory
+Staff counts inventory.
 
 Tables:
 
@@ -70,19 +77,25 @@ inventory_sessions
 inventory_session_items
 
 Flow:
-Create session → Enter counts → Submit → Approve
+Create session → Enter counts → Submit → Approve → Lock
+
+Approved counts become baseline truth.
 
 Step 4 — Smart Order
 
-System calculates:
+System calculates suggested order.
 
-order_qty = par - stock
+Formula:
+
+target = par + usage_buffer
+order = target - on_hand
 
 Adjusted for:
 
 pack size
 case rounding
 vendor minimums
+UOM conversion
 
 Tables:
 
@@ -90,25 +103,23 @@ smart_order_runs
 smart_order_run_items
 Step 5 — Purchase Order
 
-Smart order becomes PO
+Smart order becomes purchase order.
 
 Tables:
 
-purchase_history
-purchase_history_items
+purchase_orders
+purchase_order_items
 Step 6 — Invoice Upload
 
-User uploads invoice
+User uploads invoice.
 
 Edge Function:
 parse-invoice
 
-Data:
+Tables:
 
-items
-qty
-price
-totals
+invoices
+invoice_items
 Step 7 — Invoice Matching
 
 System compares:
@@ -118,7 +129,7 @@ PO vs Invoice
 Checks:
 
 missing items
-qty mismatch
+quantity mismatch
 price mismatch
 
 Tables:
@@ -127,25 +138,28 @@ invoice_line_comparisons
 delivery_issues
 Step 8 — Receipt Confirmation
 
-User confirms delivery
+User confirms delivery.
 
 System:
 
-updates purchase history
+updates last paid cost
 logs discrepancies
+updates inventory truth
 Step 9 — Waste Logging
 
-User logs waste
+User logs waste.
 
 Table:
 
 waste_log
-Step 10 — Notifications
+Step 10 — Alerts & Dashboard
 
 System alerts:
 
 low stock
-price changes
+overstock
+price increase
+price decrease
 missing items
 waste spikes
 
@@ -153,106 +167,160 @@ Tables:
 
 notifications
 notification_preferences
-3. Canonical Data Model (Use These Tables)
+alert_recipients
+reminders
+3. Inventory Truth Rules
 
-These are the real core tables:
+Inventory must follow one source of truth.
+
+On Hand:
+
+on_hand =
+approved_count
++ received
+- waste
+- adjustments
+
+Never:
+
+recomputed in UI
+overwritten silently
+based on orders
+4. Price Truth Rules
+
+Last Paid Cost:
+
+last_paid_cost =
+most recent confirmed invoice receipt cost
+
+Must:
+
+normalize pack size
+normalize unit
+track history
+5. Smart Order Rules
+target = PAR + expected usage
+suggested = max(target - on_hand, 0)
+
+Then apply:
+
+pack size rounding
+vendor minimums
+UOM conversion
+6. Stock Risk Rules
+
+LOW
+
+on_hand < reorder threshold
+
+OK
+
+healthy range
+
+HIGH
+
+on_hand > max threshold
+7. Canonical Tables
 
 Tenant
+
 restaurants
 restaurant_members
-locations
 profiles
+locations
+
 Inventory
-inventory_lists
+
 inventory_catalog_items
+inventory_lists
 list_categories
-list_category_sets
 list_item_category_map
+
 PAR
+
 par_guides
 par_guide_items
+
 Counts
+
 inventory_sessions
 inventory_session_items
-Smart Order
+
+Smart Orders
+
 smart_order_runs
 smart_order_run_items
+
 Purchasing
-purchase_history
-purchase_history_items
+
+purchase_orders
+purchase_order_items
+
+Invoices
+
+invoices
+invoice_items
+
 Invoice Matching
+
 invoice_line_comparisons
 delivery_issues
+
 Vendors
+
 vendor_item_mappings
 vendor_integrations
+
 Waste
+
 waste_log
+
 Notifications
+
 notifications
 notification_preferences
 alert_recipients
 reminders
-4. Deprecated / Legacy Tables (Do NOT Expand)
+8. Transitional Tables (Do Not Expand)
+purchase_history
+purchase_history_items
 
-These exist but should not be expanded:
+These are legacy procurement tables.
+
+Future truth:
+purchase_orders + invoices
+
+9. Deprecated Tables (Old Architecture)
+
+Do not expand:
 
 categories
 inventory_items
 par_items
 custom_lists
 custom_list_items
+10. Backend Ownership Rules
 
-They belong to old architecture.
-
-5. Critical Calculation Rules
-
-These calculations must have one source of truth
-
-Stock Risk
-LOW  = stock < par
-OK   = stock >= par
-HIGH = stock > par * threshold
-Smart Order
-order = ceil((par - stock) / pack_size)
-
-Must include:
-
-pack size
-rounding
-vendor min
-UOM conversion
-Usage
-usage = previous_stock + received - current_stock
-
-NOT:
-based on orders
-
-Invoice Variance
-qty_diff   = invoice_qty - po_qty
-price_diff = invoice_price - po_price
-total_diff = line_total_invoice - line_total_po
-6. Backend Ownership Rules
-
-These must live in backend:
+Must live in backend/domain:
 
 smart order calculation
 risk calculation
-PAR suggestions
-usage analytics
+usage calculation
+price change detection
 invoice comparison
 dashboard totals
 reporting aggregation
+alert generation
 
 Frontend only:
 
 display
-formatting
 filtering
-UI logic
-7. Multi-Tenant Rules
+formatting
+UI interactions
+11. Multi-Tenant Rules
 
-Every table must include:
+Every table includes:
 
 restaurant_id
 
@@ -264,34 +332,117 @@ RLS must enforce:
 
 user can only access their restaurant
 
-8. Known Problems (Current App)
+12. Known Problems (Current App)
 
 These must be fixed:
 
 duplicate calculation logic
 unsafe receipt logic
-fake usage data from orders
+fake usage from orders
 duplicate PAR engines
 weak invoice matching
-name-based item matching
+name-based matching
 missing pack-size conversions
-inconsistent reports
+inconsistent dashboard
 missing audit logs
-9. Architecture Rules
+fragmented price truth
+no inventory ledger
+giant page components
+13. Architecture Rules
 
 Cursor must follow:
 
 Do not create duplicate tables
 Use canonical tables only
 Do not move logic to frontend
-Prefer SQL / RPC for calculations
+Prefer domain layer calculations
 Preserve multi-tenant safety
-Prefer item_id over item name
-One calculation source of truth
-Do not invent new workflows
-Use migrations for schema changes
-Keep backend authoritative
-10. Future Features
+Prefer item_id over name
+One source of truth per calculation
+Fix one issue at a time
+Extract logic before rewriting
+Backend authoritative
+14. Folder Architecture
+src/domain/inventory
+src/domain/pricing
+src/domain/ordering
+src/domain/alerts
+src/domain/dashboard
+src/types
+
+Pages must NOT contain core logic.
+
+15. Stabilization Phase
+
+Before new features:
+
+fix lint issues
+remove any types
+remove unsafe casts
+centralize inventory logic
+centralize pricing logic
+centralize alerts
+clean dashboard metrics
+split giant files
+16. Execution Order
+
+Phase 1
+
+Fix EnterInventory.tsx
+Fix InvoiceReview.tsx
+Fix Invoices.tsx
+Fix Dashboard.tsx
+
+Phase 2
+
+Create inventory rules
+Create pricing rules
+Create ordering rules
+Create alert rules
+Create dashboard metrics
+
+Phase 3
+
+Connect count workflow
+Connect smart order
+Connect invoice workflow
+Connect notifications
+Connect dashboard
+
+Phase 4
+
+Split giant files
+Clean hooks
+Extract services
+
+Phase 5
+
+Add inventory ledger
+Add price history
+Tighten item identity
+
+Phase 6
+
+polish dashboard
+improve alerts
+improve suggested order UX
+17. Competitive Strategy
+
+We compete by:
+
+faster counting
+simpler UI
+better alerts
+trusted dashboard
+easier onboarding
+
+We DO NOT compete by:
+
+POS features
+accounting system
+menu management
+enterprise analytics
+18. Future Features
 
 Planned:
 
@@ -302,17 +453,17 @@ stock movement ledger
 receiving workflow
 substitution tracking
 credit tracking
-location-level inventory
+location inventory
 scheduled ordering
 AI forecasting
-11. App Goal
+19. Final App Goal
 
-RestaurantIQ should become:
+RestaurantIQ becomes:
 
-"Inventory + Purchasing + Receiving platform for restaurants"
+"A fast, trustworthy inventory and purchasing platform that helps restaurants know what to count, what to order, and where money is leaking."
 
 Not:
 
 POS
-ordering
-menu management
+ordering system
+menu manager

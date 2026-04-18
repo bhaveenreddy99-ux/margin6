@@ -2,7 +2,7 @@
  * Demo Role Switcher — visible only in demo mode.
  * Allows toggling OWNER / MANAGER UI permissions without needing separate auth users.
  */
-import { useState, useEffect, createContext, useContext, ReactNode } from "react";
+import { useState, createContext, useContext, ReactNode } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

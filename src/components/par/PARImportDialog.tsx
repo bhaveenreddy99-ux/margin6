@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -432,9 +432,13 @@ export function PARImportDialog({ open, onOpenChange, onImportComplete, existing
   const importIntoGuide = async (guideId: string, listId: string, rowsToProcess: MatchedRow[]) => {
     // Get existing items in this guide
     const { data: existingItems } = await supabase
-      .from("par_guide_items").select("id, item_name").eq("par_guide_id", guideId);
+      .from("par_guide_items").select("id, item_name, catalog_item_id").eq("par_guide_id", guideId);
     const existingByName = new Map<string, string>();
-    (existingItems || []).forEach(e => existingByName.set(e.item_name.toLowerCase().trim(), e.id));
+    const existingByCatalogId = new Map<string, string>();
+    (existingItems || []).forEach(e => {
+      existingByName.set(e.item_name.toLowerCase().trim(), e.id);
+      if (e.catalog_item_id) existingByCatalogId.set(e.catalog_item_id, e.id);
+    });
 
     const toInsert: any[] = [];
     const toUpdate: { id: string; data: any }[] = [];
@@ -463,7 +467,9 @@ export function PARImportDialog({ open, onOpenChange, onImportComplete, existing
         row.catalogItemId = row.manualCatalogId;
       }
 
-      const existingId = existingByName.get(row.itemName.toLowerCase().trim());
+      const existingId =
+        (row.catalogItemId && existingByCatalogId.get(row.catalogItemId)) ||
+        existingByName.get(row.itemName.toLowerCase().trim());
       if (existingId) {
         toUpdate.push({
           id: existingId,
@@ -471,6 +477,7 @@ export function PARImportDialog({ open, onOpenChange, onImportComplete, existing
             par_level: row.parLevel ?? 0,
             ...(row.category && { category: row.category }),
             ...(row.unit && { unit: row.unit }),
+            ...(row.catalogItemId ? { catalog_item_id: row.catalogItemId } : {}),
           },
         });
         updated++;
@@ -482,6 +489,7 @@ export function PARImportDialog({ open, onOpenChange, onImportComplete, existing
           category: row.category || null,
           unit: row.unit || null,
           brand_name: row.brand || null,
+          ...(row.catalogItemId ? { catalog_item_id: row.catalogItemId } : {}),
         });
         created++;
       }

@@ -1,3 +1,17 @@
+import type { Database } from "@/integrations/supabase/types";
+
+type PurchaseOrderItemRow = Database["public"]["Tables"]["purchase_order_items"]["Row"];
+type SmartOrderRunItemRow = Database["public"]["Tables"]["smart_order_run_items"]["Row"];
+
+/**
+ * PO lines loaded for a linked smart order, with `suggested_order` set from `quantity_ordered`
+ * so they align with `smart_order_run_items` for variance/compare logic.
+ */
+export type LinkedPurchaseOrderLine = PurchaseOrderItemRow & { suggested_order: number | null };
+
+/** Lines backing invoice vs linked order comparison (PO-backed or run-staging). */
+export type LinkedSmartOrderLine = LinkedPurchaseOrderLine | SmartOrderRunItemRow;
+
 export interface InvoiceItem {
   product_number: string | null;
   item_name: string;

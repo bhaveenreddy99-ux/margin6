@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,19 +14,47 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { computeDetailedPARRecommendations, type DetailedPARRecommendation } from "@/lib/usage-analytics";
 import {
+  isSuggestionLikelyTooHigh,
+  isSuggestionLikelyTooLow,
+  isSuggestionMissingPar,
+} from "@/domain/par/parHealth";
+import {
   TrendingUp, TrendingDown, Minus, BellRing, BarChart3, RefreshCw,
   Sparkles, AlertTriangle, PackageCheck, PackageMinus, ListFilter, CheckSquare
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { useIsCompact } from "@/hooks/use-mobile";
 
-type FilterMode = "all" | "changed" | "major" | "stockout" | "overstock" | "missing_par";
+type FilterMode =
+  | "all"
+  | "changed"
+  | "major"
+  | "stockout"
+  | "overstock"
+  | "missing_par"
+  | "likely_low"
+  | "likely_high";
+
+/** Display-only: managers see trust tied to count snapshots, not internal computeConfidence(). */
+function confidenceTierFromDataPoints(dataPoints: number): "high" | "medium" | "low" {
+  if (dataPoints >= 3) return "high";
+  if (dataPoints === 2) return "medium";
+  return "low";
+}
+
+function formatWeeklyUsages(values: number[]): string {
+  if (!values.length) return "—";
+  return values.map((v, i) => `W${i + 1}: ${v.toFixed(1)}`).join(" · ");
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function PARSuggestionsPage() {
   const { currentRestaurant, currentLocation } = useRestaurant();
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const isCompact = useIsCompact();
 
   const [lists, setLists] = useState<any[]>([]);
   const [parGuides, setParGuides] = useState<any[]>([]);
@@ -42,6 +71,7 @@ export default function PARSuggestionsPage() {
   const [notifying, setNotifying] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  const [itemsPendingApply, setItemsPendingApply] = useState<DetailedPARRecommendation[]>([]);
 
   const isManagerPlus = currentRestaurant?.role === "OWNER" || currentRestaurant?.role === "MANAGER";
 
@@ -53,6 +83,22 @@ export default function PARSuggestionsPage() {
     supabase.from("par_settings").select("*").eq("restaurant_id", currentRestaurant.id).maybeSingle()
       .then(({ data }) => { if (data) setParSettings(data); });
   }, [currentRestaurant]);
+
+  // Deep link from PAR Management: /app/par/suggestions?list=<inventory_list_id>&filter=<mode>
+  useEffect(() => {
+    const listId = searchParams.get("list");
+    if (!listId || lists.length === 0) return;
+    if (lists.some((l) => l.id === listId)) {
+      setSelectedList(listId);
+    }
+  }, [searchParams, lists]);
+
+  useEffect(() => {
+    const f = searchParams.get("filter");
+    if (f === "likely_low" || f === "likely_high" || f === "missing_par") {
+      setFilterMode(f);
+    }
+  }, [searchParams]);
 
   // Load PAR guides when list changes
   useEffect(() => {
@@ -100,27 +146,30 @@ export default function PARSuggestionsPage() {
       case "stockout": return suggestions.filter(s => s.risk_type === "stockout");
       case "overstock": return suggestions.filter(s => s.risk_type === "overstock");
       case "missing_par": return suggestions.filter(s => s.risk_type === "missing_par");
+      case "likely_low": return suggestions.filter(s => isSuggestionLikelyTooLow(s));
+      case "likely_high": return suggestions.filter(s => isSuggestionLikelyTooHigh(s));
       default: return suggestions;
     }
   }, [suggestions, filterMode]);
 
-  // ─── Apply to PAR Guide ─────────────────────────────────────────────────
-  const handleApplyToGuide = async () => {
+  const parHealthCounts = useMemo(
+    () => ({
+      missing: suggestions.filter(s => isSuggestionMissingPar(s)).length,
+      likelyLow: suggestions.filter(s => isSuggestionLikelyTooLow(s)).length,
+      likelyHigh: suggestions.filter(s => isSuggestionLikelyTooHigh(s)).length,
+    }),
+    [suggestions],
+  );
+
+  // ─── Apply to PAR Guide (same matching as single-row; batch-safe) ─────────
+  const runApplyParItems = async (itemsToApply: DetailedPARRecommendation[]) => {
     if (!currentRestaurant || !user) return;
     setApplying(true);
-
-    const itemsToApply = filteredSuggestions.filter(s => selectedItems.has(s.item_name));
-    if (itemsToApply.length === 0) {
-      toast.error("No items selected.");
-      setApplying(false);
-      return;
-    }
 
     // Determine target guide
     let targetGuideId = selectedGuide !== "all" ? selectedGuide : null;
 
     if (!targetGuideId) {
-      // Find the first guide for this list
       const listId = selectedList !== "all" ? selectedList : lists[0]?.id;
       if (!listId) {
         toast.error("Please select an inventory list first.");
@@ -132,7 +181,6 @@ export default function PARSuggestionsPage() {
       targetGuideId = guides?.[0]?.id;
 
       if (!targetGuideId) {
-        // Create a new guide
         const { data: newGuide, error } = await supabase.from("par_guides").insert({
           restaurant_id: currentRestaurant.id,
           inventory_list_id: listId,
@@ -148,37 +196,115 @@ export default function PARSuggestionsPage() {
       }
     }
 
-    // Update or insert par_guide_items
+    const catalogIds = [
+      ...new Set(
+        itemsToApply.map((i) => i.catalog_item_id).filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
+    const catalogNameById = new Map<string, string>();
+    if (catalogIds.length > 0) {
+      const { data: catRows } = await supabase
+        .from("inventory_catalog_items")
+        .select("id, item_name")
+        .in("id", catalogIds);
+      for (const c of catRows ?? []) {
+        if (c.item_name) catalogNameById.set(c.id, c.item_name);
+      }
+    }
+
+    const { data: guideRows } = await supabase
+      .from("par_guide_items")
+      .select("id, item_name, catalog_item_id")
+      .eq("par_guide_id", targetGuideId);
+    const guideRowIdByCatalogId = new Map<string, string>();
+    const guideRowIdByLowerName = new Map<string, string>();
+    for (const row of guideRows ?? []) {
+      if (row.catalog_item_id) guideRowIdByCatalogId.set(row.catalog_item_id, row.id);
+      const k = row.item_name.trim().toLowerCase();
+      if (!guideRowIdByLowerName.has(k)) guideRowIdByLowerName.set(k, row.id);
+    }
+
+    const resolveExistingRowId = (item: DetailedPARRecommendation): string | undefined => {
+      if (item.catalog_item_id) {
+        const byId = guideRowIdByCatalogId.get(item.catalog_item_id);
+        if (byId) return byId;
+      }
+      const canonical = item.catalog_item_id ? catalogNameById.get(item.catalog_item_id)?.trim() : undefined;
+      if (canonical) {
+        const byCatalog = guideRowIdByLowerName.get(canonical.toLowerCase());
+        if (byCatalog) return byCatalog;
+      }
+      const bySuggestionName = guideRowIdByLowerName.get(item.item_name.trim().toLowerCase());
+      if (bySuggestionName) return bySuggestionName;
+      return undefined;
+    };
+
     let updated = 0;
     let created = 0;
     for (const item of itemsToApply) {
-      const { data: existing } = await supabase.from("par_guide_items")
-        .select("id")
-        .eq("par_guide_id", targetGuideId)
-        .ilike("item_name", item.item_name)
-        .maybeSingle();
+      let existingId = resolveExistingRowId(item);
 
-      if (existing) {
-        await supabase.from("par_guide_items")
-          .update({ par_level: item.suggested_par })
-          .eq("id", existing.id);
+      if (!existingId) {
+        const { data: loose } = await supabase
+          .from("par_guide_items")
+          .select("id")
+          .eq("par_guide_id", targetGuideId)
+          .ilike("item_name", item.item_name)
+          .maybeSingle();
+        existingId = loose?.id;
+      }
+
+      const insertItemName =
+        (item.catalog_item_id && catalogNameById.get(item.catalog_item_id)?.trim()) || item.item_name;
+
+      if (existingId) {
+        await supabase.from("par_guide_items").update({
+          par_level: item.suggested_par,
+          ...(item.catalog_item_id ? { catalog_item_id: item.catalog_item_id } : {}),
+        }).eq("id", existingId);
         updated++;
       } else {
         await supabase.from("par_guide_items").insert({
           par_guide_id: targetGuideId,
-          item_name: item.item_name,
+          item_name: insertItemName,
           category: item.category,
           unit: item.unit,
           par_level: item.suggested_par,
+          ...(item.catalog_item_id ? { catalog_item_id: item.catalog_item_id } : {}),
         });
         created++;
       }
     }
 
-    toast.success(`Applied ${updated + created} PAR changes (${updated} updated, ${created} created).`);
+    const total = updated + created;
+    toast.success(`Applied ${total} PAR update${total !== 1 ? "s" : ""}`);
     setApplying(false);
     setApplyDialogOpen(false);
+    setItemsPendingApply([]);
     setSelectedItems(new Set());
+  };
+
+  const handleConfirmApply = () => {
+    void runApplyParItems(itemsPendingApply);
+  };
+
+  const openApplyDialogForSelected = () => {
+    const batch = filteredSuggestions.filter(s => selectedItems.has(s.item_name));
+    if (batch.length === 0) {
+      toast.error("No items selected.");
+      return;
+    }
+    setItemsPendingApply(batch);
+    setApplyDialogOpen(true);
+  };
+
+  const openApplyDialogForVisible = () => {
+    if (filteredSuggestions.length === 0) {
+      toast.error("No suggestions match the current filter.");
+      return;
+    }
+    setItemsPendingApply(filteredSuggestions);
+    setApplyDialogOpen(true);
   };
 
   // ─── Notify with anti-spam ──────────────────────────────────────────────
@@ -323,7 +449,7 @@ export default function PARSuggestionsPage() {
   };
 
   // ─── Badges ─────────────────────────────────────────────────────────────
-  const confidenceBadge = (c: string) => {
+  const confidenceBadge = (c: "high" | "medium" | "low") => {
     if (c === "high") return <Badge className="bg-success/15 text-success border-success/30 border text-[10px]">High</Badge>;
     if (c === "medium") return <Badge className="bg-warning/15 text-warning border-warning/30 border text-[10px]">Medium</Badge>;
     return <Badge className="bg-muted text-muted-foreground text-[10px]">Low</Badge>;
@@ -488,17 +614,67 @@ export default function PARSuggestionsPage() {
             ))}
           </div>
 
+          {/* PAR Health (clickable → filter) */}
+          <div className="rounded-lg border border-border/80 bg-muted/20 px-3 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">PAR health</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={filterMode === "missing_par" ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setFilterMode("missing_par")}
+              >
+                Missing PAR
+                <Badge variant="secondary" className="text-[10px] tabular-nums">{parHealthCounts.missing}</Badge>
+              </Button>
+              <Button
+                type="button"
+                variant={filterMode === "likely_low" ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setFilterMode("likely_low")}
+              >
+                Likely too low
+                <Badge variant="secondary" className="text-[10px] tabular-nums">{parHealthCounts.likelyLow}</Badge>
+              </Button>
+              <Button
+                type="button"
+                variant={filterMode === "likely_high" ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setFilterMode("likely_high")}
+              >
+                Likely too high
+                <Badge variant="secondary" className="text-[10px] tabular-nums">{parHealthCounts.likelyHigh}</Badge>
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              Based on current suggestion types (increase / decrease / stockout / overstock / missing — same engine as the table).
+            </p>
+          </div>
+
           {/* Action bar */}
           {isManagerPlus && (
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 flex-wrap items-center">
               <Button
-                onClick={() => setApplyDialogOpen(true)}
+                onClick={openApplyDialogForVisible}
+                disabled={filteredSuggestions.length === 0}
+                size="sm"
+                className="gap-2 text-xs bg-gradient-amber shadow-amber text-primary-foreground"
+              >
+                <CheckSquare className="h-3.5 w-3.5" />
+                Apply visible suggestions ({filteredSuggestions.length})
+              </Button>
+              <Button
+                onClick={openApplyDialogForSelected}
                 disabled={selectedItems.size === 0}
                 size="sm"
+                variant="outline"
                 className="gap-2 text-xs"
               >
                 <CheckSquare className="h-3.5 w-3.5" />
-                Apply Selected to PAR Guide ({selectedItems.size})
+                Apply selected ({selectedItems.size})
               </Button>
               <Button
                 onClick={handleNotify}
@@ -513,8 +689,57 @@ export default function PARSuggestionsPage() {
             </div>
           )}
 
-          {/* Suggestions table */}
-          <Card className="overflow-hidden">
+          {/* Mobile: compact cards */}
+          {isCompact && (
+            <div className="space-y-3 md:hidden">
+              {filteredSuggestions.map((s, idx) => (
+                <Card key={`m-${s.catalog_item_id ?? ""}:${s.item_name}:${idx}`} className="border-border/80">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm leading-snug">{s.item_name}</p>
+                        {s.category && <p className="text-[11px] text-muted-foreground">{s.category}{s.unit ? ` · ${s.unit}` : ""}</p>}
+                      </div>
+                      {riskBadge(s.risk_type)}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <p className="text-[10px] uppercase text-muted-foreground">Current PAR</p>
+                        <p className="font-mono tabular-nums">{s.current_par > 0 ? s.current_par : "—"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase text-primary">Suggested</p>
+                        <p className="font-mono font-semibold tabular-nums">{s.suggested_par.toFixed(1)}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="text-muted-foreground">Confidence</span>
+                      {confidenceBadge(confidenceTierFromDataPoints(s.data_points))}
+                      <span className="text-muted-foreground">· {s.data_points} count snapshots</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-snug line-clamp-3">{s.reason}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">{formatWeeklyUsages(s.weekly_usages)}</p>
+                    {isManagerPlus && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-border/60">
+                        <Checkbox
+                          checked={selectedItems.has(s.item_name)}
+                          onCheckedChange={() => toggleItem(s.item_name)}
+                          id={`mob-par-${idx}`}
+                        />
+                        <label htmlFor={`mob-par-${idx}`} className="text-xs text-muted-foreground">Include in batch apply</label>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+              {filteredSuggestions.length === 0 && (
+                <p className="text-center text-sm text-muted-foreground py-6">No items match this filter.</p>
+              )}
+            </div>
+          )}
+
+          {/* Suggestions table (desktop / tablet) */}
+          <Card className={`overflow-hidden ${isCompact ? "hidden md:block" : ""}`}>
             <CardHeader className="pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
@@ -540,18 +765,19 @@ export default function PARSuggestionsPage() {
                     )}
                     <TableHead className="text-xs font-semibold">Item</TableHead>
                     <TableHead className="text-xs font-semibold">Category</TableHead>
-                    <TableHead className="text-xs font-semibold text-right">Active PAR</TableHead>
-                    <TableHead className="text-xs font-semibold text-right">Suggested</TableHead>
+                    <TableHead className="text-xs font-semibold text-right min-w-[120px]">PAR change</TableHead>
                     <TableHead className="text-xs font-semibold text-center">Change</TableHead>
                     <TableHead className="text-xs font-semibold text-center">Risk</TableHead>
                     <TableHead className="text-xs font-semibold text-center">Confidence</TableHead>
-                    <TableHead className="text-xs font-semibold hidden lg:table-cell">Reason</TableHead>
+                    <TableHead className="text-xs font-semibold text-center hidden md:table-cell">Data pts</TableHead>
+                    <TableHead className="text-xs font-semibold hidden lg:table-cell min-w-[140px]">Weekly usage (est.)</TableHead>
+                    <TableHead className="text-xs font-semibold hidden lg:table-cell min-w-[160px]">Reason</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredSuggestions.map((s) => (
                     <TableRow
-                      key={s.item_name}
+                      key={`${s.catalog_item_id ?? ""}:${s.item_name}`}
                       className={`hover:bg-muted/20 transition-colors ${
                         Math.abs(s.change_pct) >= 20 ? "bg-warning/5" : ""
                       } ${s.risk_type === "stockout" ? "bg-destructive/5" : ""}`}
@@ -577,10 +803,20 @@ export default function PARSuggestionsPage() {
                         {s.unit && <span className="text-[10px] text-muted-foreground">{s.unit}</span>}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.category || "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-muted-foreground">
-                        {s.current_par > 0 ? s.current_par : "—"}
+                      <TableCell className="text-right align-top">
+                        <div className="inline-flex flex-col gap-1.5 items-end text-left min-w-[7.5rem]">
+                          <div className="rounded-md border border-border/80 bg-muted/30 px-2 py-1.5 w-full">
+                            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Current PAR</span>
+                            <p className="font-mono text-sm tabular-nums text-muted-foreground">
+                              {s.current_par > 0 ? s.current_par : "—"}
+                            </p>
+                          </div>
+                          <div className="rounded-md border border-primary/25 bg-primary/5 px-2 py-1.5 w-full">
+                            <span className="text-[10px] font-medium text-primary uppercase tracking-wide">Suggested PAR</span>
+                            <p className="font-mono text-sm font-semibold tabular-nums text-foreground">{s.suggested_par.toFixed(1)}</p>
+                          </div>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm font-semibold">{s.suggested_par.toFixed(1)}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
                           {changeIcon(s.change_amount)}
@@ -597,15 +833,24 @@ export default function PARSuggestionsPage() {
                           {riskBadge(s.risk_type)}
                         </div>
                       </TableCell>
-                      <TableCell className="text-center">{confidenceBadge(s.confidence)}</TableCell>
-                      <TableCell className="text-[11px] text-muted-foreground hidden lg:table-cell max-w-xs">
+                      <TableCell className="text-center">{confidenceBadge(confidenceTierFromDataPoints(s.data_points))}</TableCell>
+                      <TableCell className="text-center text-xs font-mono tabular-nums hidden md:table-cell">
+                        {s.data_points}
+                      </TableCell>
+                      <TableCell className="text-[10px] text-muted-foreground hidden lg:table-cell max-w-[200px] leading-snug">
+                        {formatWeeklyUsages(s.weekly_usages)}
+                      </TableCell>
+                      <TableCell className="text-[11px] text-muted-foreground hidden lg:table-cell max-w-xs leading-snug">
                         {s.reason}
                       </TableCell>
                     </TableRow>
                   ))}
                   {filteredSuggestions.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center text-sm text-muted-foreground py-8">
+                      <TableCell
+                        colSpan={isManagerPlus ? 10 : 9}
+                        className="text-center text-sm text-muted-foreground py-8"
+                      >
                         No items match this filter.
                       </TableCell>
                     </TableRow>
@@ -644,12 +889,18 @@ export default function PARSuggestionsPage() {
       )}
 
       {/* Apply Confirmation Dialog */}
-      <Dialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
+      <Dialog
+        open={applyDialogOpen}
+        onOpenChange={(open) => {
+          setApplyDialogOpen(open);
+          if (!open) setItemsPendingApply([]);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Apply PAR Changes</DialogTitle>
             <DialogDescription>
-              This will update {selectedItems.size} PAR level{selectedItems.size !== 1 ? "s" : ""} in the{" "}
+              This will update {itemsPendingApply.length} PAR level{itemsPendingApply.length !== 1 ? "s" : ""} in the{" "}
               {selectedGuide !== "all" ? "selected" : "first available"} PAR guide
               {selectedGuide === "all" && selectedList === "all" ? " (a new guide will be created if needed)" : ""}.
             </DialogDescription>
@@ -659,16 +910,24 @@ export default function PARSuggestionsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs">Item</TableHead>
-                  <TableHead className="text-xs text-right">Current</TableHead>
-                  <TableHead className="text-xs text-right">New</TableHead>
+                  <TableHead className="text-xs text-right">Current PAR</TableHead>
+                  <TableHead className="text-xs text-right">Suggested PAR</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSuggestions.filter(s => selectedItems.has(s.item_name)).map(s => (
-                  <TableRow key={s.item_name}>
+                {itemsPendingApply.map(s => (
+                  <TableRow key={`${s.catalog_item_id ?? ""}:${s.item_name}`}>
                     <TableCell className="text-sm">{s.item_name}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">{s.current_par > 0 ? s.current_par : "—"}</TableCell>
-                    <TableCell className="text-right text-sm font-semibold">{s.suggested_par.toFixed(1)}</TableCell>
+                    <TableCell className="text-right">
+                      <span className="inline-block rounded-md border border-border/80 bg-muted/30 px-2 py-1 font-mono text-sm tabular-nums text-muted-foreground">
+                        {s.current_par > 0 ? s.current_par : "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className="inline-block rounded-md border border-primary/25 bg-primary/5 px-2 py-1 font-mono text-sm font-semibold tabular-nums">
+                        {s.suggested_par.toFixed(1)}
+                      </span>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -676,7 +935,7 @@ export default function PARSuggestionsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setApplyDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleApplyToGuide} disabled={applying} className="gap-2">
+            <Button onClick={handleConfirmApply} disabled={applying || itemsPendingApply.length === 0} className="gap-2">
               <CheckSquare className="h-3.5 w-3.5" />
               {applying ? "Applying…" : "Confirm & Apply"}
             </Button>

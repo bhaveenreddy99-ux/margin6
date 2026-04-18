@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, Users, LogOut, Receipt, Settings, Bell, TrendingUp, Trash2 } from "lucide-react";
+import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, Users, LogOut, Receipt, Settings, Bell, Trash2, ChefHat } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -14,9 +14,9 @@ const mainNav = [
 const inventoryNav = [
   { title: "List Management", url: "/app/inventory/lists", icon: ClipboardList },
   { title: "Inventory Management", url: "/app/inventory/enter", icon: Package },
-  { title: "PAR Management", url: "/app/par", icon: BookOpen },
-  { title: "PAR Suggestions", url: "/app/par/suggestions", icon: TrendingUp },
+  { title: "PAR", url: "/app/par", icon: BookOpen },
   { title: "Smart Order", url: "/app/smart-order", icon: ShoppingCart },
+  { title: "Recipes", url: "/app/recipes", icon: ChefHat },
   { title: "Purchase History", url: "/app/purchase-history", icon: Receipt },
 ];
 

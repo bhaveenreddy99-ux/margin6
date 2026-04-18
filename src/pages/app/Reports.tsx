@@ -1,19 +1,21 @@
 import { useEffect, useState, useCallback } from "react";
+import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import {
-  BarChart3, AlertTriangle, Package, TrendingUp, TrendingDown, DollarSign,
+  BarChart3, AlertTriangle, Package, TrendingUp, DollarSign,
   Building2, ArrowRight, Trophy, ThumbsDown, CheckCircle2
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { getRisk } from "@/lib/inventory-utils";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
+import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
 import { computePARRecommendations } from "@/lib/usage-analytics";
 
 type ReportScope = "single" | "all" | "compare";
@@ -38,11 +40,19 @@ function SingleReport({ restaurantId }: { restaurantId: string }) {
   const [trend, setTrend] = useState<{ week: string; value: number }[]>([]);
   const [topItems, setTopItems] = useState<{ item_name: string; total_value: number; current_stock: number; unit: string }[]>([]);
   const [parMetrics, setParMetrics] = useState<{ total: number; major: number; top5: string[] } | null>(null);
+  const [lastApprovedAt, setLastApprovedAt] = useState<string | null>(null);
 
   const fetch = useCallback(async () => {
     setLoading(true);
     // Compute PAR suggestion metrics in parallel
     computePARSuggestionCount(restaurantId).then(m => setParMetrics(m));
+
+    const { data: riskSettingsRow } = await supabase
+      .from("smart_order_settings")
+      .select("red_threshold, yellow_threshold")
+      .eq("restaurant_id", restaurantId)
+      .maybeSingle();
+    const riskTh = riskThresholdsFromSettings(riskSettingsRow);
 
     // Latest approved session
     const { data: sessions } = await supabase
@@ -54,6 +64,7 @@ function SingleReport({ restaurantId }: { restaurantId: string }) {
       .limit(1);
 
     if (sessions && sessions.length > 0) {
+      setLastApprovedAt(sessions[0].approved_at ?? null);
       const { data: items } = await supabase
         .from("inventory_session_items")
         .select("*")
@@ -62,7 +73,7 @@ function SingleReport({ restaurantId }: { restaurantId: string }) {
       if (items) {
         let red = 0, yellow = 0, green = 0, value = 0;
         items.forEach(i => {
-          const risk = getRisk(Number(i.current_stock), i.par_level).level;
+          const risk = getRisk(Number(i.current_stock), i.par_level, riskTh).level;
           if (risk === "RED") red++;
           else if (risk === "YELLOW") yellow++;
           else if (risk === "GREEN") green++;
@@ -84,6 +95,7 @@ function SingleReport({ restaurantId }: { restaurantId: string }) {
       }
     } else {
       setKpis({ value: 0, red: 0, yellow: 0, green: 0, sessions: 0 });
+      setLastApprovedAt(null);
     }
 
     // Trend: last 8 approved sessions
@@ -136,6 +148,11 @@ function SingleReport({ restaurantId }: { restaurantId: string }) {
 
   return (
     <div className="space-y-5">
+      {lastApprovedAt && (
+        <p className="text-[11px] text-muted-foreground leading-snug px-0.5">
+          {STOCK_TRUTH_MESSAGE}
+        </p>
+      )}
       {/* KPI cards */}
       <div className="grid gap-3 sm:grid-cols-4">
         <Card className="border-primary/15">
@@ -235,6 +252,13 @@ function SingleReport({ restaurantId }: { restaurantId: string }) {
 
 // ─── Restaurant data loader for multi-restaurant reports ─────────────────────
 async function loadRestaurantMetrics(rid: string, rname: string, rrole: string) {
+  const { data: riskSettingsRow } = await supabase
+    .from("smart_order_settings")
+    .select("red_threshold, yellow_threshold")
+    .eq("restaurant_id", rid)
+    .maybeSingle();
+  const riskTh = riskThresholdsFromSettings(riskSettingsRow);
+
   // Latest approved session
   const { data: sessions } = await supabase
     .from("inventory_sessions")
@@ -255,7 +279,7 @@ async function loadRestaurantMetrics(rid: string, rname: string, rrole: string) 
       .eq("session_id", sessions[0].id);
 
     (items || []).forEach(i => {
-      const risk = getRisk(Number(i.current_stock), i.par_level).level;
+      const risk = getRisk(Number(i.current_stock), i.par_level, riskTh).level;
       if (risk === "RED") red++;
       else if (risk === "YELLOW") yellow++;
       else if (risk === "GREEN") green++;

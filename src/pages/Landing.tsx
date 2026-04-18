@@ -1,10 +1,10 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  ChefHat, BarChart3, ClipboardList, Package, ArrowRight, Shield, Zap,
+  ChefHat, BarChart3, ClipboardList, ArrowRight,
   CheckCircle2, Upload, ListChecks, ShoppingCart, AlertTriangle, Brain,
   FileDown, CalendarClock, Users, TrendingUp, Building2, Rocket, Award,
-  MapPin, Eye, Layers
+  MapPin, Eye
 } from "lucide-react";
 import { motion } from "framer-motion";
 

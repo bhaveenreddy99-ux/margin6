@@ -1,5 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useMemo, useState } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,18 +6,40 @@ import {
   Package, AlertTriangle, TrendingUp, TrendingDown, ShoppingCart,
   Building2, Bell, DollarSign, BarChart3, Sparkles,
   ClipboardCheck, Clock, CheckCircle2, Zap, ArrowRight,
-  CalendarDays, Activity, Receipt, Trash2
+  CalendarDays, Activity, Receipt, Trash2, Truck,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { format, differenceInDays, startOfDay } from "date-fns";
-import { getRisk, computeOrderQty } from "@/lib/inventory-utils";
-import { computeUsageAnalytics, computePARRecommendations, type ComputedUsageItem, type PARRecommendation } from "@/lib/usage-analytics";
-import { resolvePurchaseHistoryBusinessDate } from "@/lib/purchase-history-source";
-import { fetchInvoiceDocumentIdsForRestaurant } from "@/lib/procurement-dedupe";
+import {
+  format,
+  differenceInDays,
+} from "date-fns";
+import type { ComputedUsageItem, PARRecommendation } from "@/lib/usage-analytics";
+import {
+  buildDashboardDisplayState,
+  buildPortfolioSummary,
+  buildProfitIntelligenceActions,
+  dashboardSpendPeriodLabel,
+  formatInventoryQty,
+  sortPortfolioRestaurants,
+  spendPeriodPlainName,
+  spendPeriodSubtitle,
+  summarizeWasteSnapshot,
+} from "@/domain/dashboard/dashboardSelectors";
+import type {
+  DashboardTimeFilter,
+  PortfolioDashboardTotals,
+  PortfolioRestaurantRow,
+  ProfitIntelligenceAction,
+  TopReorderItem,
+  WasteLogSnapshotRow,
+} from "@/domain/dashboard/dashboardTypes";
+import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
+import { useDashboardData, usePortfolioDashboardData } from "@/hooks/useDashboardData";
 
 // ─── Today's Briefing ───
 function TodaysBriefing({
@@ -29,8 +50,8 @@ function TodaysBriefing({
   pendingInvoices,
   daysSinceLastCount,
 }: {
-  timeFilter: string;
-  setTimeFilter: (v: string) => void;
+  timeFilter: DashboardTimeFilter;
+  setTimeFilter: (value: DashboardTimeFilter) => void;
   onStartInventory: () => void;
   stockStatus: { red: number; yellow: number; green: number };
   pendingInvoices: number;
@@ -52,9 +73,14 @@ function TodaysBriefing({
           {format(new Date(), "EEEE, MMM d")}
         </p>
         <p className="text-sm font-semibold text-foreground mt-0.5">{briefing}</p>
+        {daysSinceLastCount !== null && (
+          <p className="text-[10px] text-amber-900/65 dark:text-amber-100/45 mt-1.5 max-w-xl leading-relaxed">
+            {STOCK_TRUTH_MESSAGE}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <Select value={timeFilter} onValueChange={setTimeFilter}>
+        <Select value={timeFilter} onValueChange={(value) => setTimeFilter(value as DashboardTimeFilter)}>
           <SelectTrigger className="w-[150px] h-9 text-xs font-medium bg-background">
             <CalendarDays className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
             <SelectValue />
@@ -86,7 +112,7 @@ function KpiCard({
   changeLabel,
   accent,
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
   value: string;
   change?: number;
@@ -103,9 +129,9 @@ function KpiCard({
 
   return (
     <Card className={`${a.border} hover:shadow-md transition-all duration-200`}>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${a.bg}`}>
+      <CardContent className="p-5 flex flex-col h-full min-h-[132px]">
+        <div className="flex items-start justify-between gap-2">
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${a.bg}`}>
             <Icon className={`h-5 w-5 ${a.text}`} />
           </div>
           {change !== undefined && (
@@ -115,12 +141,10 @@ function KpiCard({
             </div>
           )}
         </div>
-        <div className="mt-3">
-          <p className="text-2xl font-bold tracking-tight font-display">{value}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-        </div>
+        <p className="text-xs font-medium text-muted-foreground mt-3 leading-snug">{label}</p>
+        <p className="text-2xl sm:text-3xl font-bold tracking-tight font-display tabular-nums mt-1">{value}</p>
         {changeLabel && (
-          <p className="text-[11px] text-muted-foreground/70 mt-1">{changeLabel}</p>
+          <p className="text-xs text-muted-foreground/85 mt-2 leading-snug">{changeLabel}</p>
         )}
       </CardContent>
     </Card>
@@ -135,6 +159,7 @@ function ActionCenter({
   recommendationsCount,
   todayWasteCount,
   deliveryIssueCount,
+  profitIntelligenceActions,
   navigate,
 }: {
   criticalCount: number;
@@ -143,12 +168,22 @@ function ActionCenter({
   recommendationsCount: number;
   todayWasteCount: number;
   deliveryIssueCount: number;
+  profitIntelligenceActions?: ProfitIntelligenceAction[];
   navigate: (path: string) => void;
 }) {
+  const intelShown = profitIntelligenceActions ?? [];
+
+  const dotClass = (t: ProfitIntelligenceAction["type"]) =>
+    t === "CRITICAL"
+      ? "bg-destructive"
+      : t === "WARNING"
+        ? "bg-warning"
+        : "bg-primary";
+
   const items = [
     {
       icon: AlertTriangle,
-      label: `${criticalCount} Critical Items Below PAR`,
+      label: `${criticalCount} item${criticalCount !== 1 ? "s" : ""} below PAR — open Smart Order`,
       color: "text-destructive",
       bg: "bg-destructive/6",
       path: "/app/smart-order",
@@ -156,7 +191,7 @@ function ActionCenter({
     },
     {
       icon: Clock,
-      label: `${pendingApprovals} Pending Invoice${pendingApprovals !== 1 ? "s" : ""}`,
+      label: `${pendingApprovals} invoice${pendingApprovals !== 1 ? "s" : ""} waiting to receive`,
       color: "text-primary",
       bg: "bg-primary/6",
       path: "/app/invoices",
@@ -164,7 +199,7 @@ function ActionCenter({
     },
     {
       icon: CalendarDays,
-      label: "No count in 7+ days — time to count",
+      label: "It’s been 7+ days since your last count",
       color: "text-warning",
       bg: "bg-warning/6",
       path: "/app/inventory/enter",
@@ -172,7 +207,7 @@ function ActionCenter({
     },
     {
       icon: TrendingUp,
-      label: `${recommendationsCount} PAR adjustment${recommendationsCount !== 1 ? "s" : ""} suggested`,
+      label: `${recommendationsCount} PAR suggestion${recommendationsCount !== 1 ? "s" : ""} ready to review`,
       color: "text-primary",
       bg: "bg-primary/6",
       path: "/app/par/suggestions",
@@ -180,15 +215,15 @@ function ActionCenter({
     },
     {
       icon: Trash2,
-      label: "No waste logged today — remind staff",
+      label: "No waste logged today — remind your team",
       color: "text-muted-foreground",
       bg: "bg-muted/30",
       path: "/app/waste-log",
       show: daysSinceLastCount !== null && daysSinceLastCount <= 1 && todayWasteCount === 0,
     },
     {
-      icon: AlertTriangle,
-      label: `${deliveryIssueCount} order${deliveryIssueCount !== 1 ? 's' : ''} with delivery issues`,
+      icon: Truck,
+      label: `${deliveryIssueCount} delivery issue${deliveryIssueCount !== 1 ? "s" : ""} to review`,
       color: "text-destructive",
       bg: "bg-destructive/6",
       path: "/app/invoices",
@@ -196,27 +231,62 @@ function ActionCenter({
     },
   ].filter((i) => i.show);
 
+  const totalShown = intelShown.length + items.length;
+
   return (
-    <Card className="hover:shadow-md transition-all duration-200">
-      <div className="flex items-center gap-2 p-5 pb-3">
+    <Card className="hover:shadow-md transition-all duration-200 border-border/80">
+      <div className="flex items-center gap-2 p-5 pb-2">
         <Bell className="h-4 w-4 text-warning" />
-        <h3 className="text-sm font-bold tracking-tight">Needs Attention</h3>
-        {items.length > 0 && (
-          <Badge variant="secondary" className="text-[10px] ml-1 h-5">{items.length}</Badge>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold tracking-tight">What to do next</h3>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Highest-priority items first</p>
+        </div>
+        {totalShown > 0 && (
+          <Badge variant="secondary" className="text-[10px] shrink-0 h-5">{totalShown}</Badge>
         )}
       </div>
       <CardContent className="pt-0 pb-4 px-5">
-        {items.length === 0 ? (
+        {totalShown === 0 ? (
           <div className="flex flex-col items-center py-8 text-center">
             <CheckCircle2 className="h-10 w-10 text-success/30 mb-3" />
-            <p className="text-sm font-medium text-muted-foreground">All clear</p>
-            <p className="text-xs text-muted-foreground/60 mt-0.5">No actions needed right now</p>
+            <p className="text-sm font-medium text-muted-foreground">You’re in good shape</p>
+            <p className="text-xs text-muted-foreground/60 mt-0.5">Nothing urgent right now</p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-3">
+            {intelShown.length > 0 && (
+              <div className="space-y-2">
+                {intelShown.map((a, i) => (
+                  <div
+                    key={`intel-${i}`}
+                    className={`flex items-start gap-3 py-2.5 px-3 rounded-lg border text-sm leading-snug ${
+                      a.type === "CRITICAL"
+                        ? "bg-destructive/[0.06] text-foreground border-destructive/15"
+                        : a.type === "WARNING"
+                          ? "bg-warning/[0.06] text-foreground border-warning/20"
+                          : "bg-primary/[0.04] text-foreground border-primary/15"
+                    }`}
+                  >
+                    <span
+                      className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClass(a.type)}`}
+                      aria-hidden
+                    />
+                    <span className="font-medium flex-1">{a.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {intelShown.length > 0 && items.length > 0 && (
+              <div className="border-t border-border/60 pt-3">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-0.5">
+                  Quick links
+                </p>
+              </div>
+            )}
             {items.map((item, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => navigate(item.path)}
                 className="w-full flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/40 transition-colors text-left group"
               >
@@ -224,7 +294,7 @@ function ActionCenter({
                   <item.icon className={`h-4 w-4 ${item.color}`} />
                 </div>
                 <span className="text-sm font-medium flex-1">{item.label}</span>
-                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-foreground transition-colors shrink-0" />
               </button>
             ))}
           </div>
@@ -241,12 +311,14 @@ function SmartOrderPreview({
   yellowCount,
   reorderValue,
   navigate,
+  lastApprovedAt,
 }: {
-  topReorder: any[];
+  topReorder: TopReorderItem[];
   redCount: number;
   yellowCount: number;
   reorderValue: number;
   navigate: (path: string) => void;
+  lastApprovedAt: Date | null;
 }) {
   const riskBadge = (ratio: number) => {
     if (ratio < 0.5) return <Badge variant="destructive" className="text-[10px] font-medium w-12 justify-center">LOW</Badge>;
@@ -258,28 +330,40 @@ function SmartOrderPreview({
 
   return (
     <Card className="hover:shadow-md transition-all duration-200">
-      <div className="flex items-center justify-between p-5 pb-3">
+      <div className="flex items-center justify-between p-5 pb-3 gap-3">
         <div className="flex-1 min-w-0">
           {hasItems ? (
-            <div className="flex items-center gap-3 flex-wrap">
-              <div>
-                <p className="text-sm font-bold tracking-tight">
-                  Order Needed:
-                  {redCount > 0 && <span className="text-destructive ml-1">{redCount} Critical</span>}
-                  {redCount > 0 && yellowCount > 0 && <span className="text-muted-foreground">, </span>}
-                  {yellowCount > 0 && <span className="text-warning">{yellowCount} Low</span>}
-                </p>
+            <div className="flex flex-col gap-0.5">
+              <h3 className="text-sm font-bold tracking-tight">Smart Order</h3>
+              <p className="text-[11px] text-muted-foreground">Top items to reorder today</p>
+              {lastApprovedAt != null && (
+                <p className="text-[10px] text-muted-foreground/75 mt-1">{STOCK_TRUTH_MESSAGE}</p>
+              )}
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                {redCount > 0 && <span className="text-destructive font-medium">{redCount} critical</span>}
+                {redCount > 0 && yellowCount > 0 && <span className="text-muted-foreground"> · </span>}
+                {yellowCount > 0 && <span className="text-warning font-medium">{yellowCount} low</span>}
                 {reorderValue > 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Est. reorder value: <span className="font-semibold text-foreground font-mono">${reorderValue.toFixed(0)}</span>
-                  </p>
+                  <>
+                    <span className="text-muted-foreground"> · </span>
+                    <span className="text-foreground font-semibold tabular-nums">
+                      ${reorderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                    <span className="text-muted-foreground"> est.</span>
+                  </>
                 )}
-              </div>
+              </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary shrink-0" />
-              <h3 className="text-sm font-bold tracking-tight">Smart Order Suggestions</h3>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                <h3 className="text-sm font-bold tracking-tight">Smart Order</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Top items to reorder today</p>
+              {lastApprovedAt != null && (
+                <p className="text-[10px] text-muted-foreground/75 mt-1">{STOCK_TRUTH_MESSAGE}</p>
+              )}
             </div>
           )}
         </div>
@@ -317,19 +401,25 @@ function SmartOrderPreview({
               <TableHeader>
                 <TableRow className="bg-muted/20 hover:bg-muted/20">
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Item</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right">On Hand</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right">On hand (count)</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right">PAR</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right">Order Qty</TableHead>
                   <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center">Risk</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {topReorder.slice(0, 5).map((item, i) => (
+                {topReorder.slice(0, 8).map((item, i) => (
                   <TableRow key={i} className="hover:bg-muted/20">
                     <TableCell className="text-sm font-medium">{item.item_name}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{item.current_stock}</TableCell>
-                    <TableCell className="text-sm text-right font-mono text-muted-foreground">{item.par_level}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-semibold">{item.suggestedOrder}</TableCell>
+                    <TableCell className="text-sm text-right font-mono tabular-nums">
+                      {formatInventoryQty(Number(item.current_stock ?? 0))}
+                    </TableCell>
+                    <TableCell className="text-sm text-right font-mono text-muted-foreground tabular-nums">
+                      {formatInventoryQty(Number(item.par_level ?? 0))}
+                    </TableCell>
+                    <TableCell className="text-sm text-right font-mono font-semibold tabular-nums">
+                      {formatInventoryQty(item.suggestedOrder)}
+                    </TableCell>
                     <TableCell className="text-center">{riskBadge(item.ratio)}</TableCell>
                   </TableRow>
                 ))}
@@ -343,9 +433,8 @@ function SmartOrderPreview({
 }
 
 // ─── Today's Waste Snapshot ───
-function WasteSnapshot({ entries, navigate }: { entries: any[]; navigate: (p: string) => void }) {
-  const totalQty = entries.reduce((sum, e) => sum + Number(e.quantity), 0);
-  const lastThree = entries.slice(0, 3);
+function WasteSnapshot({ entries, navigate }: { entries: WasteLogSnapshotRow[]; navigate: (p: string) => void }) {
+  const { totalQty, recentEntries } = summarizeWasteSnapshot(entries);
 
   return (
     <Card className="hover:shadow-md transition-all duration-200">
@@ -390,7 +479,7 @@ function WasteSnapshot({ entries, navigate }: { entries: any[]; navigate: (p: st
             </div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2">Recent Entries</p>
             <div className="space-y-0.5">
-              {lastThree.map((entry, i) => (
+              {recentEntries.map((entry, i) => (
                 <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/30 transition-colors">
                   <span className="text-[10px] text-muted-foreground font-mono shrink-0 w-14">
                     {format(new Date(entry.logged_at), "h:mm a")}
@@ -398,7 +487,7 @@ function WasteSnapshot({ entries, navigate }: { entries: any[]; navigate: (p: st
                   <span className="text-sm font-medium flex-1 truncate">{entry.item_name}</span>
                   <span className="text-xs font-mono text-muted-foreground shrink-0">×{entry.quantity}</span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
-                    {(entry.reason as string).replace(/_/g, " ")}
+                    {entry.reason.replace(/_/g, " ")}
                   </span>
                 </div>
               ))}
@@ -497,7 +586,9 @@ function AnalyticsSection({ highUsage, trendData }: { highUsage: ComputedUsageIt
                   </div>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground/50 mt-3">Inventory value per approved session</p>
+              <p className="text-[11px] text-muted-foreground/50 mt-3">
+                {STOCK_TRUTH_MESSAGE}
+              </p>
             </div>
           )}
         </CardContent>
@@ -507,111 +598,16 @@ function AnalyticsSection({ highUsage, trendData }: { highUsage: ComputedUsageIt
 }
 
 // ─── Spend Overview ───
-function SpendOverview({ restaurantId, locationId, navigate }: { restaurantId: string; locationId?: string; navigate: (p: string) => void }) {
-  const [spendData, setSpendData] = useState<{ thisWeek: number; thisMonth: number; vendors: { name: string; total: number }[] }>({
-    thisWeek: 0, thisMonth: 0, vendors: [],
-  });
-
-  useEffect(() => {
-    const fetchSpend = async () => {
-      const now = new Date();
-      const weekStart = new Date(now.getTime() - 7 * 86400000);
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-      const invoiceDocIds = await fetchInvoiceDocumentIdsForRestaurant(restaurantId);
-
-      let invSpendQuery = supabase
-        .from("invoices")
-        .select("id, vendor_name, created_at, invoice_date")
-        .eq("restaurant_id", restaurantId)
-        .eq("status", "confirmed");
-
-      if (locationId) {
-        invSpendQuery = invSpendQuery.eq("location_id", locationId);
-      }
-
-      const { data: invoiceSpendRows } = await invSpendQuery;
-      const invoicesInMonth = (invoiceSpendRows ?? []).filter(
-        (r) => resolvePurchaseHistoryBusinessDate(r) >= monthStart,
-      );
-      const invoiceIdsMonth = invoicesInMonth.map((r) => r.id);
-
-      const costByDoc: Record<string, number> = {};
-      if (invoiceIdsMonth.length > 0) {
-        const { data: invLineCosts } = await supabase
-          .from("invoice_items")
-          .select("invoice_id, total_cost")
-          .in("invoice_id", invoiceIdsMonth);
-        (invLineCosts ?? []).forEach((i) => {
-          costByDoc[i.invoice_id] = (costByDoc[i.invoice_id] || 0) + Number(i.total_cost || 0);
-        });
-      }
-
-      let phQuery = supabase
-        .from("purchase_history")
-        .select("id, vendor_name, created_at, invoice_date")
-        .eq("restaurant_id", restaurantId)
-        .in("invoice_status", ["COMPLETE", "POSTED"]);
-
-      if (locationId) {
-        phQuery = phQuery.eq("location_id", locationId);
-      }
-
-      const { data: recentPH } = await phQuery;
-      const filteredPH = (recentPH ?? [])
-        .filter((p) => !invoiceDocIds.has(p.id))
-        .filter((p) => resolvePurchaseHistoryBusinessDate(p) >= monthStart);
-
-      if (filteredPH.length > 0) {
-        const phIds = filteredPH.map((p) => p.id);
-        const { data: phItems } = await supabase
-          .from("purchase_history_items")
-          .select("purchase_history_id, total_cost")
-          .in("purchase_history_id", phIds);
-        (phItems ?? []).forEach((i) => {
-          costByDoc[i.purchase_history_id] =
-            (costByDoc[i.purchase_history_id] || 0) + Number(i.total_cost || 0);
-        });
-      }
-
-      if (!invoicesInMonth.length && !filteredPH.length) {
-        setSpendData({ thisWeek: 0, thisMonth: 0, vendors: [] });
-        return;
-      }
-
-      let thisWeek = 0;
-      let thisMonth = 0;
-      const vendorMap: Record<string, number> = {};
-
-      invoicesInMonth.forEach((p) => {
-        const cost = costByDoc[p.id] || 0;
-        const businessDate = resolvePurchaseHistoryBusinessDate(p);
-        thisMonth += cost;
-        if (businessDate >= weekStart) thisWeek += cost;
-        const vn = p.vendor_name || "Unknown";
-        vendorMap[vn] = (vendorMap[vn] || 0) + cost;
-      });
-
-      filteredPH.forEach((p) => {
-        const cost = costByDoc[p.id] || 0;
-        const businessDate = resolvePurchaseHistoryBusinessDate(p);
-        thisMonth += cost;
-        if (businessDate >= weekStart) thisWeek += cost;
-        const vn = p.vendor_name || "Unknown";
-        vendorMap[vn] = (vendorMap[vn] || 0) + cost;
-      });
-
-      const vendors = Object.entries(vendorMap)
-        .map(([name, total]) => ({ name, total }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 5);
-
-      setSpendData({ thisWeek, thisMonth, vendors });
-    };
-    fetchSpend();
-  }, [restaurantId, locationId]);
-
-  if (spendData.thisMonth === 0) return null;
+function SpendOverview({
+  navigate,
+  timeFilter,
+  spendData,
+}: {
+  navigate: (p: string) => void;
+  timeFilter: DashboardTimeFilter;
+  spendData: { periodSpend: number; vendors: { name: string; total: number }[] } | null;
+}) {
+  if (!spendData || spendData.periodSpend === 0) return null;
 
   return (
     <Card className="hover:shadow-md transition-all duration-200">
@@ -625,15 +621,9 @@ function SpendOverview({ restaurantId, locationId, navigate }: { restaurantId: s
         </Button>
       </div>
       <CardContent className="pt-0 pb-4 px-5">
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="rounded-lg bg-muted/30 p-3">
-            <p className="text-[11px] text-muted-foreground mb-1">This Week</p>
-            <p className="text-lg font-bold font-mono">${spendData.thisWeek.toFixed(0)}</p>
-          </div>
-          <div className="rounded-lg bg-muted/30 p-3">
-            <p className="text-[11px] text-muted-foreground mb-1">This Month</p>
-            <p className="text-lg font-bold font-mono">${spendData.thisMonth.toFixed(0)}</p>
-          </div>
+        <div className="rounded-lg bg-muted/30 p-3 mb-4">
+          <p className="text-[11px] text-muted-foreground mb-1">{dashboardSpendPeriodLabel(timeFilter)}</p>
+          <p className="text-lg font-bold font-mono">${spendData.periodSpend.toFixed(0)}</p>
         </div>
         {spendData.vendors.length > 0 && (
           <div>
@@ -709,10 +699,16 @@ function RecommendationsPanel({ recommendations }: { recommendations: PARRecomme
 }
 
 // ─── Multi-Location Section ───
-function MultiLocationView({ restaurants, navigate, setCurrentRestaurant }: { restaurants: any[]; navigate: any; setCurrentRestaurant: any }) {
-  const sorted = useMemo(() => {
-    return [...restaurants].sort((a, b) => b.red - a.red);
-  }, [restaurants]);
+function MultiLocationView({
+  restaurants,
+  navigate,
+  setCurrentRestaurant,
+}: {
+  restaurants: PortfolioRestaurantRow[];
+  navigate: (path: string) => void;
+  setCurrentRestaurant: (r: { id: string; name: string; role: string } | null) => void;
+}) {
+  const sorted = useMemo(() => sortPortfolioRestaurants(restaurants), [restaurants]);
 
   const maxValue = Math.max(...restaurants.map((r) => r.red + r.yellow + r.green), 1);
 
@@ -829,28 +825,14 @@ function MultiLocationView({ restaurants, navigate, setCurrentRestaurant }: { re
 }
 
 // ─── Portfolio Dashboard (All Restaurants) ───
-function PortfolioDashboard({ setCurrentRestaurant }: { setCurrentRestaurant: (r: any) => void }) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [timeFilter, setTimeFilter] = useState("this_week");
+function PortfolioDashboard({
+  setCurrentRestaurant,
+}: {
+  setCurrentRestaurant: (r: { id: string; name: string; role: string } | null) => void;
+}) {
+  const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const fetchPortfolio = async () => {
-      setLoading(true);
-      const { data: session } = await supabase.auth.getSession();
-      const token = session?.session?.access_token;
-      if (!token) { setLoading(false); return; }
-      try {
-        const res = await supabase.functions.invoke("portfolio-dashboard");
-        if (res.data) setData(res.data);
-      } catch (e) {
-        console.error("Portfolio fetch error:", e);
-      }
-      setLoading(false);
-    };
-    fetchPortfolio();
-  }, []);
+  const { data, loading } = usePortfolioDashboardData(timeFilter);
 
   if (loading) {
     return (
@@ -862,10 +844,9 @@ function PortfolioDashboard({ setCurrentRestaurant }: { setCurrentRestaurant: (r
     );
   }
 
-  const totals = data?.totals || { red: 0, yellow: 0, green: 0 };
-  const restaurants = data?.restaurants || [];
-  const totalItems = totals.red + totals.yellow + totals.green;
-  const portfolioOverstockValue = totals.overstockValue ?? totals.wasteExposure ?? 0;
+  const totals: PortfolioDashboardTotals = data?.totals ?? { red: 0, yellow: 0, green: 0 };
+  const restaurants: PortfolioRestaurantRow[] = data?.restaurants ?? [];
+  const { totalItems, portfolioOverstockValue } = buildPortfolioSummary(totals);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -896,7 +877,13 @@ function PortfolioDashboard({ setCurrentRestaurant }: { setCurrentRestaurant: (r
           accent="warning"
           changeLabel="Estimated value above PAR"
         />
-        <KpiCard icon={DollarSign} label="Spend This Month" value={totals.spendMonth > 0 ? `$${totals.spendMonth.toFixed(0)}` : "$0"} accent="success" changeLabel="From completed invoices" />
+        <KpiCard
+          icon={DollarSign}
+          label={dashboardSpendPeriodLabel(timeFilter)}
+          value={totals.spendMonth > 0 ? `$${totals.spendMonth.toFixed(0)}` : "$0"}
+          accent="success"
+          changeLabel="From completed invoices"
+        />
       </div>
 
       {/* Action Center + AI Insights */}
@@ -923,209 +910,96 @@ function PortfolioDashboard({ setCurrentRestaurant }: { setCurrentRestaurant: (r
 function SingleDashboard() {
   const { currentRestaurant, currentLocation } = useRestaurant();
   const navigate = useNavigate();
-  const [stockStatus, setStockStatus] = useState({ red: 0, yellow: 0, green: 0 });
-  const [topReorder, setTopReorder] = useState<any[]>([]);
-  const [highUsage, setHighUsage] = useState<ComputedUsageItem[]>([]);
-  const [recommendations, setRecommendations] = useState<PARRecommendation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [timeFilter, setTimeFilter] = useState("this_week");
-  const [inventoryValue, setInventoryValue] = useState(0);
-  const [missingCostCount, setMissingCostCount] = useState(0);
-  const [trendData, setTrendData] = useState<{ label: string; value: number }[]>([]);
-  const [pendingInvoices, setPendingInvoices] = useState(0);
-  const [overstockValue, setOverstockValue] = useState(0);
-  const [lastSessionDate, setLastSessionDate] = useState<Date | null>(null);
-  const [lastSessionName, setLastSessionName] = useState<string | null>(null);
-  const [todayWasteEntries, setTodayWasteEntries] = useState<any[]>([]);
-  const [todayWasteCount, setTodayWasteCount] = useState(0);
-  const [deliveryIssueCount, setDeliveryIssueCount] = useState(0);
+  const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
+  const {
+    stockStatus,
+    topReorder,
+    reorderSummary,
+    highUsage,
+    recommendations,
+    loading,
+    inventoryValue,
+    missingCostCount,
+    trendData,
+    pendingInvoices,
+    overstockValue,
+    lastSessionDate,
+    lastSessionName,
+    todayWasteEntries,
+    spendOverviewData,
+    missingParCount,
+    periodSpend,
+    deliveryIssuesCount,
+    priceIncreaseImpact,
+    recordedWasteValue,
+    recordedWasteCount,
+    wasteItemsMissingCost,
+  } = useDashboardData({
+    currentRestaurantId: currentRestaurant?.id,
+    currentLocationId: currentLocation?.id,
+    timeFilter,
+  });
 
   const daysSinceLastCount = lastSessionDate ? differenceInDays(new Date(), lastSessionDate) : null;
 
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    (async () => {
-      const invoiceDocIds = await fetchInvoiceDocumentIdsForRestaurant(currentRestaurant.id);
-      const [{ count: invPending }, { data: phRows }] = await Promise.all([
-        supabase
-          .from("invoices")
-          .select("id", { count: "exact", head: true })
-          .eq("restaurant_id", currentRestaurant.id)
-          .in("status", ["draft", "review", "ready_to_receive"]),
-        supabase
-          .from("purchase_history")
-          .select("id")
-          .eq("restaurant_id", currentRestaurant.id)
-          .in("invoice_status", ["DRAFT", "RECEIVED"]),
-      ]);
-      const phPending = (phRows ?? []).filter((p) => !invoiceDocIds.has(p.id)).length;
-      setPendingInvoices((invPending ?? 0) + phPending);
-    })();
-  }, [currentRestaurant]);
+  const profitIntelligenceActions = useMemo((): ProfitIntelligenceAction[] => {
+    return buildProfitIntelligenceActions({
+      reorderSummary,
+      deliveryIssuesCount,
+      priceIncreaseImpact,
+      missingParCount,
+    });
+  }, [reorderSummary, deliveryIssuesCount, priceIncreaseImpact, missingParCount]);
 
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    supabase
-      .rpc('get_delivery_issue_pos', { p_restaurant_id: currentRestaurant.id })
-      .then(({ data }) => { if (data) setDeliveryIssueCount(data.length); });
-  }, [currentRestaurant]);
-
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    const fetchData = async () => {
-      setLoading(true);
-      const rid = currentRestaurant.id;
-      const locId = currentLocation?.id;
-
-      // --- Latest approved session + items ---
-      let sessionQuery = supabase
-        .from("inventory_sessions")
-        .select("id, approved_at, name")
-        .eq("restaurant_id", rid)
-        .eq("status", "APPROVED")
-        .order("approved_at", { ascending: false })
-        .limit(1);
-
-      if (locId) {
-        sessionQuery = sessionQuery.eq("location_id", locId);
-      }
-
-      const { data: sessions } = await sessionQuery;
-
-      if (sessions && sessions.length > 0) {
-        if (sessions[0].approved_at) {
-          setLastSessionDate(new Date(sessions[0].approved_at));
-        }
-        if (sessions[0].name) {
-          setLastSessionName(sessions[0].name);
-        }
-
-        const { data: items } = await supabase
-          .from("inventory_session_items")
-          .select("*")
-          .eq("session_id", sessions[0].id);
-
-        if (items) {
-          let r = 0, y = 0, g = 0;
-          let waste = 0;
-          const reorderList = items.map(i => {
-            const stock = Number(i.current_stock ?? 0);
-            const par = Number(i.par_level ?? 0);
-            const risk = getRisk(stock, par);
-            if (risk.level === "RED") r++;
-            else if (risk.level === "YELLOW") y++;
-            else if (risk.level === "GREEN") g++;
-            if (par > 0 && stock > par && i.unit_cost) {
-              waste += (stock - par) * Number(i.unit_cost);
-            }
-            return { ...i, suggestedOrder: computeOrderQty(stock, par, i.unit, i.pack_size), ratio: par > 0 ? stock / par : 1 };
-          });
-          setStockStatus({ red: r, yellow: y, green: g });
-          setOverstockValue(waste);
-          setTopReorder(reorderList.sort((a, b) => b.suggestedOrder - a.suggestedOrder).slice(0, 8));
-
-          const invVal = items.reduce((sum, i) => sum + Number(i.current_stock ?? 0) * (i.unit_cost || 0), 0);
-          setInventoryValue(invVal);
-          setMissingCostCount(items.filter(i => !i.unit_cost).length);
-        }
-      } else {
-        setStockStatus({ red: 0, yellow: 0, green: 0 });
-        setTopReorder([]);
-        setInventoryValue(0);
-        setMissingCostCount(0);
-        setOverstockValue(0);
-        setLastSessionDate(null);
-        setLastSessionName(null);
-      }
-
-      // --- Inventory Value Trend: last 8 approved sessions ---
-      let trendQuery = supabase
-        .from("inventory_sessions")
-        .select("id, approved_at")
-        .eq("restaurant_id", rid)
-        .eq("status", "APPROVED")
-        .order("approved_at", { ascending: false })
-        .limit(8);
-
-      if (locId) {
-        trendQuery = trendQuery.eq("location_id", locId);
-      }
-
-      const { data: trendSessions } = await trendQuery;
-
-      if (trendSessions && trendSessions.length > 0) {
-        const trendResults: { label: string; value: number }[] = [];
-        for (const s of trendSessions) {
-          const { data: sItems } = await supabase
-            .from("inventory_session_items")
-            .select("current_stock, unit_cost")
-            .eq("session_id", s.id);
-          const val = (sItems || []).reduce((sum, i) => sum + i.current_stock * (i.unit_cost || 0), 0);
-          trendResults.push({
-            label: s.approved_at ? format(new Date(s.approved_at), "MMM d") : "?",
-            value: val,
-          });
-        }
-        setTrendData(trendResults.reverse());
-      } else {
-        setTrendData([]);
-      }
-
-      // --- Computed Usage Analytics ---
-      const computedUsage = await computeUsageAnalytics(rid, locId);
-      setHighUsage(computedUsage);
-
-      // --- PAR Recommendations ---
-      const recs = await computePARRecommendations(rid, locId);
-      setRecommendations(recs);
-
-      // --- Today's waste entries ---
-      try {
-        const todayStart = startOfDay(new Date());
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: wasteToday } = await (supabase as any)
-          .from("waste_log")
-          .select("item_name, quantity, reason, logged_at")
-          .eq("restaurant_id", rid)
-          .gte("logged_at", todayStart.toISOString())
-          .order("logged_at", { ascending: false })
-          .limit(20);
-        setTodayWasteEntries((wasteToday as any[]) || []);
-        setTodayWasteCount(((wasteToday as any[]) || []).length);
-      } catch {
-        setTodayWasteEntries([]);
-        setTodayWasteCount(0);
-      }
-
-      setLoading(false);
-    };
-    fetchData();
-  }, [currentRestaurant, currentLocation]);
+  const {
+    reorderValue,
+    criticalLowCount,
+    unitsToReorder,
+    inventoryValueLabel,
+    lastCountAccent,
+    lastCountLabel,
+    lastCountDescription,
+  } = useMemo(
+    () =>
+      buildDashboardDisplayState({
+        reorderSummary,
+        daysSinceLastCount,
+        lastSessionDate,
+        lastSessionName,
+        missingCostCount,
+      }),
+    [reorderSummary, daysSinceLastCount, lastSessionDate, lastSessionName, missingCostCount],
+  );
 
   if (loading) {
     return (
-      <div className="space-y-5 animate-fade-in">
+      <div className="space-y-6 animate-fade-in">
         <Skeleton className="h-16 rounded-xl" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>
-        <div className="grid gap-5 lg:grid-cols-2">{[1, 2].map(i => <Skeleton key={i} className="h-64 rounded-xl" />)}</div>
+        <Skeleton className="h-5 w-40 rounded-md" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-32 rounded-xl" />
+          ))}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-28 rounded-xl" />
+          ))}
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          {[1, 2].map((i) => (
+            <Skeleton key={i} className="h-72 rounded-xl" />
+          ))}
+        </div>
+        <Skeleton className="h-5 w-32 rounded-md" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-28 rounded-xl" />
+          ))}
+        </div>
       </div>
     );
   }
-
-  const reorderValue = topReorder.reduce((sum, item) => {
-    const cost = item.unit_cost || 0;
-    return sum + Math.round(item.suggestedOrder * 100) / 100 * cost;
-  }, 0);
-
-  const inventoryValueLabel = missingCostCount > 0
-    ? `${missingCostCount} item${missingCostCount !== 1 ? "s" : ""} missing costs`
-    : "From latest approved session";
-
-  const lastCountAccent: "success" | "warning" | "destructive" =
-    daysSinceLastCount === null ? "destructive"
-    : daysSinceLastCount <= 2 ? "success"
-    : daysSinceLastCount <= 5 ? "warning"
-    : "destructive";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1136,6 +1010,11 @@ function SingleDashboard() {
             {currentRestaurant?.name}
             {currentLocation ? ` · ${currentLocation.name}` : ""}
           </p>
+          {lastSessionDate && (
+            <p className="text-xs text-muted-foreground/90 mt-1.5 max-w-2xl leading-snug">
+              {STOCK_TRUTH_MESSAGE}
+            </p>
+          )}
         </div>
       </div>
 
@@ -1149,90 +1028,218 @@ function SingleDashboard() {
         daysSinceLastCount={daysSinceLastCount}
       />
 
-      {/* Executive KPI Cards — 5 cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <KpiCard
-          icon={DollarSign}
-          label="Inventory Value ($)"
-          value={inventoryValue > 0 ? `$${inventoryValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "$0"}
-          accent="primary"
-          changeLabel={inventoryValueLabel}
-        />
-        <KpiCard
-          icon={AlertTriangle}
-          label="At Risk Items"
-          value={`${stockStatus.red + stockStatus.yellow}`}
-          accent="destructive"
-          changeLabel={`${stockStatus.red} critical · ${stockStatus.yellow} low`}
-        />
-        <KpiCard
-          icon={Package}
-          label="Overstock Value"
-          value={overstockValue > 0 ? `$${overstockValue.toFixed(0)}` : "$0"}
-          accent="warning"
-          changeLabel="Estimated value above PAR"
-        />
-        <KpiCard
-          icon={ShoppingCart}
-          label="Smart Order Ready"
-          value={reorderValue > 0 ? `$${reorderValue.toFixed(0)}` : "$0"}
-          accent="success"
-          changeLabel="Suggested reorder value"
-        />
-        <KpiCard
-          icon={CalendarDays}
-          label="Last Count"
-          value={
-            daysSinceLastCount === null
-              ? "Never"
-              : daysSinceLastCount === 0
-              ? "Today"
-              : `${daysSinceLastCount}d ago`
-          }
-          accent={lastCountAccent}
-          changeLabel={lastSessionName ?? "No counts yet"}
-        />
+      {/* Section 1 — Today's situation */}
+      <section className="space-y-4" aria-labelledby="dash-today-heading">
+        <h2 id="dash-today-heading" className="text-sm font-semibold tracking-tight text-foreground">
+          Today&apos;s situation
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard
+            icon={ShoppingCart}
+            label="Reorder needed today"
+            value={
+              reorderValue > 0
+                ? `$${reorderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="success"
+            changeLabel={
+              reorderSummary?.missingCostCount
+                ? `excl. ${reorderSummary.missingCostCount} items — no cost data`
+                : "Estimated to reach PAR levels"
+            }
+          />
+          <KpiCard
+            icon={AlertTriangle}
+            label="Critical low stock items"
+            value={String(criticalLowCount)}
+            accent="destructive"
+            changeLabel="May stock out soon"
+          />
+          <KpiCard
+            icon={Package}
+            label="Overstock at risk"
+            value={
+              overstockValue > 0
+                ? `$${overstockValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="warning"
+            changeLabel={
+              reorderSummary?.missingCostCount
+                ? `excl. ${reorderSummary.missingCostCount} items — no cost data`
+                : "Inventory above PAR"
+            }
+          />
+          <KpiCard
+            icon={Receipt}
+            label={dashboardSpendPeriodLabel(timeFilter)}
+            value={
+              periodSpend > 0
+                ? `$${periodSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="primary"
+            changeLabel={spendPeriodSubtitle(timeFilter)}
+          />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <KpiCard
+            icon={DollarSign}
+            label="Inventory value"
+            value={
+              inventoryValue > 0
+                ? `$${inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="primary"
+            changeLabel={inventoryValueLabel}
+          />
+          <KpiCard
+            icon={ClipboardCheck}
+            label="Units to reorder"
+            value={unitsToReorder > 0 ? formatInventoryQty(unitsToReorder) : "0"}
+            accent="primary"
+            changeLabel={`${stockStatus.yellow} low-stock items (not critical)`}
+          />
+          <KpiCard
+            icon={CalendarDays}
+            label="Last count"
+            value={lastCountLabel}
+            accent={lastCountAccent}
+            changeLabel={lastCountDescription}
+          />
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ActionCenter
+            criticalCount={stockStatus.red}
+            pendingApprovals={pendingInvoices}
+            daysSinceLastCount={daysSinceLastCount}
+            recommendationsCount={recommendations.length}
+            todayWasteCount={todayWasteEntries.length}
+            deliveryIssueCount={deliveryIssuesCount}
+            profitIntelligenceActions={profitIntelligenceActions}
+            navigate={navigate}
+          />
+          <SmartOrderPreview
+            topReorder={topReorder}
+            redCount={stockStatus.red}
+            yellowCount={stockStatus.yellow}
+            reorderValue={reorderValue}
+            navigate={navigate}
+            lastApprovedAt={lastSessionDate}
+          />
+        </div>
+      </section>
+
+      {/* Section 2 — This period */}
+      <section className="mt-8 space-y-4" aria-labelledby="dash-period-heading">
+        <h2 id="dash-period-heading" className="text-sm font-semibold tracking-tight text-foreground">
+          This period
+        </h2>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Same window as the spend card: {spendPeriodPlainName(timeFilter)}.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <KpiCard
+            icon={Receipt}
+            label={dashboardSpendPeriodLabel(timeFilter)}
+            value={
+              periodSpend > 0
+                ? `$${periodSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="success"
+            changeLabel={spendPeriodSubtitle(timeFilter)}
+          />
+          <KpiCard
+            icon={Truck}
+            label="Delivery issues"
+            value={String(deliveryIssuesCount)}
+            accent={deliveryIssuesCount > 0 ? "destructive" : "primary"}
+            changeLabel="Missing items, shorts, or reported problems"
+          />
+          <KpiCard
+            icon={TrendingUp}
+            label="Price increase impact"
+            value={
+              priceIncreaseImpact > 0
+                ? `$${priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="warning"
+            changeLabel="Versus what you ordered, when both costs are known"
+          />
+        </div>
+      </section>
+
+      {/* Section 3 — Loss & waste */}
+      <section className="mt-8 space-y-4" aria-labelledby="dash-loss-heading">
+        <h2 id="dash-loss-heading" className="text-sm font-semibold tracking-tight text-foreground">
+          Loss &amp; waste
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <KpiCard
+            icon={Trash2}
+            label="Recorded waste"
+            value={
+              recordedWasteValue > 0
+                ? `$${recordedWasteValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : recordedWasteCount > 0
+                  ? `${recordedWasteCount} entr${recordedWasteCount !== 1 ? "ies" : "y"}`
+                  : "$0"
+            }
+            accent="warning"
+            changeLabel={
+              recordedWasteCount === 0
+                ? "No waste logged in this period"
+                : wasteItemsMissingCost > 0
+                  ? `excl. ${wasteItemsMissingCost} entr${wasteItemsMissingCost !== 1 ? "ies" : "y"} — no cost data`
+                  : recordedWasteValue > 0
+                    ? "From logged costs when available"
+                    : "Add catalog links on waste entries to estimate dollars"
+            }
+          />
+          <KpiCard
+            icon={AlertTriangle}
+            label="Items missing PAR"
+            value={String(missingParCount)}
+            accent={missingParCount > 0 ? "destructive" : "primary"}
+            changeLabel={STOCK_TRUTH_MESSAGE}
+          />
+          <KpiCard
+            icon={Package}
+            label="Overstock at risk"
+            value={
+              overstockValue > 0
+                ? `$${overstockValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : "$0"
+            }
+            accent="warning"
+            changeLabel="Same as above — dollars tied up above PAR"
+          />
+        </div>
+      </section>
+
+      <div className="mt-10 space-y-8 border-t border-border/60 pt-10">
+        {/* Today's Waste Snapshot */}
+        {currentRestaurant && (
+          <WasteSnapshot entries={todayWasteEntries} navigate={navigate} />
+        )}
+
+        {/* Spend Overview */}
+        {currentRestaurant && (
+          <SpendOverview navigate={navigate} timeFilter={timeFilter} spendData={spendOverviewData} />
+        )}
+
+        {/* Usage & Trends */}
+        <AnalyticsSection highUsage={highUsage} trendData={trendData} />
+
+        {/* AI Insights */}
+        <RecommendationsPanel recommendations={recommendations} />
       </div>
-
-      {/* Action Center + Smart Order */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <ActionCenter
-          criticalCount={stockStatus.red}
-          pendingApprovals={pendingInvoices}
-          daysSinceLastCount={daysSinceLastCount}
-          recommendationsCount={recommendations.length}
-          todayWasteCount={todayWasteCount}
-          deliveryIssueCount={deliveryIssueCount}
-          navigate={navigate}
-        />
-        <SmartOrderPreview
-          topReorder={topReorder}
-          redCount={stockStatus.red}
-          yellowCount={stockStatus.yellow}
-          reorderValue={reorderValue}
-          navigate={navigate}
-        />
-      </div>
-
-      {/* Today's Waste Snapshot */}
-      {currentRestaurant && (
-        <WasteSnapshot entries={todayWasteEntries} navigate={navigate} />
-      )}
-
-      {/* Spend Overview */}
-      {currentRestaurant && (
-        <SpendOverview
-          restaurantId={currentRestaurant.id}
-          locationId={currentLocation?.id}
-          navigate={navigate}
-        />
-      )}
-
-      {/* Usage & Trends */}
-      <AnalyticsSection highUsage={highUsage} trendData={trendData} />
-
-      {/* AI Insights */}
-      <RecommendationsPanel recommendations={recommendations} />
     </div>
   );
 }

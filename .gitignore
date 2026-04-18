@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+playwright/.auth/
+playwright-report/
+test-results/
 
 # Environment variables
 .env

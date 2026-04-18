@@ -4,7 +4,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { CheckCircle, ShoppingCart, ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import { ExportButtons } from "@/components/ExportButtons";
@@ -12,18 +12,9 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
-
-function getRisk(currentStock: number, parLevel: number | null | undefined): { label: string; bgClass: string; textClass: string } {
-  if (parLevel === null || parLevel === undefined || parLevel <= 0) {
-    return { label: "No PAR", bgClass: "bg-muted/60", textClass: "text-muted-foreground" };
-  }
-  const stock = currentStock ?? 0;
-  if (stock <= 0) return { label: "Critical", bgClass: "bg-destructive/10", textClass: "text-destructive" };
-  const ratio = stock / parLevel;
-  if (ratio < 0.5) return { label: "Critical", bgClass: "bg-destructive/10", textClass: "text-destructive" };
-  if (ratio < 1.0) return { label: "Low", bgClass: "bg-warning/10", textClass: "text-warning" };
-  return { label: "OK", bgClass: "bg-success/10", textClass: "text-success" };
-}
+import { buildParGuideLevelMaps, resolveParLevelFromGuideMaps } from "@/domain/inventory/parGuideLevels";
+import { getRisk, computeOrderQty, type RiskThresholds } from "@/lib/inventory-utils";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 
 function formatDateTime(isoString: string) {
   const d = new Date(isoString);
@@ -42,6 +33,10 @@ export default function ApprovedPage() {
   const [loadingSession, setLoadingSession] = useState<string | null>(null);
   const [decliningId, setDecliningId] = useState<string | null>(null);
   const [localSuggestedOrder, setLocalSuggestedOrder] = useState<Record<string, string>>({});
+  const [riskThresholds, setRiskThresholds] = useState<RiskThresholds>({
+    redThresholdPercent: 50,
+    yellowThresholdPercent: 100,
+  });
 
   const isManagerOrOwner = currentRestaurant?.role === "OWNER" || currentRestaurant?.role === "MANAGER";
 
@@ -63,6 +58,12 @@ export default function ApprovedPage() {
       .eq("status", "APPROVED")
       .order("approved_at", { ascending: false })
       .then(({ data }) => { if (data) setSessions(data); });
+    supabase
+      .from("smart_order_settings")
+      .select("red_threshold, yellow_threshold")
+      .eq("restaurant_id", currentRestaurant.id)
+      .maybeSingle()
+      .then(({ data }) => { setRiskThresholds(riskThresholdsFromSettings(data)); });
   }, [currentRestaurant]);
 
   const loadSessionItems = async (session: any) => {
@@ -82,18 +83,24 @@ export default function ApprovedPage() {
         : Promise.resolve({ data: null }),
     ]);
 
-    const parMap: Record<string, number> = {};
+    let parMaps: ReturnType<typeof buildParGuideLevelMaps> | null = null;
     if (guides && guides.length > 0) {
       const { data: parItems } = await supabase
         .from("par_guide_items")
-        .select("item_name, par_level")
+        .select("item_name, par_level, catalog_item_id")
         .eq("par_guide_id", guides[0].id);
-      (parItems || []).forEach(p => { parMap[p.item_name] = Number(p.par_level); });
+      parMaps = buildParGuideLevelMaps(parItems || []);
     }
 
     const enriched = (items || []).map(item => ({
       ...item,
-      approved_par: parMap[item.item_name] !== undefined ? parMap[item.item_name] : (Number(item.par_level) || null),
+      approved_par: parMaps
+        ? resolveParLevelFromGuideMaps(
+            { catalog_item_id: item.catalog_item_id, item_name: item.item_name },
+            parMaps,
+            Number(item.par_level) || 0,
+          )
+        : (Number(item.par_level) || null),
       catalog_item_id: item.catalog_item_id || null,
     }));
 
@@ -208,16 +215,16 @@ export default function ApprovedPage() {
 
                     {/* Item rows */}
                     {isExpanded && items && items.map(item => {
-                      const risk = getRisk(Number(item.current_stock), item.approved_par);
+                      const riskInfo = getRisk(Number(item.current_stock), item.approved_par, riskThresholds);
                       const computedOrder = item.approved_par != null && item.approved_par > 0
-                        ? Math.max(0, item.approved_par - Number(item.current_stock))
+                        ? computeOrderQty(Number(item.current_stock), item.approved_par, item.unit, item.pack_size)
                         : null;
                       const lastOrderDate = item.catalog_item_id ? lastOrderDates[item.catalog_item_id] : null;
                       const lastOrderStr = lastOrderDate ? format(new Date(lastOrderDate), "MM/dd/yy") : null;
                       const localVal = localSuggestedOrder[item.id];
                       const displayOrder = localVal !== undefined ? localVal : (computedOrder !== null ? String(computedOrder % 1 === 0 ? computedOrder : parseFloat(computedOrder.toFixed(2))) : "");
                       return (
-                        <TableRow key={item.id} className={`${risk.bgClass} border-b border-border/30`}>
+                        <TableRow key={item.id} className={`${riskInfo.bgClass} border-b border-border/30`}>
                           <TableCell className="pl-12 py-3">
                             <p className="text-sm font-medium leading-tight">{item.item_name}</p>
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-0 mt-0.5">
@@ -239,8 +246,8 @@ export default function ApprovedPage() {
                             {item.approved_par !== null && item.approved_par !== undefined ? item.approved_par : "—"}
                           </TableCell>
                           <TableCell className="text-center py-3">
-                            <Badge className={`${risk.bgClass} ${risk.textClass} border-0 text-[10px]`}>
-                              {risk.label}
+                            <Badge className={`${riskInfo.bgClass} ${riskInfo.textClass} border-0 text-[10px]`}>
+                              {riskInfo.label}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-center py-3">

@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getRisk } from "../../../src/lib/inventory-utils.ts";
+import { getRisk, computeOrderQty } from "../../../src/lib/inventory-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,6 +45,24 @@ Deno.serve(async (req) => {
 
     const userId = user.id;
 
+    /** Spend aggregation window (client sends ISO strings). Default: month start → now (matches pre–body-filter behavior). */
+    let spendRangeStart = new Date();
+    spendRangeStart.setDate(1);
+    spendRangeStart.setHours(0, 0, 0, 0);
+    let spendRangeEnd = new Date();
+
+    if (req.method === "POST") {
+      try {
+        const body = await req.json() as { startDate?: string; endDate?: string };
+        if (body?.startDate && body?.endDate) {
+          spendRangeStart = new Date(body.startDate);
+          spendRangeEnd = new Date(body.endDate);
+        }
+      } catch {
+        // keep defaults
+      }
+    }
+
     // Get all restaurants user belongs to
     const { data: memberships } = await supabase
       .from("restaurant_members")
@@ -65,6 +83,16 @@ Deno.serve(async (req) => {
     for (const membership of memberships) {
       const rid = (membership as any).restaurants.id;
       const rname = (membership as any).restaurants.name;
+
+      const { data: riskSettingsRow } = await supabase
+        .from("smart_order_settings")
+        .select("red_threshold, yellow_threshold")
+        .eq("restaurant_id", rid)
+        .maybeSingle();
+      const riskThresholds = {
+        redThresholdPercent: riskSettingsRow?.red_threshold ?? 50,
+        yellowThresholdPercent: riskSettingsRow?.yellow_threshold ?? 100,
+      };
 
       // Get all locations for this restaurant
       const { data: locations } = await supabase
@@ -107,14 +135,14 @@ Deno.serve(async (req) => {
         if (sessions?.length) {
           const { data: items } = await supabase
             .from("inventory_session_items")
-            .select("item_name, current_stock, par_level, unit, unit_cost")
+            .select("item_name, current_stock, par_level, unit, unit_cost, pack_size")
             .eq("session_id", sessions[0].id);
 
           if (items) {
             items.forEach((i: any) => {
               const stock = Number(i.current_stock ?? 0);
               const par = Number(i.par_level ?? 0);
-              const risk = getRisk(stock, i.par_level).level;
+              const risk = getRisk(stock, i.par_level, riskThresholds).level;
               if (risk === "RED") locRed++;
               else if (risk === "YELLOW") locYellow++;
               else if (risk === "GREEN") locGreen++;
@@ -124,7 +152,16 @@ Deno.serve(async (req) => {
               }
             });
             topItems = items
-              .map((i: any) => ({ ...i, suggested: Math.max(Number(i.par_level) - Number(i.current_stock), 0), ratio: Number(i.current_stock) / Math.max(Number(i.par_level), 1) }))
+              .map((i: any) => ({
+                ...i,
+                suggested: computeOrderQty(
+                  i.current_stock,
+                  i.par_level,
+                  i.unit,
+                  i.pack_size,
+                ),
+                ratio: Number(i.current_stock) / Math.max(Number(i.par_level), 1),
+              }))
               .sort((a: any, b: any) => b.suggested - a.suggested)
               .slice(0, 5);
           }
@@ -148,11 +185,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Spend this month
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
-
+      // Spend in requested period (see spendRangeStart / spendRangeEnd)
       const { data: invDocRows } = await supabase
         .from("invoices")
         .select("id")
@@ -168,8 +201,10 @@ Deno.serve(async (req) => {
         .eq("status", "confirmed");
 
       const invInMonth = (invConfirmed ?? []).filter(
-        (p: { invoice_date?: string | null; created_at?: string | null }) =>
-          resolvePurchaseHistoryBusinessDate(p) >= monthStart,
+        (p: { invoice_date?: string | null; created_at?: string | null }) => {
+          const d = resolvePurchaseHistoryBusinessDate(p);
+          return d >= spendRangeStart && d <= spendRangeEnd;
+        },
       );
       if (invInMonth.length > 0) {
         const iids = invInMonth.map((i: { id: string }) => i.id);
@@ -189,8 +224,11 @@ Deno.serve(async (req) => {
         .in("invoice_status", ["COMPLETE", "POSTED"]);
 
       const filteredPH = (recentPH ?? []).filter(
-        (p: { id: string; invoice_date?: string | null; created_at?: string | null }) =>
-          !invoiceIdSet.has(p.id) && resolvePurchaseHistoryBusinessDate(p) >= monthStart,
+        (p: { id: string; invoice_date?: string | null; created_at?: string | null }) => {
+          if (invoiceIdSet.has(p.id)) return false;
+          const d = resolvePurchaseHistoryBusinessDate(p);
+          return d >= spendRangeStart && d <= spendRangeEnd;
+        },
       );
       if (filteredPH.length > 0) {
         const phIds = filteredPH.map((p: { id: string }) => p.id);

@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,630 +9,336 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import {
-  FileText, Upload, Plus, Search, Loader2, Check, AlertTriangle,
-  DollarSign, Package, Calendar, Truck, Eye, Trash2,
+  FileText, Upload, Plus, Search, Loader2, AlertTriangle,
+  Package, Calendar, Truck, Eye, Trash2,
   Info, Plug, PenLine, Save, ClipboardCheck, Camera,
 } from "lucide-react";
 import { formatNum } from "@/lib/inventory-utils";
-import * as XLSX from "xlsx";
-import { InvoiceItem, InvoiceHeader, InvoiceStatus } from "@/components/invoices/types";
-import { useInvoiceMatching } from "@/components/invoices/useInvoiceMatching";
+import { InvoiceItem, InvoiceHeader } from "@/components/invoices/types";
 import InvoiceItemsTable from "@/components/invoices/InvoiceItemsTable";
 import VendorConnectTab from "@/components/invoices/VendorConnectTab";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  buildInvoiceEditorItems,
+  buildInvoiceHeaderFromRow,
+} from "@/domain/invoices/invoicesPageHelpers";
+import {
+  filterInvoices,
+  MAIN_INVOICE_STATUS_UI,
+  resolveMainInvoiceStatusKey,
+  summarizeInvoices,
+} from "@/domain/invoices/invoicesPageSelectors";
+import type {
+  InvoiceCreateTab,
+  InvoiceItemRow,
+  InvoiceListRow,
+  InvoiceStatusFilter,
+} from "@/domain/invoices/invoicesPageTypes";
+import { useInvoicesData } from "@/hooks/useInvoicesData";
+import { useInvoiceActions } from "@/hooks/useInvoiceActions";
 
-const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string; bgColor: string }> = {
-  DRAFT: { label: "Draft", color: "text-warning", bgColor: "bg-warning/10 border-warning/20" },
-  RECEIVED: { label: "Received", color: "text-primary", bgColor: "bg-primary/10 border-primary/20" },
-  POSTED: { label: "Posted", color: "text-success", bgColor: "bg-success/10 border-success/20" },
-};
+/** PO display from FK + joined row only (list / view). */
+function PoLinkBadge(props: {
+  purchaseOrderId: string | null | undefined;
+  joinedPoNumber: string | null | undefined;
+}) {
+  const linked = Boolean(props.purchaseOrderId);
+  if (!linked) {
+    return <span className="text-[11px] text-muted-foreground/80">No purchase order linked</span>;
+  }
+  const num = props.joinedPoNumber?.trim();
+  return (
+    <span className="text-[11px] font-mono text-primary/70">PO: {num || "—"}</span>
+  );
+}
 
 export default function InvoicesPage() {
   const { currentRestaurant } = useRestaurant();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [purchases, setPurchases] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [viewPurchase, setViewPurchase] = useState<any>(null);
-  const [viewItems, setViewItems] = useState<any[]>([]);
+  const [viewPurchase, setViewPurchase] = useState<InvoiceListRow | null>(null);
+  const [viewItems, setViewItems] = useState<InvoiceItemRow[]>([]);
   const [searchFilter, setSearchFilter] = useState("");
   const [dateRange, setDateRange] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [deliveryIssuePOs, setDeliveryIssuePOs] = useState<Array<{
-    purchase_history_id: string;
-    po_number: string | null;
-    issue_count: number;
-  }>>([]);
-
-  // Create invoice state
-  const [createTab, setCreateTab] = useState("manual");
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>("all");
+  const [createTab, setCreateTab] = useState<InvoiceCreateTab>("manual");
   const [header, setHeader] = useState<InvoiceHeader>({
     vendor_name: "", invoice_number: "", invoice_date: new Date().toISOString().split("T")[0],
     po_number: "", location_id: "", linked_smart_order_id: "",
   });
   const [items, setItems] = useState<InvoiceItem[]>([]);
-  const [parsing, setParsing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [catalogItems, setCatalogItems] = useState<any[]>([]);
-  const [locations, setLocations] = useState<any[]>([]);
-  const [smartOrders, setSmartOrders] = useState<any[]>([]);
-  const [linkedSmartOrderItems, setLinkedSmartOrderItems] = useState<any[]>([]);
-  const [lastSessionItems, setLastSessionItems] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  /** Set when parse-invoice returns a PO# from a PDF (used for auto-link after save). */
+  const intakeFileRef = useRef<HTMLInputElement>(null);
+  const intakePhotoRef = useRef<HTMLInputElement>(null);
   const [parsedPoNumberFromPdf, setParsedPoNumberFromPdf] = useState<string | null>(null);
-  const { matchItems } = useInvoiceMatching(catalogItems);
-
-  // Editing existing draft
   const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
+  const {
+    purchases,
+    loading,
+    deliveryIssuePOs,
+    catalogItems,
+    locations,
+    smartOrders,
+    lastSessionItems,
+    linkedSmartOrderItems,
+    vendorMappings,
+    refreshPurchases,
+    loadInvoiceItems,
+  } = useInvoicesData({
+    currentRestaurantId: currentRestaurant?.id,
+    dateRange,
+    linkedSmartOrderId: header.linked_smart_order_id,
+  });
 
-  const fetchPurchases = useCallback(async () => {
-    if (!currentRestaurant) return;
-    setLoading(true);
-    let query = supabase.from("invoices").select("*, purchase_orders(po_number, smart_order_run_id)")
-      .eq("restaurant_id", currentRestaurant.id)
-      .order("created_at", { ascending: false });
-
-    if (dateRange !== "all") {
-      const now = new Date();
-      let start: Date;
-      if (dateRange === "7") start = new Date(now.getTime() - 7 * 86400000);
-      else if (dateRange === "30") start = new Date(now.getTime() - 30 * 86400000);
-      else start = new Date(now.getTime() - 90 * 86400000);
-      query = query.gte("created_at", start.toISOString());
-    }
-
-    const { data } = await query;
-    if (data) {
-      setPurchases(data.map((row: any) => ({
-        ...row,
-        po_number: row.purchase_orders?.po_number ?? row.po_number ?? null,
-        smart_order_run_id: row.purchase_orders?.smart_order_run_id ?? null,
-      })));
-    }
-    setLoading(false);
-  }, [currentRestaurant, dateRange]);
-
-  useEffect(() => { fetchPurchases(); }, [fetchPurchases]);
-
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    supabase
-      .rpc('get_delivery_issue_pos', { p_restaurant_id: currentRestaurant.id })
-      .then(({ data, error }) => {
-        if (!error && data) setDeliveryIssuePOs(data);
-      });
-  }, [currentRestaurant]);
-
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    Promise.all([
-    supabase.from("inventory_catalog_items").select("id, item_name, vendor_sku, product_number, brand_name, vendor_name, unit, pack_size, default_unit_cost")
-        .eq("restaurant_id", currentRestaurant.id),
-      supabase.from("locations").select("id, name").eq("restaurant_id", currentRestaurant.id).eq("is_active", true),
-      supabase.from("smart_order_runs").select("id, created_at, inventory_list_id, inventory_lists(name)")
-        .eq("restaurant_id", currentRestaurant.id).order("created_at", { ascending: false }).limit(10),
-    ]).then(([catRes, locRes, soRes]) => {
-      if (catRes.data) setCatalogItems(catRes.data);
-      if (locRes.data) setLocations(locRes.data);
-      if (soRes.data) setSmartOrders(soRes.data);
+  const resetCreateForm = useCallback(() => {
+    setHeader({
+      vendor_name: "",
+      invoice_number: "",
+      invoice_date: new Date().toISOString().split("T")[0],
+      po_number: "",
+      location_id: "",
+      linked_smart_order_id: "",
     });
-  }, [currentRestaurant]);
+    setItems([]);
+    setCreateTab("manual");
+    setEditingPurchaseId(null);
+    setParsedPoNumberFromPdf(null);
+  }, []);
 
-  // Last session items for expected on-hand
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    supabase.from("inventory_sessions").select("id").eq("restaurant_id", currentRestaurant.id)
-      .eq("status", "APPROVED").order("approved_at", { ascending: false }).limit(1)
-      .then(({ data: sessions }) => {
-        if (sessions?.length) {
-          supabase.from("inventory_session_items").select("item_name, current_stock")
-            .eq("session_id", sessions[0].id).then(({ data }) => { if (data) setLastSessionItems(data); });
-        }
-      });
-  }, [currentRestaurant]);
-
-  // Load linked PO / smart order lines for variance (normalize to suggested_order)
-  useEffect(() => {
-    if (!header.linked_smart_order_id) { setLinkedSmartOrderItems([]); return; }
-    (async () => {
-      const { data: po } = await supabase.from("purchase_orders").select("id").eq("smart_order_run_id", header.linked_smart_order_id).maybeSingle();
-      if (po?.id) {
-        const { data: poi } = await supabase.from("purchase_order_items").select("*").eq("purchase_order_id", po.id);
-        setLinkedSmartOrderItems((poi || []).map((p: any) => ({ ...p, suggested_order: p.quantity_ordered })));
-      } else {
-        const { data: sri } = await supabase.from("smart_order_run_items").select("*").eq("run_id", header.linked_smart_order_id);
-        setLinkedSmartOrderItems(sri || []);
+  const openInvoiceEditor = useCallback(
+    async (invoice: InvoiceListRow, parsedPoForHeader: string | null) => {
+      const invoiceItems = await loadInvoiceItems(invoice.id);
+      setEditingPurchaseId(invoice.id);
+      setParsedPoNumberFromPdf(null);
+      setHeader(buildInvoiceHeaderFromRow(invoice));
+      setItems(invoiceItems.length > 0 ? buildInvoiceEditorItems(invoiceItems, catalogItems) : []);
+      setCreateTab("manual");
+      setCreateOpen(true);
+      if (parsedPoForHeader) {
+        setParsedPoNumberFromPdf(parsedPoForHeader);
+        setHeader((current) => ({ ...current, po_number: parsedPoForHeader }));
       }
-    })();
-  }, [header.linked_smart_order_id]);
-
-  /** After invoice rows are saved: auto-link PO when not manually linked. Never throws. */
-  const applyAutoPoLinkAfterSave = useCallback(
-    async (args: {
-      invoiceId: string;
-      restaurantId: string;
-      hadManualPoLink: boolean;
-      manualPoNumber: string | null;
-      parsedPoFromPdf: string | null;
-      vendorName: string;
-    }) => {
-      if (args.hadManualPoLink) return;
-
-      const poTrim =
-        (args.manualPoNumber?.trim() || args.parsedPoFromPdf?.trim() || "") || "";
-
-      const linkPurchaseOrder = async (poId: string, poLabel: string | null) => {
-        const { error: updErr } = await supabase
-          .from("invoices")
-          .update({ purchase_order_id: poId, updated_at: new Date().toISOString() })
-          .eq("id", args.invoiceId);
-        if (updErr) {
-          toast.warning("Invoice saved — could not attach purchase order.");
-          console.error("invoice purchase_order_id update", updErr);
-          return false;
-        }
-        toast.success(`Linked to PO ${poLabel ?? "—"}`);
-        await fetchPurchases();
-        return true;
-      };
-
-      // Method 1 — match by PO number (manual field takes precedence over parsed PDF)
-      if (poTrim) {
-        const { data: poRows, error } = await supabase
-          .from("purchase_orders")
-          .select("id, po_number, created_at")
-          .eq("restaurant_id", args.restaurantId)
-          .eq("po_number", poTrim)
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          toast.warning("Invoice saved — could not look up purchase order.");
-          console.error("purchase_orders po_number lookup", error);
-          // fall through to Method 2
-        } else if (poRows?.length) {
-          const best = poRows[0];
-          await linkPurchaseOrder(best.id, best.po_number ?? poTrim);
-          return;
-        }
-        // Not found by PO# — continue to Method 2
-      }
-
-      // Method 2 — vendor + date window (only when Method 1 did not link)
-      const fourteenDaysAgo = new Date();
-      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-
-      const { data: rows, error: vErr } = await supabase
-        .from("purchase_orders")
-        .select("id, po_number, vendor_name, created_at")
-        .eq("restaurant_id", args.restaurantId)
-        .gte("created_at", fourteenDaysAgo.toISOString());
-
-      if (vErr) {
-        toast.warning("Invoice saved — could not search purchase orders.");
-        console.error("purchase_orders vendor window lookup", vErr);
-        return;
-      }
-
-      const inv = args.vendorName.trim().toLowerCase();
-      const pool = rows ?? [];
-      const candidates = pool.filter((r) => {
-        const vn = r.vendor_name;
-        if (vn == null || String(vn).trim() === "") return true;
-        if (!inv) return false;
-        return String(vn).toLowerCase().includes(inv);
-      });
-
-      if (candidates.length === 0) {
-        toast.info("Invoice saved — no matching PO found");
-        return;
-      }
-      if (candidates.length > 1) {
-        toast.info("Multiple POs found — please link manually");
-        return;
-      }
-
-      await linkPurchaseOrder(candidates[0].id, candidates[0].po_number);
     },
-    [fetchPurchases],
+    [catalogItems, loadInvoiceItems],
   );
 
-  /** Raw file bytes → base64 (same encoding as PDF path). */
-  const fileToBase64Raw = async (file: File): Promise<string> => {
-    const arrayBuffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-    }
-    return btoa(binary);
-  };
+  const {
+    parsing,
+    saving,
+    intakeUploading,
+    handleImportedFile,
+    handleCapturedPhoto,
+    handleSaveInvoice,
+    handleIntakeUpload,
+    handleDeleteInvoice,
+  } = useInvoiceActions({
+    currentRestaurantId: currentRestaurant?.id,
+    userId: user?.id,
+    createOpen,
+    editingPurchaseId,
+    header,
+    items,
+    catalogItems,
+    vendorMappings,
+    parsedPoNumberFromPdf,
+    setHeader,
+    setItems,
+    setParsedPoNumberFromPdf,
+    setCreateOpen,
+    loadInvoiceItems,
+    refreshPurchases,
+    onResetCreateForm: resetCreateForm,
+    onOpenEditorForInvoice: openInvoiceEditor,
+  });
 
-  type ParseInvoiceResult = {
-    vendor_name?: string;
-    invoice_number?: string;
-    invoice_date?: string;
-    po_number?: string | null;
-    items?: unknown[];
-    error?: string;
-  };
-
-  const applyParseInvoiceResult = (result: ParseInvoiceResult, mode: "pdf" | "image") => {
-    if (result.error) throw new Error(result.error);
-    if (result.vendor_name) setHeader((h) => ({ ...h, vendor_name: result.vendor_name as string }));
-    if (result.invoice_number) setHeader((h) => ({ ...h, invoice_number: result.invoice_number as string }));
-    if (result.invoice_date) setHeader((h) => ({ ...h, invoice_date: result.invoice_date as string }));
-    if (result.po_number != null && String(result.po_number).trim()) {
-      const po = String(result.po_number).trim();
-      setParsedPoNumberFromPdf(po);
-      setHeader((h) => ({ ...h, po_number: po }));
-    }
-    if (result.items?.length) {
-      setItems(matchItems(result.items as Parameters<typeof matchItems>[0]));
-      toast.success(`AI extracted ${result.items.length} items`);
-    } else if (mode === "image") {
-      setHeader((h) => ({
-        ...h,
-        vendor_name: "",
-        invoice_number: "",
-        invoice_date: new Date().toISOString().split("T")[0],
-        po_number: "",
-      }));
-      setItems([]);
-      setParsedPoNumberFromPdf(null);
-      toast.error("Could not read — please fill in manually");
-    } else {
-      toast.error("AI could not extract items from this PDF");
-    }
-  };
-
-  // Parse CSV/Excel file
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setParsedPoNumberFromPdf(null);
-
-    const isSpreadsheet = /\.(csv|xlsx|xls)$/i.test(file.name);
-    const isPDF = /\.pdf$/i.test(file.name);
-
-    if (isSpreadsheet) {
-      const data = await file.arrayBuffer();
-      const wb = XLSX.read(data);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[] = XLSX.utils.sheet_to_json(ws);
-
-      if (rows.length === 0) { toast.error("No data found in file"); return; }
-
-      const headers = Object.keys(rows[0]).map(h => h.toLowerCase());
-      const findCol = (keys: string[]) => {
-        const original = Object.keys(rows[0]);
-        for (const k of keys) {
-          const idx = headers.findIndex(h => h.includes(k));
-          if (idx >= 0) return original[idx];
-        }
-        return null;
-      };
-
-      const nameCol = findCol(["item", "description", "product name", "desc"]);
-      const qtyCol = findCol(["qty", "quantity", "shipped", "ship"]);
-      const priceCol = findCol(["price", "unit cost", "cost", "unit price"]);
-      const totalCol = findCol(["total", "extended", "amount", "ext"]);
-      const skuCol = findCol(["product number", "sku", "item number", "item #", "product #", "prod"]);
-      const unitCol = findCol(["unit", "uom", "measure"]);
-      const packCol = findCol(["pack", "size", "pack size"]);
-      const brandCol = findCol(["brand", "manufacturer", "mfg", "brand name"]);
-
-      const parsed = rows.map(row => ({
-        product_number: skuCol ? String(row[skuCol] || "") : null,
-        item_name: nameCol ? String(row[nameCol] || "") : "",
-        quantity: qtyCol ? Number(row[qtyCol]) || 0 : 0,
-        unit_cost: priceCol ? Number(String(row[priceCol]).replace(/[$,]/g, "")) || null : null,
-        line_total: totalCol ? Number(String(row[totalCol]).replace(/[$,]/g, "")) || null : null,
-        unit: unitCol ? String(row[unitCol] || "") : null,
-        pack_size: packCol ? String(row[packCol] || "") : null,
-        brand_name: brandCol ? String(row[brandCol] || "") : null,
-      })).filter(r => r.item_name);
-
-      setItems(matchItems(parsed));
-      toast.success(`Parsed ${parsed.length} items from file`);
-    } else if (isPDF) {
-      setParsing(true);
-      try {
-        const base64 = await fileToBase64Raw(file);
-        const { data: result, error } = await supabase.functions.invoke("parse-invoice", {
-          body: { content: base64, file_type: "PDF" },
-        });
-        if (error) throw error;
-        applyParseInvoiceResult((result || {}) as ParseInvoiceResult, "pdf");
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Failed to parse PDF";
-        toast.error(message);
-      }
-      setParsing(false);
-    } else {
-      toast.error("Unsupported file type. Use PDF, CSV, or Excel.");
-    }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleTakePhotoClick = () => {
+  const handleTakePhotoClick = useCallback(() => {
     if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
       toast.error("Use Upload PDF instead on desktop");
       return;
     }
     photoInputRef.current?.click();
-  };
+  }, []);
 
-  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const onImportFilePicked = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      await handleImportedFile(file);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    [handleImportedFile],
+  );
 
-    setParsedPoNumberFromPdf(null);
-    setParsing(true);
-    try {
-      const base64 = await fileToBase64Raw(file);
-      const { data: result, error } = await supabase.functions.invoke("parse-invoice", {
-        body: { content: base64, file_type: "IMAGE" },
-      });
-      if (error) {
-        toast.error("Could not read invoice — try again");
-        console.error("parse-invoice IMAGE", error);
-        return;
-      }
-      applyParseInvoiceResult((result || {}) as ParseInvoiceResult, "image");
-    } catch (err: unknown) {
-      toast.error("Could not read invoice — try again");
-      console.error("parse-invoice IMAGE", err);
-    } finally {
-      setParsing(false);
+  const onImportPhotoPicked = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      await handleCapturedPhoto(file);
       if (photoInputRef.current) photoInputRef.current.value = "";
-    }
-  };
+    },
+    [handleCapturedPhoto],
+  );
 
-  const addManualItem = () => {
-    setItems(prev => [...prev, {
-      product_number: null, item_name: "", quantity: 1, unit_cost: null,
-      line_total: null, unit: null, pack_size: null,
-      catalog_item_id: null, match_status: "MANUAL",
-    }]);
-  };
+  const onIntakeFilePicked = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      await handleIntakeUpload(file, "file");
+      if (intakeFileRef.current) intakeFileRef.current.value = "";
+    },
+    [handleIntakeUpload],
+  );
 
-  const updateItem = (index: number, field: string, value: any) => {
-    setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
-  };
+  const onIntakePhotoPicked = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      await handleIntakeUpload(file, "photo");
+      if (intakePhotoRef.current) intakePhotoRef.current.value = "";
+    },
+    [handleIntakeUpload],
+  );
 
-  const removeItem = (index: number) => {
-    setItems(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const mapItemToCatalog = (index: number, catalogId: string) => {
-    const cat = catalogItems.find(c => c.id === catalogId);
-    if (!cat) return;
-    setItems(prev => prev.map((item, i) =>
-      i === index ? { ...item, catalog_item_id: catalogId, match_status: "MATCHED" as const, catalog_match_name: cat.item_name } : item
-    ));
-  };
-
-  // Save invoice with status
-  const handleSave = async (status: InvoiceStatus) => {
-    if (!currentRestaurant || !user) return;
-    const unmatchedCount = items.filter(i => i.match_status === "UNMATCHED").length;
-
-    // Block POST if unmatched items exist
-    if (status === "POSTED" && unmatchedCount > 0) {
-      toast.error(`${unmatchedCount} unmatched item(s). Map all items before posting.`);
-      return;
-    }
-    if (items.length === 0) { toast.error("No items to save"); return; }
-    if (!header.vendor_name.trim()) { toast.error("Vendor name is required"); return; }
-
-    setSaving(true);
-    try {
-      const capturedParsedPo = parsedPoNumberFromPdf;
-      const capturedManualPo = header.po_number.trim() || null;
-      const capturedVendor = header.vendor_name.trim();
-
-      let purchaseOrderId: string | null = null;
-      if (header.linked_smart_order_id) {
-        const { data: po } = await supabase.from("purchase_orders").select("id").eq("smart_order_run_id", header.linked_smart_order_id.trim()).maybeSingle();
-        purchaseOrderId = po?.id ?? null;
-      }
-
-      const workflowStatus =
-        status === "POSTED" ? "ready_to_receive" : status === "RECEIVED" ? "review" : "draft";
-
-      const invData: Record<string, unknown> = {
-        restaurant_id: currentRestaurant.id,
-        vendor_name: header.vendor_name.trim(),
-        invoice_number: header.invoice_number.trim() || null,
-        invoice_date: header.invoice_date || null,
-        location_id: header.location_id || null,
-        purchase_order_id: purchaseOrderId,
-        created_by: user.id,
-        status: workflowStatus,
-        receipt_status: "pending",
-        updated_at: new Date().toISOString(),
-      };
-
-      let purchaseId: string;
-
-      if (editingPurchaseId) {
-        const { error: invError } = await supabase.from("invoices")
-          .update(invData).eq("id", editingPurchaseId);
-        if (invError) throw invError;
-        purchaseId = editingPurchaseId;
-        await supabase.from("invoice_items").delete().eq("invoice_id", purchaseId);
-      } else {
-        const { data: invRow, error: invError } = await supabase.from("invoices")
-          .insert(invData).select().single();
-        if (invError) throw invError;
-        purchaseId = invRow.id;
-      }
-
-      const invRows = items.map(i => {
-        const cat = i.catalog_item_id ? catalogItems.find(c => c.id === i.catalog_item_id) : null;
-        const brandName = (i as any).brand_name || cat?.brand_name || null;
-        return {
-          invoice_id: purchaseId,
-          item_name: i.item_name,
-          quantity: i.quantity,
-          unit_cost: i.unit_cost,
-          total_cost: i.line_total ?? (i.unit_cost ? i.unit_cost * i.quantity : null),
-          pack_size: i.pack_size,
-          catalog_item_id: i.catalog_item_id,
-          match_status: i.match_status,
-          brand_name: brandName,
-        };
-      });
-
-      const { error: itemsError } = await supabase.from("invoice_items").insert(invRows);
-      if (itemsError) throw itemsError;
-
-      await applyAutoPoLinkAfterSave({
-        invoiceId: purchaseId,
-        restaurantId: currentRestaurant.id,
-        hadManualPoLink: purchaseOrderId != null,
-        manualPoNumber: capturedManualPo,
-        parsedPoFromPdf: capturedParsedPo,
-        vendorName: capturedVendor,
-      });
-
-      const statusLabel = status === "POSTED" ? "Posted" : status === "RECEIVED" ? "Received" : "Draft saved";
-      toast.success(`Invoice ${statusLabel.toLowerCase()} successfully`);
-      setCreateOpen(false);
-      resetCreateForm();
-      fetchPurchases();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save invoice");
-    }
-    setSaving(false);
-  };
-
-  const resetCreateForm = () => {
-    setHeader({ vendor_name: "", invoice_number: "", invoice_date: new Date().toISOString().split("T")[0], po_number: "", location_id: "", linked_smart_order_id: "" });
-    setItems([]);
-    setCreateTab("manual");
-    setEditingPurchaseId(null);
-    setParsedPoNumberFromPdf(null);
-  };
-
-  // Open existing invoice for editing (DRAFT or RECEIVED)
-  const handleEditInvoice = async (p: any) => {
-    const { data: phItems } = await supabase.from("invoice_items").select("*").eq("invoice_id", p.id);
-    setEditingPurchaseId(p.id);
-    setParsedPoNumberFromPdf(null);
-    const runId = p.smart_order_run_id || p.purchase_orders?.smart_order_run_id || "";
-    setHeader({
-      vendor_name: p.vendor_name || "",
-      invoice_number: p.invoice_number || "",
-      invoice_date: p.invoice_date || new Date().toISOString().split("T")[0],
-      po_number: typeof p.po_number === "string" ? p.po_number : "",
-      location_id: p.location_id || "",
-      linked_smart_order_id: runId,
-    });
-    if (phItems) {
-      setItems(phItems.map((i: any) => ({
+  const addManualItem = useCallback(() => {
+    setItems((current) => [
+      ...current,
+      {
         product_number: null,
-        item_name: i.item_name,
-        quantity: Number(i.quantity),
-        unit_cost: i.unit_cost != null ? Number(i.unit_cost) : null,
-        line_total: i.total_cost != null ? Number(i.total_cost) : null,
+        item_name: "",
+        quantity: 1,
+        unit_cost: null,
+        line_total: null,
         unit: null,
-        pack_size: i.pack_size,
-        catalog_item_id: i.catalog_item_id,
-        match_status: (i.match_status as any) || "MANUAL",
-        catalog_match_name: i.catalog_item_id ? catalogItems.find(c => c.id === i.catalog_item_id)?.item_name : undefined,
-      })));
-    }
-    setCreateTab("manual");
-    setCreateOpen(true);
-  };
+        pack_size: null,
+        catalog_item_id: null,
+        match_status: "MANUAL",
+      },
+    ]);
+  }, []);
 
-  const handleViewPurchase = async (p: any) => {
-    const { data } = await supabase.from("invoice_items").select("*").eq("invoice_id", p.id);
-    setViewItems(data || []);
-    setViewPurchase(p);
-  };
-
-  const handleDeletePurchase = async (id: string) => {
-    await supabase.from("invoice_items").delete().eq("invoice_id", id);
-    await supabase.from("invoices").delete().eq("id", id);
-    toast.success("Invoice deleted");
-    fetchPurchases();
-  };
-
-  // Handle vendor import callback
-  const handleVendorImport = (importedItems: InvoiceItem[], vendorName: string, invoiceNumber: string, invoiceDate: string) => {
-    setItems(importedItems);
-    setHeader(h => ({ ...h, vendor_name: vendorName, invoice_number: invoiceNumber, invoice_date: invoiceDate }));
-    setParsedPoNumberFromPdf(null);
-    // Switch to manual tab to show the review table
-    setCreateTab("manual");
-  };
-
-  // Filter purchases
-  const filteredPurchases = useMemo(() => {
-    let filtered = purchases;
-    if (searchFilter) {
-      const lower = searchFilter.toLowerCase();
-      filtered = filtered.filter(p =>
-        (p.vendor_name || "").toLowerCase().includes(lower) ||
-        (p.invoice_number || "").toLowerCase().includes(lower)
+  const updateItem = useCallback(
+    <K extends keyof InvoiceItem,>(index: number, field: K, value: InvoiceItem[K]) => {
+      setItems((current) =>
+        current.map((item, itemIndex) =>
+          itemIndex === index ? { ...item, [field]: value } : item,
+        ),
       );
-    }
-    if (statusFilter !== "all") {
-      filtered = filtered.filter((p: any) => {
-        const s = p.status || "review";
-        if (statusFilter === "PENDING") return s === "draft" || s === "review" || s === "ready_to_receive";
-        if (statusFilter === "DRAFT") return s === "draft";
-        if (statusFilter === "RECEIVED") return s === "review";
-        if (statusFilter === "COMPLETE") return s === "confirmed";
-        return s === String(statusFilter).toLowerCase();
-      });
-    }
-    return filtered;
-  }, [purchases, searchFilter, statusFilter]);
+    },
+    [],
+  );
 
-  // Stats
-  const draftCount = purchases.filter((p: any) => p.status === "draft").length;
-  const receivedCount = purchases.filter((p: any) => p.status === "review" || p.status === "ready_to_receive").length;
-  const pendingReviewCount = purchases.filter((p: any) => p.status !== "confirmed" && (!p.receipt_status || p.receipt_status === "pending" || p.receipt_status === "reviewing")).length;
-  const unmatchedCount = items.filter(i => i.match_status === "UNMATCHED").length;
-  const canPost = items.length > 0 && unmatchedCount === 0 && header.vendor_name.trim();
+  const onItemQuantityChange = useCallback((index: number, quantity: number) => {
+    const nextQuantity = Number.isFinite(quantity) ? quantity : 0;
+    setItems((current) =>
+      current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        return {
+          ...item,
+          quantity: nextQuantity,
+          line_total: item.unit_cost != null ? item.unit_cost * nextQuantity : null,
+        };
+      }),
+    );
+  }, []);
 
-  const getStatusBadge = (status: string) => {
-    const normalized =
-      status === "confirmed" ? "POSTED"
-        : status === "ready_to_receive" ? "RECEIVED"
-          : status === "review" ? "RECEIVED"
-            : status === "draft" ? "DRAFT"
-              : status === "COMPLETE" ? "POSTED"
-                : status === "RECEIVED" ? "RECEIVED"
-                  : status === "DRAFT" ? "DRAFT"
-                    : "POSTED";
-    const s = normalized as InvoiceStatus;
-    const config = STATUS_CONFIG[s] || STATUS_CONFIG.POSTED;
+  const onItemUnitCostChange = useCallback((index: number, unitCost: number | null) => {
+    setItems((current) =>
+      current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        return {
+          ...item,
+          unit_cost: unitCost,
+          line_total: unitCost != null ? unitCost * item.quantity : null,
+        };
+      }),
+    );
+  }, []);
+
+  const removeItem = useCallback((index: number) => {
+    setItems((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }, []);
+
+  const mapItemToCatalog = useCallback(
+    (index: number, catalogId: string) => {
+      const catalogItem = catalogItems.find((item) => item.id === catalogId);
+      if (!catalogItem) return;
+      setItems((current) =>
+        current.map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                catalog_item_id: catalogId,
+                match_status: "MATCHED",
+                catalog_match_name: catalogItem.item_name,
+              }
+            : item,
+        ),
+      );
+    },
+    [catalogItems],
+  );
+
+  const handleEditInvoice = useCallback(
+    async (invoice: InvoiceListRow) => {
+      await openInvoiceEditor(invoice, null);
+    },
+    [openInvoiceEditor],
+  );
+
+  const handleViewPurchase = useCallback(
+    async (invoice: InvoiceListRow) => {
+      const invoiceItems = await loadInvoiceItems(invoice.id);
+      setViewItems(invoiceItems);
+      setViewPurchase(invoice);
+    },
+    [loadInvoiceItems],
+  );
+
+  const handleVendorImport = useCallback(
+    (importedItems: InvoiceItem[], vendorName: string, invoiceNumber: string, invoiceDate: string) => {
+      setItems(importedItems);
+      setHeader((current) => ({
+        ...current,
+        vendor_name: vendorName,
+        invoice_number: invoiceNumber,
+        invoice_date: invoiceDate,
+      }));
+      setParsedPoNumberFromPdf(null);
+      setCreateTab("manual");
+    },
+    [],
+  );
+
+  const filteredPurchases = useMemo(
+    () => filterInvoices(purchases, searchFilter, statusFilter),
+    [purchases, searchFilter, statusFilter],
+  );
+
+  const { draftCount, receivedCount, pendingReviewCount, activeVendors, lastInvoiceDate } = useMemo(
+    () => summarizeInvoices(purchases),
+    [purchases],
+  );
+
+  const getStatusBadge = useCallback((status: string) => {
+    const key = resolveMainInvoiceStatusKey(status);
+    const config = MAIN_INVOICE_STATUS_UI[key];
     return <Badge className={`${config.bgColor} ${config.color} text-[10px] border`}>{config.label}</Badge>;
-  };
+  }, []);
 
-  const getReceiptStatusBadge = (status: string | null | undefined) => {
-    switch (status) {
-      case "confirmed": return <Badge className="bg-success/10 text-success border-0 text-[10px]">Confirmed</Badge>;
-      case "issues_reported": return <Badge className="bg-orange-500/10 text-orange-600 border-0 text-[10px]">Issues</Badge>;
-      case "reviewing": return <Badge className="bg-blue-500/10 text-blue-600 border-0 text-[10px]">Reviewing</Badge>;
-      default: return null;
-    }
-  };
+  const getIssuesReportedBadge = useCallback((receiptStatus: string | null | undefined) => {
+    if (receiptStatus !== "issues_reported") return null;
+    return (
+      <Badge className="bg-orange-500/10 text-orange-600 border-0 text-[10px]">Issues Reported</Badge>
+    );
+  }, []);
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -641,12 +347,57 @@ export default function InvoicesPage() {
           <h1 className="page-title">Invoices (Receiving)</h1>
           <p className="page-description">Upload vendor invoices, match items, and track spend</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={intakeFileRef}
+            type="file"
+            accept=".pdf,.csv,application/pdf,text/csv"
+            className="hidden"
+            onChange={onIntakeFilePicked}
+          />
+          <input
+            ref={intakePhotoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onIntakePhotoPicked}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={intakeUploading || !currentRestaurant}
+            onClick={() => intakeFileRef.current?.click()}
+          >
+            {intakeUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            Upload File
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={intakeUploading || !currentRestaurant}
+            onClick={() => intakePhotoRef.current?.click()}
+          >
+            {intakeUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+            Upload Photo
+          </Button>
+          <Button
+            type="button"
+            className="bg-gradient-amber shadow-amber gap-2"
+            size="sm"
+            onClick={() => {
+              resetCreateForm();
+              setCreateOpen(true);
+            }}
+          >
+            <PenLine className="h-4 w-4" /> Enter Manually
+          </Button>
+        </div>
+
         <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) resetCreateForm(); }}>
-          <DialogTrigger asChild>
-            <Button className="bg-gradient-amber shadow-amber gap-2" size="sm">
-              <Plus className="h-4 w-4" /> New Invoice
-            </Button>
-          </DialogTrigger>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -699,7 +450,7 @@ export default function InvoicesPage() {
                     <SelectItem value="none">None</SelectItem>
                     {smartOrders.map(so => (
                       <SelectItem key={so.id} value={so.id}>
-                        {(so as any).inventory_lists?.name || "Smart Order"} — {new Date(so.created_at).toLocaleDateString()}
+                        {so.inventory_lists?.name || "Smart Order"} — {new Date(so.created_at).toLocaleDateString()}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -708,7 +459,7 @@ export default function InvoicesPage() {
             )}
 
             {/* 3 Input Tabs */}
-            <Tabs value={createTab} onValueChange={setCreateTab}>
+            <Tabs value={createTab} onValueChange={(value) => setCreateTab(value as InvoiceCreateTab)}>
               <TabsList className="w-full">
                 <TabsTrigger value="manual" className="flex-1 gap-1.5 text-xs">
                   <PenLine className="h-3.5 w-3.5" /> Manual
@@ -733,7 +484,7 @@ export default function InvoicesPage() {
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-muted-foreground">Upload PDF or spreadsheet</Label>
                   <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/40 transition-colors">
-                    <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.pdf" onChange={handleFileUpload} className="hidden" id="invoice-upload" />
+                    <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.pdf" onChange={onImportFilePicked} className="hidden" id="invoice-upload" />
                     <label htmlFor="invoice-upload" className="cursor-pointer space-y-2">
                       {parsing ? (
                         <Loader2 className="h-8 w-8 mx-auto text-primary animate-spin" />
@@ -753,7 +504,7 @@ export default function InvoicesPage() {
                     capture="environment"
                     className="hidden"
                     id="invoice-photo"
-                    onChange={handlePhotoCapture}
+                    onChange={onImportPhotoPicked}
                   />
                   <Button
                     type="button"
@@ -784,6 +535,8 @@ export default function InvoicesPage() {
               linkedSmartOrderItems={linkedSmartOrderItems}
               lastSessionItems={lastSessionItems}
               onUpdateItem={updateItem}
+              onItemQuantityChange={onItemQuantityChange}
+              onItemUnitCostChange={onItemUnitCostChange}
               onRemoveItem={removeItem}
               onMapItem={mapItemToCatalog}
               onAddManualItem={addManualItem}
@@ -794,7 +547,7 @@ export default function InvoicesPage() {
               <Button variant="outline" onClick={() => { setCreateOpen(false); resetCreateForm(); }}>Cancel</Button>
               <Button
                 variant="outline"
-                onClick={() => handleSave("DRAFT")}
+                onClick={() => handleSaveInvoice("DRAFT")}
                 disabled={saving || items.length === 0}
                 className="gap-2"
               >
@@ -803,20 +556,12 @@ export default function InvoicesPage() {
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => handleSave("RECEIVED")}
+                onClick={() => handleSaveInvoice("RECEIVED")}
                 disabled={saving || items.length === 0 || !header.vendor_name.trim()}
                 className="gap-2"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
-                Mark Received
-              </Button>
-              <Button
-                onClick={() => handleSave("POSTED")}
-                disabled={saving || !canPost}
-                className="bg-gradient-amber shadow-amber gap-2"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                Post Invoice
+                Submit for Review
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -829,21 +574,20 @@ export default function InvoicesPage() {
           <div className="flex flex-wrap gap-3 items-end">
             <div className="space-y-1">
               <Label className="text-xs">Status</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-36 h-9 text-xs"><SelectValue /></SelectTrigger>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as InvoiceStatusFilter)}>
+                <SelectTrigger className="w-40 h-9 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="PENDING">Pending (Draft/Received)</SelectItem>
-                  <SelectItem value="DRAFT">Draft</SelectItem>
-                  <SelectItem value="RECEIVED">Received</SelectItem>
-                  <SelectItem value="COMPLETE">Posted</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="pending_review">Pending Review</SelectItem>
+                  <SelectItem value="posted">Posted</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Date Range</Label>
               <Select value={dateRange} onValueChange={setDateRange}>
-                <SelectTrigger className="w-36 h-9 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-40 h-9 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Time</SelectItem>
                   <SelectItem value="7">Last 7 Days</SelectItem>
@@ -894,7 +638,7 @@ export default function InvoicesPage() {
               <Truck className="h-5 w-5 text-success" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{new Set(purchases.map(p => p.vendor_name).filter(Boolean)).size}</p>
+              <p className="text-2xl font-bold">{activeVendors}</p>
               <p className="text-xs text-muted-foreground">Active Vendors</p>
             </div>
           </CardContent>
@@ -906,7 +650,7 @@ export default function InvoicesPage() {
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {purchases.length > 0 ? new Date(purchases[0].created_at).toLocaleDateString() : "—"}
+                {lastInvoiceDate ? new Date(lastInvoiceDate).toLocaleDateString() : "—"}
               </p>
               <p className="text-xs text-muted-foreground">Last Invoice</p>
             </div>
@@ -920,7 +664,7 @@ export default function InvoicesPage() {
           <CardContent className="flex items-center gap-3 p-4">
             <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0" />
             <p className="text-sm text-warning flex-1">
-              <span className="font-semibold">{pendingReviewCount} invoice{pendingReviewCount > 1 ? "s" : ""}</span> pending receipt review. Click <strong>Review</strong> on each invoice to confirm delivery and report issues.
+              <span className="font-semibold">{pendingReviewCount} invoice{pendingReviewCount > 1 ? "s" : ""}</span> awaiting review. Click <strong>Review</strong> on each to verify lines and delivery details. Submitting for review from the editor only advances workflow — it does not post stock or costs.
             </p>
           </CardContent>
         </Card>
@@ -957,14 +701,15 @@ export default function InvoicesPage() {
           <CardContent className="empty-state">
             <FileText className="empty-state-icon" />
             <p className="empty-state-title">No invoices yet</p>
-            <p className="empty-state-description">Upload your first vendor invoice to start tracking spend and receiving.</p>
+            <p className="empty-state-description">Upload your first vendor invoice to start tracking spend.</p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
           {filteredPurchases.map(p => {
             const status = p.status || "review";
-            const isEditable = status !== "confirmed";
+            const isPosted = status === "confirmed" || status === "COMPLETE";
+            const isEditable = !isPosted;
             return (
               <Card key={p.id} className="hover:shadow-card transition-all duration-200">
                 <CardContent className="flex items-center justify-between p-4">
@@ -975,9 +720,12 @@ export default function InvoicesPage() {
                       </div>
                       <div>
                         <p className="text-sm font-medium">{p.vendor_name || "Unknown Vendor"}</p>
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
                           {p.invoice_number && <span className="font-mono">#{p.invoice_number}</span>}
-                          {p.po_number && <span className="font-mono text-primary/70">PO: {p.po_number}</span>}
+                          <PoLinkBadge
+                            purchaseOrderId={p.purchase_order_id}
+                            joinedPoNumber={p.purchase_orders?.po_number ?? null}
+                          />
                           <span>{new Date(p.created_at).toLocaleDateString()}</span>
                           {p.invoice_date && <span>· Invoice: {new Date(p.invoice_date).toLocaleDateString()}</span>}
                         </div>
@@ -986,7 +734,7 @@ export default function InvoicesPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {getStatusBadge(status)}
-                    {getReceiptStatusBadge(p.receipt_status)}
+                    {getIssuesReportedBadge(p.receipt_status)}
                     {isEditable && (
                       <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditInvoice(p)}>
                         <PenLine className="h-3.5 w-3.5" />
@@ -1003,7 +751,7 @@ export default function InvoicesPage() {
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleViewPurchase(p)}>
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive hover:text-destructive" onClick={() => handleDeletePurchase(p.id)}>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive hover:text-destructive" onClick={() => handleDeleteInvoice(p.id)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -1021,13 +769,24 @@ export default function InvoicesPage() {
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
               {viewPurchase?.vendor_name || "Invoice"} {viewPurchase?.invoice_number ? `#${viewPurchase.invoice_number}` : ""}
-              {viewPurchase && getStatusBadge(viewPurchase.status || "review")}
+              {viewPurchase && (
+                <>
+                  {getStatusBadge(viewPurchase.status || "review")}
+                  {getIssuesReportedBadge(viewPurchase.receipt_status)}
+                </>
+              )}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground items-center">
               {viewPurchase?.invoice_date && <span>Invoice Date: {new Date(viewPurchase.invoice_date).toLocaleDateString()}</span>}
               <span>Recorded: {viewPurchase && new Date(viewPurchase.created_at).toLocaleDateString()}</span>
+              {viewPurchase && (
+                <PoLinkBadge
+                  purchaseOrderId={viewPurchase.purchase_order_id}
+                  joinedPoNumber={viewPurchase.purchase_orders?.po_number ?? null}
+                />
+              )}
             </div>
             <div className="rounded-lg border overflow-hidden">
               <Table>

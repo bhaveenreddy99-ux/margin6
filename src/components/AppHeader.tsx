@@ -26,7 +26,6 @@ const routeNames: Record<string, string> = {
   "/app/inventory/approved": "Approved",
   "/app/smart-order": "Smart Order",
   "/app/purchase-history": "Purchase History",
-  "/app/par": "PAR Management",
   "/app/orders": "Orders",
   "/app/reports": "Reports",
   "/app/staff": "Staff",
@@ -43,9 +42,12 @@ export function AppHeader() {
   const navigate = useNavigate();
   const [restaurantSearch, setRestaurantSearch] = useState("");
 
-  const pageName = routeNames[location.pathname] ||
-    (location.pathname.startsWith("/app/inventory/import") ? "Import" :
-     location.pathname.startsWith("/app/settings") ? "Settings" : "");
+  const pageName =
+    location.pathname === "/app/par" || location.pathname.startsWith("/app/par/")
+      ? "PAR"
+      : routeNames[location.pathname] ||
+        (location.pathname.startsWith("/app/inventory/import") ? "Import" :
+         location.pathname.startsWith("/app/settings") ? "Settings" : "");
 
   // Filter restaurants for search
   const filteredRestaurants = useMemo(() => {

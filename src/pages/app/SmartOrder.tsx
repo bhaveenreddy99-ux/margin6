@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,22 +22,34 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner";
 import { ShoppingCart, DollarSign, AlertTriangle, Package, Eye, ArrowLeft, Trash2, ExternalLink, Info, Pencil, Hash } from "lucide-react";
 import { ExportButtons } from "@/components/ExportButtons";
-import { getRisk, formatNum, formatCurrency, computeNeedRaw, isWholeUnitType, type RiskLevel } from "@/lib/inventory-utils";
+import { getRisk, formatNum, formatCurrency, computeNeedRaw, type RiskThresholds } from "@/lib/inventory-utils";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 import ItemIdentityBlock from "@/components/ItemIdentityBlock";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
+import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
+import {
+  analyzeMultiVendorBlockForSubmit,
+  analyzeVendorBlockForSubmit,
+  type CatalogItemVendorFields,
+} from "@/domain/ordering/smartOrderVendor";
 
 const normalizeItemName = (value: string | null | undefined) => (value || "").trim().toLowerCase();
+
+/** Multi-vendor block UX (logic unchanged — copy only). */
+const MULTI_VENDOR_SUBMIT_MESSAGE =
+  "This order includes items from multiple vendors. Create separate orders per vendor.";
+const MULTI_VENDOR_TIP = "Tip: Keep one vendor per list for faster ordering.";
 
 export default function SmartOrderPage() {
   const { currentRestaurant } = useRestaurant();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [runs, setRuns] = useState<any[]>([]);
+  const [runs, setRuns] = useState<Tables<'smart_order_runs'>[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedRun, setSelectedRun] = useState<any>(null);
-  const [runItems, setRunItems] = useState<any[]>([]);
+  const [selectedRun, setSelectedRun] = useState<Tables<'smart_order_runs'> | null>(null);
+  const [runItems, setRunItems] = useState<Tables<'smart_order_run_items'>[]>([]);
   const [deleteRunId, setDeleteRunId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [editingRunItem, setEditingRunItem] = useState<string | null>(null);
@@ -45,21 +58,29 @@ export default function SmartOrderPage() {
   // Filters
   const [dateFilter, setDateFilter] = useState("30");
   const [listFilter, setListFilter] = useState("all");
-  const [lists, setLists] = useState<any[]>([]);
-  const [catalogItems, setCatalogItems] = useState<any[]>([]);
+  const [lists, setLists] = useState<Pick<Tables<'inventory_lists'>, 'id' | 'name'>[]>([]);
+  const [catalogItems, setCatalogItems] = useState<Pick<Tables<'inventory_catalog_items'>, 'id' | 'item_name' | 'product_number' | 'vendor_sku' | 'vendor_name' | 'inventory_list_id'>[]>([]);
 
   // Detail view toggles
   const [showGreen, setShowGreen] = useState(false);
   const [showNoPar, setShowNoPar] = useState(false);
+  const [riskThresholds, setRiskThresholds] = useState<RiskThresholds>({
+    redThresholdPercent: 50,
+    yellowThresholdPercent: 100,
+  });
 
   const { lastOrderDates } = useLastOrderDates(currentRestaurant?.id);
 
   useEffect(() => {
     if (!currentRestaurant) return;
+    let cancelled = false;
     supabase.from("inventory_lists").select("id, name").eq("restaurant_id", currentRestaurant.id)
-      .then(({ data }) => { if (data) setLists(data); });
-    supabase.from("inventory_catalog_items").select("id, item_name, product_number, vendor_sku").eq("restaurant_id", currentRestaurant.id)
-      .then(({ data }) => { if (data) setCatalogItems(data); });
+      .then(({ data }) => { if (!cancelled && data) setLists(data); });
+    supabase.from("inventory_catalog_items").select("id, item_name, product_number, vendor_sku, vendor_name, inventory_list_id").eq("restaurant_id", currentRestaurant.id)
+      .then(({ data }) => { if (!cancelled && data) setCatalogItems(data); });
+    supabase.from("smart_order_settings").select("red_threshold, yellow_threshold").eq("restaurant_id", currentRestaurant.id).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setRiskThresholds(riskThresholdsFromSettings(data)); });
+    return () => { cancelled = true; };
   }, [currentRestaurant]);
 
   const catalogLookup = catalogItems.reduce<Record<string, any>>((acc, ci) => {
@@ -74,25 +95,55 @@ export default function SmartOrderPage() {
     return acc;
   }, {});
 
+  const vendorSubmitAnalysis = useMemo(() => {
+    if (!selectedRun) return { blocked: false as const };
+    const byId = catalogItems.reduce<Record<string, CatalogItemVendorFields>>((acc, ci) => {
+      acc[ci.id] = ci;
+      return acc;
+    }, {});
+    const multi = analyzeMultiVendorBlockForSubmit(runItems, byId);
+    if (multi.blocked) {
+      return { blocked: true as const, reason: "multi_vendor" as const, sampleVendors: multi.sampleVendors };
+    }
+    const rest = analyzeVendorBlockForSubmit(
+      runItems,
+      selectedRun.inventory_list_id ?? null,
+      byId,
+    );
+    if (rest.blocked) {
+      return {
+        blocked: true as const,
+        reason: "no_vendor" as const,
+        listLevelOnly: rest.listLevelOnly,
+        sampleNames: rest.sampleNames,
+        problemLineCount: rest.problemLineCount,
+      };
+    }
+    return { blocked: false as const };
+  }, [selectedRun, runItems, catalogItems]);
+
   const fetchRuns = async () => {
     if (!currentRestaurant) return;
     setLoading(true);
-    const daysAgo = new Date();
-    daysAgo.setDate(daysAgo.getDate() - parseInt(dateFilter));
+    try {
+      const daysAgo = new Date();
+      daysAgo.setDate(daysAgo.getDate() - parseInt(dateFilter));
 
-    let query = supabase.from("smart_order_runs")
-      .select("*, inventory_lists(name), inventory_sessions(name, approved_at), par_guides(name), smart_order_run_items(id)")
-      .eq("restaurant_id", currentRestaurant.id)
-      .gte("created_at", daysAgo.toISOString())
-      .order("created_at", { ascending: false });
+      let query = supabase.from("smart_order_runs")
+        .select("*, inventory_lists(name), inventory_sessions(name, approved_at), par_guides(name), smart_order_run_items(id)")
+        .eq("restaurant_id", currentRestaurant.id)
+        .gte("created_at", daysAgo.toISOString())
+        .order("created_at", { ascending: false });
 
-    if (listFilter !== "all") {
-      query = query.eq("inventory_list_id", listFilter);
+      if (listFilter !== "all") {
+        query = query.eq("inventory_list_id", listFilter);
+      }
+
+      const { data } = await query;
+      if (data) setRuns(data);
+    } finally {
+      setLoading(false);
     }
-
-    const { data } = await query;
-    if (data) setRuns(data);
-    setLoading(false);
   };
 
   useEffect(() => { fetchRuns(); }, [currentRestaurant, dateFilter, listFilter]);
@@ -160,6 +211,27 @@ export default function SmartOrderPage() {
 
   const handleSubmitOrder = async () => {
     if (!selectedRun || !user) return;
+    if (vendorSubmitAnalysis.blocked) {
+      if (vendorSubmitAnalysis.reason === "multi_vendor") {
+        toast.error(MULTI_VENDOR_SUBMIT_MESSAGE, { description: MULTI_VENDOR_TIP });
+        return;
+      }
+      if (vendorSubmitAnalysis.listLevelOnly) {
+        toast.error(
+          "Cannot submit order: no vendor on catalog for this list. Add vendor names in List Management before submitting this order.",
+        );
+        return;
+      }
+      const { sampleNames, problemLineCount } = vendorSubmitAnalysis;
+      const namesPart =
+        sampleNames.length > 0
+          ? ` Examples: ${sampleNames.join(", ")}${problemLineCount > sampleNames.length ? "…" : ""}.`
+          : "";
+      toast.error(
+        `Cannot submit order: no vendor on catalog for this list (${problemLineCount} line${problemLineCount === 1 ? "" : "s"} affected).${namesPart} Add vendor names in List Management before submitting this order.`,
+      );
+      return;
+    }
     // Capture pre-submit status from the closure so the toast is correct
     // even after state updates happen asynchronously.
     const isFirstSubmit = selectedRun.status !== 'submitted';
@@ -198,9 +270,9 @@ export default function SmartOrderPage() {
       );
 
       if (isFirstSubmit) {
-        toast.success(poNumber ? `Order submitted — ${poNumber}` : 'Order submitted');
+        toast.success(poNumber ? `Order submitted — ${poNumber} created` : 'Order submitted');
       } else {
-        toast.success('Purchase History updated');
+        toast.success(poNumber ? `PO updated — ${poNumber}` : 'PO updated');
       }
     } catch (e: any) {
       toast.error(`Submit failed: ${e.message}`);
@@ -209,8 +281,9 @@ export default function SmartOrderPage() {
     }
   };
 
-  const riskBadge = (risk: string, currentStock?: number, parLevel?: number) => {
-    const riskInfo = getRisk(currentStock, parLevel);
+  const riskBadge = (currentStock?: number, parLevel?: number) => {
+    const riskInfo = getRisk(currentStock, parLevel, riskThresholds);
+    const risk = riskInfo.level;
     const badgeClass = risk === "RED" ? "bg-destructive/10 text-destructive"
       : risk === "YELLOW" ? "bg-warning text-warning-foreground"
       : risk === "NO_PAR" ? "bg-muted/60 text-muted-foreground"
@@ -231,11 +304,15 @@ export default function SmartOrderPage() {
 
   // Detail view
   if (selectedRun) {
-    const orderItems = runItems.filter(i => i.suggested_order > 0 && i.risk !== "NO_PAR");
-    const greenItems = runItems.filter(i => i.risk === "GREEN" && i.suggested_order <= 0);
-    const noParItems = runItems.filter(i => i.risk === "NO_PAR");
-    const redCount = runItems.filter(i => i.risk === "RED").length;
-    const yellowCount = runItems.filter(i => i.risk === "YELLOW").length;
+    const orderItems = runItems.filter(
+      i => i.suggested_order > 0 && getRisk(i.current_stock, i.par_level, riskThresholds).level !== "NO_PAR",
+    );
+    const greenItems = runItems.filter(
+      i => getRisk(i.current_stock, i.par_level, riskThresholds).level === "GREEN" && i.suggested_order <= 0,
+    );
+    const noParItems = runItems.filter(i => getRisk(i.current_stock, i.par_level, riskThresholds).level === "NO_PAR");
+    const redCount = runItems.filter(i => getRisk(i.current_stock, i.par_level, riskThresholds).level === "RED").length;
+    const yellowCount = runItems.filter(i => getRisk(i.current_stock, i.par_level, riskThresholds).level === "YELLOW").length;
     const lineEstCost = (i: { suggested_order: number; unit_cost: number | null }) => {
       if (!i.unit_cost || !(i.suggested_order > 0)) return 0;
       return Math.round(Number(i.suggested_order) * Number(i.unit_cost) * 100) / 100;
@@ -289,16 +366,16 @@ export default function SmartOrderPage() {
               size="sm"
               variant={selectedRun.status === 'submitted' ? 'outline' : 'default'}
               className="gap-1.5"
-              disabled={submitting}
+              disabled={submitting || vendorSubmitAnalysis.blocked}
               onClick={handleSubmitOrder}
             >
               <ShoppingCart className="h-3.5 w-3.5" />
-              {submitting ? 'Saving…' : selectedRun.status === 'submitted' ? 'Update Purchase History' : 'Submit Order'}
+              {submitting ? 'Submitting…' : selectedRun.status === 'submitted' ? 'Update PO' : 'Submit Order'}
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
               window.location.href = "/app/purchase-history";
             }}>
-              <ExternalLink className="h-3.5 w-3.5" /> Purchase History
+              <ExternalLink className="h-3.5 w-3.5" /> View orders & receipts
             </Button>
           </div>
         </div>
@@ -313,6 +390,39 @@ export default function SmartOrderPage() {
                 </p>
                 <p className="text-xs text-warning mt-1">
                   Link a PAR guide in PAR Management and run a new count for accurate suggestions.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {vendorSubmitAnalysis.blocked && vendorSubmitAnalysis.reason === "multi_vendor" && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="flex items-start gap-3 p-4">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-destructive leading-snug">
+                  {MULTI_VENDOR_SUBMIT_MESSAGE}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1.5 leading-snug">
+                  {MULTI_VENDOR_TIP}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        {vendorSubmitAnalysis.blocked && vendorSubmitAnalysis.reason === "no_vendor" && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="flex items-start gap-3 p-4">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-destructive">
+                  Cannot submit — no vendor on catalog for this list
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {vendorSubmitAnalysis.listLevelOnly
+                    ? "Add vendor names to catalog items on this list in List Management, then submit again."
+                    : `${vendorSubmitAnalysis.problemLineCount} order line${vendorSubmitAnalysis.problemLineCount === 1 ? "" : "s"} cannot resolve a PO vendor. Add vendor names in List Management, then submit again.`}
                 </p>
               </div>
             </CardContent>
@@ -370,6 +480,9 @@ export default function SmartOrderPage() {
               </CardContent>
             </Card>
           </div>
+          <p className="text-[11px] text-muted-foreground leading-snug px-1 pt-2 max-w-4xl">
+            {STOCK_TRUTH_MESSAGE}
+          </p>
         </div>
 
         {/* Toggles */}
@@ -434,7 +547,7 @@ export default function SmartOrderPage() {
                 </TableRow>
               ) : displayItems.map(i => (
                 <TableRow key={i.id} className="hover:bg-muted/30 transition-colors">
-                  <TableCell>{riskBadge(i.risk, i.current_stock, i.par_level)}</TableCell>
+                  <TableCell>{riskBadge(i.current_stock, i.par_level)}</TableCell>
                   <TableCell>
                     <span className="font-medium text-sm">{i.item_name}</span>
                     <ItemIdentityBlock
@@ -470,7 +583,7 @@ export default function SmartOrderPage() {
                         onFocus={e => e.target.select()}
                         onChange={e => setEditRunValues(prev => ({ ...prev, par_level: e.target.value }))}
                         onBlur={async () => {
-                          const parsed = parseFloat(editRunValues.par_level) || 0;
+                          const parsed = Math.max(0, parseFloat(editRunValues.par_level) || 0);
                           setRunItems(prev => prev.map(r => r.id === i.id ? { ...r, par_level: parsed } : r));
                           await supabase.from("smart_order_run_items").update({ par_level: parsed }).eq("id", i.id);
                           setEditingRunItem(null);
@@ -503,7 +616,8 @@ export default function SmartOrderPage() {
                         onFocus={e => e.target.select()}
                         onChange={e => setEditRunValues(prev => ({ ...prev, unit_cost: e.target.value }))}
                         onBlur={async () => {
-                          const parsed = parseFloat(editRunValues.unit_cost) || null;
+                          const rawCost = parseFloat(editRunValues.unit_cost);
+                          const parsed = Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : null;
                           setRunItems(prev => prev.map(r => r.id === i.id ? { ...r, unit_cost: parsed } : r));
                           await supabase.from("smart_order_run_items").update({ unit_cost: parsed }).eq("id", i.id);
                           setEditingRunItem(null);
@@ -630,7 +744,7 @@ export default function SmartOrderPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete smart order?</AlertDialogTitle>
-            <AlertDialogDescription>This will permanently delete this smart order run and its linked purchase history. This cannot be undone.</AlertDialogDescription>
+            <AlertDialogDescription>This will permanently delete this smart order run and any linked PO or receipt records. This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

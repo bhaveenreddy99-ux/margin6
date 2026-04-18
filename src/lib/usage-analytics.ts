@@ -470,7 +470,7 @@ async function loadParGuideOverrides(
 
   let parGuideQuery = supabase
     .from("par_guide_items")
-    .select("item_name, par_level, category, unit, par_guides!inner(restaurant_id, inventory_list_id)");
+    .select("item_name, par_level, category, unit, catalog_item_id, par_guides!inner(restaurant_id, inventory_list_id)");
 
   if (options.parGuideId) {
     parGuideQuery = parGuideQuery.eq("par_guide_id", options.parGuideId);
@@ -488,13 +488,19 @@ async function loadParGuideOverrides(
     if (!normalizedName) continue;
 
     const parLevel = Number(item.par_level ?? 0);
+    const entry: ParGuideOverride = {
+      display_name: item.item_name,
+      par_level: parLevel,
+      category: item.category ?? null,
+      unit: item.unit ?? null,
+    };
+
+    const catalogKey = item.catalog_item_id ? `catalog:${item.catalog_item_id}` : null;
+    if (catalogKey && (!overrides[catalogKey] || parLevel > overrides[catalogKey].par_level)) {
+      overrides[catalogKey] = entry;
+    }
     if (!overrides[normalizedName] || parLevel > overrides[normalizedName].par_level) {
-      overrides[normalizedName] = {
-        display_name: item.item_name,
-        par_level: parLevel,
-        category: item.category ?? null,
-        unit: item.unit ?? null,
-      };
+      overrides[normalizedName] = entry;
     }
   }
 
@@ -600,7 +606,10 @@ export async function computeDetailedPARRecommendations(
     const validStocks = data.stocks.filter((stock): stock is number => stock !== null);
     if (validStocks.length < 3) continue;
 
-    const parGuideOverride = parGuideOverrides[data.normalized_name];
+    const byCatalogKey = data.catalog_item_id
+      ? parGuideOverrides[`catalog:${data.catalog_item_id}`]
+      : undefined;
+    const parGuideOverride = byCatalogKey ?? parGuideOverrides[data.normalized_name];
     const currentPar = parGuideOverride?.par_level ?? Math.max(...data.pars, 0);
     const weeklyUsages = weeklyUsageByKey[key] ?? [];
     const positiveWeeklyUsages = weeklyUsages.filter(usage => usage > 0);

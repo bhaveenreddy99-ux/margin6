@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Loader2, Plug, Download, Check, AlertTriangle, Calendar } from "lucide-react";
+import { Loader2, Plug, Download, Check, Calendar } from "lucide-react";
 import { InvoiceItem, VendorInvoiceSummary } from "./types";
 import { useInvoiceMatching } from "./useInvoiceMatching";
 import { formatNum } from "@/lib/inventory-utils";

@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, useLayoutEffect } from "react";
+import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
 import { format } from "date-fns";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,7 +15,6 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -25,226 +24,335 @@ import {
   BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { toast } from "sonner";
 import {
-  Plus, Minus, Send, Package, BookOpen, Play, ArrowLeft, Eye, CheckCircle, ClipboardList,
+  Plus, Minus, Send, Package, BookOpen, Play, ArrowLeft, Eye, CheckCircle, ClipboardList, ExternalLink,
   XCircle, ShoppingCart, Copy, ClipboardCheck, Trash2, ChevronRight, Eraser,
-  Search, SkipForward, EyeOff, Check, ListOrdered, AlertTriangle, MoreHorizontal, MoreVertical,
-  LayoutGrid, List as ListIcon, TrendingDown, CalendarClock, MapPin, Filter, Pencil, DollarSign, BarChart3 } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+  Search, EyeOff, Check, ListOrdered, MoreHorizontal, MoreVertical,
+  CalendarClock, MapPin, Filter, Pencil, DollarSign, BarChart3 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from "@/components/ui/dropdown-menu";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { useCategoryMapping } from "@/hooks/useCategoryMapping";
+import { useEnterInventoryData } from "@/hooks/useEnterInventoryData";
+import { useEnterInventoryActions } from "@/hooks/useEnterInventoryActions";
 
 import {
   getRisk, getRowState, getRowBgClass, formatNum, parseInputValue,
-  inputDisplayValue, computeOrderQty, computeRiskLevel, formatCurrency,
+  inputDisplayValue, computeOrderQty, formatCurrency, type RiskThresholds,
 } from "@/lib/inventory-utils";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ItemIdentityBlock from "@/components/ItemIdentityBlock";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
+import {
+  DESKTOP_CATEGORY_LIST_MAX_HEIGHT,
+  DESKTOP_COUNT_ROW_HEIGHT,
+  MOBILE_COUNT_CARD_HEIGHT,
+  buildCatalogDefaultParById,
+  buildCatalogDefaultParByName,
+  buildCatalogLookup,
+  buildInventoryView,
+  buildLandingFocus,
+  buildSubmitSummary,
+  computeNextOccurrence,
+  findNextSchedule,
+  formatCountdown,
+  formatLastOrdered as formatLastOrderedHelper,
+  formatParColumnCell as formatParColumnCellHelper,
+  formatSessionRowDate,
+  getApprovedPar as getApprovedParHelper,
+  getCatalogUnitCost as getCatalogUnitCostHelper,
+  getDesktopSessionGridTemplate,
+  getItemCategory as getItemCategoryHelper,
+  getItemSortOrder as getItemSortOrderHelper,
+  getProductNumber as getProductNumberHelper,
+  getRiskBadgeLabel,
+  getScheduleStatus,
+  normalizeItemName,
+  resolveCountingParDisplay as resolveCountingParDisplayHelper,
+} from "@/domain/inventory/enterInventoryHelpers";
+import type {
+  InventoryCatalogItemRow,
+  InventoryListRow,
+  InventorySessionItemRow,
+  InventorySessionListRow,
+} from "@/domain/inventory/enterInventoryTypes";
 
 const defaultCategories = ["Frozen", "Cooler", "Dry"];
 
-function normalizeItemName(itemName: string | null | undefined): string {
-  return itemName?.trim().toLowerCase() ?? "";
+/** react-window row for desktop session table — isolated from parent to limit re-renders. */
+type SessionDesktopVirtualData = {
+  catItems: InventorySessionItemRow[];
+  globalIndexByItemId: Map<string, number>;
+  getApprovedPar: (item: InventorySessionItemRow) => number;
+  riskThresholds: RiskThresholds;
+  parColumnVisible: boolean;
+  /** Staff in counting mode: hide price, shorten row meta, emphasize qty. */
+  simplifyCountingRow: boolean;
+  isCountingEditable: boolean;
+  onUpdateStock: (id: string, raw: string) => void;
+  onSaveStock: (id: string, stock: number | null) => void | Promise<void>;
+  onKeyDown: (e: React.KeyboardEvent, idx: number, field?: "stock") => void;
+  inputRefs: React.MutableRefObject<Record<string, HTMLInputElement | null>>;
+  formatParColumnCell: (item: InventorySessionItemRow) => string;
+  getProductNumber: (item: InventorySessionItemRow) => string | null;
+  formatLastOrdered: (d: string | null) => string;
+  getLastOrderDate: (name: string) => string | null;
+  renderRowActionsMenu: (item: InventorySessionItemRow) => React.ReactNode;
+  savingId: string | null;
+  savedId: string | null;
+  lastEditedId: string | null;
+};
+
+/**
+ * Desktop session count row (virtualized). Kept as a plain function because react-window v2's
+ * `List` `rowComponent` prop is typed for a non-memo component; only visible rows mount anyway.
+ */
+function InventoryRow(props: RowComponentProps<SessionDesktopVirtualData>) {
+  const { index, style, ariaAttributes, ...data } = props;
+  const item = data.catItems[index];
+  if (!item) return null;
+  const globalIdx = data.globalIndexByItemId.get(item.id) ?? 0;
+  const rowPar = data.getApprovedPar(item);
+  const needQty = rowPar > 0 ? computeOrderQty(item.current_stock, rowPar, item.unit, item.pack_size) : null;
+  const risk = getRisk(item.current_stock, rowPar, data.riskThresholds);
+  const rowBg = getRowBgClass(item.current_stock);
+  const isRecentlyEdited = data.lastEditedId === item.id;
+  const gridTemplate = getDesktopSessionGridTemplate(data.parColumnVisible, data.simplifyCountingRow);
+  const showMetaLine =
+    !data.simplifyCountingRow
+    || data.getProductNumber(item)
+    || !!item.pack_size;
+
+  return (
+    <div
+      {...ariaAttributes}
+      style={{ ...style, display: "grid", gridTemplateColumns: gridTemplate }}
+      className={`items-center gap-x-2 border-b border-border/10 px-2 transition-all duration-200 hover:bg-muted/20 ${rowBg} ${isRecentlyEdited ? "bg-primary/[0.03]" : ""}`}
+    >
+      <div className="pl-3 py-3 min-w-0">
+        <p className={`font-medium leading-tight ${data.simplifyCountingRow ? "text-[15px]" : "text-sm"}`}>{item.item_name}</p>
+        <ItemIdentityBlock brandName={item.brand_name} className="block mt-0.5" />
+        {showMetaLine && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0 mt-0.5">
+            {data.getProductNumber(item) && (
+              <span className="text-[11px] text-muted-foreground/50 font-mono">#{data.getProductNumber(item)}</span>
+            )}
+            {item.pack_size && <span className="text-[11px] text-muted-foreground/50">{item.pack_size}</span>}
+            {!data.simplifyCountingRow && (
+              <span className="text-[11px] text-muted-foreground/40">
+                {data.formatLastOrdered(data.getLastOrderDate(item.item_name)) !== "—"
+                  ? `Last: ${data.formatLastOrdered(data.getLastOrderDate(item.item_name))}`
+                  : null}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex justify-center py-3">
+        <div className="flex items-center justify-center gap-2">
+          <Input
+            ref={(el) => {
+              data.inputRefs.current[item.id] = el;
+            }}
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={0.1}
+            readOnly={!data.isCountingEditable}
+            value={inputDisplayValue(item.current_stock)}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => data.onUpdateStock(item.id, e.target.value)}
+            onBlur={() => data.onSaveStock(item.id, item.current_stock)}
+            onKeyDown={(e) => data.onKeyDown(e, globalIdx, "stock")}
+            className={`w-24 text-base font-mono text-center font-semibold rounded-lg border-2 bg-background [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+              data.simplifyCountingRow
+                ? "h-11 border-primary/35 shadow-sm focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
+                : "h-10 border-border/50 focus:border-primary/50"
+            }`}
+          />
+          <div className="w-5">
+            {data.savingId === item.id && <span className="text-muted-foreground animate-pulse text-xs">…</span>}
+            {data.savedId === item.id && <Check className="h-3.5 w-3.5 text-success" />}
+          </div>
+        </div>
+      </div>
+      {data.parColumnVisible && (
+        <div className="text-right py-3">
+          <span className="text-sm font-mono font-semibold tabular-nums text-foreground">
+            {data.formatParColumnCell(item)}
+          </span>
+        </div>
+      )}
+      {!data.simplifyCountingRow && (
+        <div className="text-right py-3">
+          <span className="text-sm font-mono tabular-nums text-foreground">
+            {item.unit_cost != null ? `$${Number(item.unit_cost).toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
+          </span>
+        </div>
+      )}
+      <div className="text-right py-3">
+        {needQty !== null ? (
+          <span
+            className={`font-mono font-semibold ${data.simplifyCountingRow ? "text-xs" : "text-sm"} ${needQty > 0 ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {formatNum(needQty)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/30 text-sm">—</span>
+        )}
+      </div>
+      <div className="text-center py-3 pr-2">
+        <Badge
+          className={`${risk.bgClass} ${risk.textClass} border-0 font-medium ${data.simplifyCountingRow ? "text-[9px] px-1.5 py-0" : "text-[10px]"}`}
+        >
+          {getRiskBadgeLabel(risk)}
+        </Badge>
+      </div>
+      <div className="py-3 pr-1 flex justify-end" onClick={(e) => e.stopPropagation()}>
+        {data.renderRowActionsMenu(item)}
+      </div>
+    </div>
+  );
 }
 
-/** Map PAR guide rows to session/catalog keys: prefer catalog_item_id via name bridge; only real guide rows included. */
-function buildCountingParLookup(
-  guideItems: Array<{ item_name: string | null; par_level: number | string | null | undefined }>,
-  catalogRows: Array<{ id: string; item_name: string | null }>,
-): { byCatalogId: Record<string, number>; byNormalizedName: Record<string, number> } {
-  const byNormalizedName: Record<string, number> = {};
-  const byCatalogId: Record<string, number> = {};
-  const catalogIdByNorm: Record<string, string> = {};
-  catalogRows.forEach((c) => {
-    const k = normalizeItemName(c.item_name);
-    if (k && catalogIdByNorm[k] === undefined) catalogIdByNorm[k] = c.id;
-  });
-  guideItems.forEach((gi) => {
-    const k = normalizeItemName(gi.item_name);
-    if (!k) return;
-    const parsed = Number(gi.par_level ?? 0);
-    const val = Number.isFinite(parsed) ? parsed : 0;
-    byNormalizedName[k] = val;
-    const cid = catalogIdByNorm[k];
-    if (cid) byCatalogId[cid] = val;
-  });
-  return { byCatalogId, byNormalizedName };
-}
+type SessionDesktopCategoryListProps = {
+  catItems: InventorySessionItemRow[];
+  listWidth: number;
+  globalIndexByItemId: Map<string, number>;
+  riskThresholds: RiskThresholds;
+  parColumnVisible: boolean;
+  isCountingEditable: boolean;
+  onUpdateStock: SessionDesktopVirtualData["onUpdateStock"];
+  onSaveStock: SessionDesktopVirtualData["onSaveStock"];
+  onKeyDown: SessionDesktopVirtualData["onKeyDown"];
+  inputRefs: SessionDesktopVirtualData["inputRefs"];
+  formatParColumnCell: SessionDesktopVirtualData["formatParColumnCell"];
+  getProductNumber: SessionDesktopVirtualData["getProductNumber"];
+  formatLastOrdered: SessionDesktopVirtualData["formatLastOrdered"];
+  getLastOrderDate: SessionDesktopVirtualData["getLastOrderDate"];
+  renderRowActionsMenu: SessionDesktopVirtualData["renderRowActionsMenu"];
+  savingId: SessionDesktopVirtualData["savingId"];
+  savedId: SessionDesktopVirtualData["savedId"];
+  lastEditedId: SessionDesktopVirtualData["lastEditedId"];
+  getApprovedPar: SessionDesktopVirtualData["getApprovedPar"];
+  simplifyCountingRow: boolean;
+  registerListRef: (instance: ListImperativeAPI | null) => void;
+};
 
-function buildParLevelMap(
-  guideItems: Array<{ item_name: string | null; par_level: number | string | null | undefined }>,
-): Record<string, number> {
-  const map: Record<string, number> = {};
-  guideItems.forEach((item) => {
-    const key = normalizeItemName(item.item_name);
-    if (!key) return;
-    const parsed = Number(item.par_level ?? 0);
-    map[key] = Number.isFinite(parsed) ? parsed : 0;
-  });
-  return map;
-}
+function SessionDesktopCategoryList({
+  catItems,
+  listWidth,
+  globalIndexByItemId,
+  riskThresholds,
+  parColumnVisible,
+  simplifyCountingRow,
+  isCountingEditable,
+  onUpdateStock,
+  onSaveStock,
+  onKeyDown,
+  inputRefs,
+  formatParColumnCell,
+  getProductNumber,
+  formatLastOrdered,
+  getLastOrderDate,
+  renderRowActionsMenu,
+  savingId,
+  savedId,
+  lastEditedId,
+  getApprovedPar,
+  registerListRef,
+}: SessionDesktopCategoryListProps) {
+  const rowProps = useMemo<SessionDesktopVirtualData>(
+    () => ({
+      catItems,
+      globalIndexByItemId,
+      getApprovedPar,
+      riskThresholds,
+      parColumnVisible,
+      simplifyCountingRow,
+      isCountingEditable,
+      onUpdateStock,
+      onSaveStock,
+      onKeyDown,
+      inputRefs,
+      formatParColumnCell,
+      getProductNumber,
+      formatLastOrdered,
+      getLastOrderDate,
+      renderRowActionsMenu,
+      savingId,
+      savedId,
+      lastEditedId,
+    }),
+    [
+      catItems,
+      globalIndexByItemId,
+      getApprovedPar,
+      riskThresholds,
+      parColumnVisible,
+      simplifyCountingRow,
+      isCountingEditable,
+      onUpdateStock,
+      onSaveStock,
+      onKeyDown,
+      inputRefs,
+      formatParColumnCell,
+      getProductNumber,
+      formatLastOrdered,
+      getLastOrderDate,
+      renderRowActionsMenu,
+      savingId,
+      savedId,
+      lastEditedId,
+    ],
+  );
 
-function getRiskBadgeLabel(risk: ReturnType<typeof getRisk>): string {
-  return risk.level === "NO_PAR" ? "NO PAR" : risk.level;
-}
+  const headerGrid = getDesktopSessionGridTemplate(parColumnVisible, simplifyCountingRow);
 
-// ── Schedule helpers ──────────────────────────────────
-function computeNextOccurrence(schedule: any): Date | null {
-  const dayMap: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
-  const tzOffsets: Record<string, number> = {
-    "America/New_York": -5, "America/Chicago": -6,
-    "America/Denver": -7, "America/Los_Angeles": -8,
-  };
-  const days: string[] = schedule.days_of_week || [];
-  const [h, m] = (schedule.time_of_day || "09:00").split(":").map(Number);
-  const offset = tzOffsets[schedule.timezone] ?? -5;
-  const now = new Date();
+  const safeWidth = Math.max(listWidth, 320);
+  const listHeight = Math.min(
+    Math.max(catItems.length * DESKTOP_COUNT_ROW_HEIGHT, catItems.length > 0 ? 80 : 0),
+    DESKTOP_CATEGORY_LIST_MAX_HEIGHT,
+  );
 
-  const monthlyDay = days.find(d => d.startsWith("MONTHLY_"));
-  if (monthlyDay) {
-    const day = parseInt(monthlyDay.split("_")[1]);
-    const candidate = new Date(now.getFullYear(), now.getMonth(), day, h, m, 0, 0);
-    if (candidate <= now) candidate.setMonth(candidate.getMonth() + 1);
-    return candidate;
-  }
-
-  for (let i = 0; i <= 7; i++) {
-    const candidate = new Date(now);
-    candidate.setDate(now.getDate() + i);
-    const candidateDay = Object.keys(dayMap).find(k => dayMap[k] === candidate.getDay());
-    if (candidateDay && days.includes(candidateDay)) {
-      candidate.setHours(h, m, 0, 0);
-      if (candidate > now) return candidate;
-    }
-  }
-  return null;
-}
-
-function getScheduleStatus(nextDate: Date): "upcoming" | "ready" | "overdue" {
-  const diffMs = nextDate.getTime() - Date.now();
-  if (diffMs < 0) return "overdue";
-  if (diffMs < 60 * 60 * 1000) return "ready";
-  return "upcoming";
-}
-
-function formatCountdown(nextDate: Date): string {
-  const diffMs = nextDate.getTime() - Date.now();
-  if (diffMs <= 0) return "Now";
-  const h = Math.floor(diffMs / 3600000);
-  const m = Math.floor((diffMs % 3600000) / 60000);
-  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
-function formatSessionRowDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return format(new Date(iso), "EEE, MM/dd/yy");
-  } catch {
-    return "—";
-  }
-}
-
-/** True when PostgREST reports missing `catalog_item_id` on inventory_session_items (DB not migrated). */
-function isInventorySessionItemsCatalogIdSchemaError(message: string | undefined): boolean {
-  if (!message) return false;
-  return /inventory_session_items.*catalog_item_id|catalog_item_id.*inventory_session_items|schema cache/i.test(message);
-}
-
-/** Seed session lines from inventory_catalog_items (+ PAR guide levels). Returns inserted row count. */
-async function insertInventorySessionLinesFromCatalog(
-  sessionId: string,
-  inventoryListId: string,
-  restaurantId: string,
-): Promise<{ ok: boolean; count: number; errorMessage?: string }> {
-  const { data: catItems, error: catFetchError } = await supabase
-    .from("inventory_catalog_items")
-    .select("*")
-    .eq("restaurant_id", restaurantId)
-    .eq("inventory_list_id", inventoryListId);
-
-  if (catFetchError) {
-    console.log("[EnterInventory] catalog fetch (seed) error:", catFetchError.message);
-    return { ok: false, count: 0, errorMessage: catFetchError.message };
-  }
-
-  const validCatalog = (catItems || []).filter((ci) => (ci.item_name || "").trim().length > 0);
-  if (validCatalog.length === 0) {
-    return { ok: true, count: 0 };
-  }
-
-  let resolvedParItems: any[] = [];
-  const { data: latestGuide, error: guideSeedErr } = await supabase
-    .from("par_guides")
-    .select("id")
-    .eq("inventory_list_id", inventoryListId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (guideSeedErr) {
-    console.log("[EnterInventory] par_guide (seed) error:", guideSeedErr.message);
-  }
-  if (latestGuide) {
-    const { data: latestItems } = await supabase
-      .from("par_guide_items")
-      .select("*")
-      .eq("par_guide_id", latestGuide.id);
-    if (latestItems) resolvedParItems = latestItems;
-  }
-
-  const parMap = buildParLevelMap(resolvedParItems);
-  const parFromGuideOrCatalog = (itemName: string, defaultPar: number | null | undefined) => {
-    const key = normalizeItemName(itemName);
-    if (key && key in parMap) return parMap[key];
-    if (defaultPar != null) {
-      const n = Number(defaultPar);
-      return Number.isFinite(n) ? n : 0;
-    }
-    return 0;
-  };
-
-  const mapRowWithCatalog = (ci: (typeof validCatalog)[0]) => ({
-    session_id: sessionId,
-    catalog_item_id: ci.id,
-    item_name: ci.item_name.trim(),
-    category: ci.category || "Dry",
-    unit: ci.unit || "",
-    pack_size: ci.pack_size ?? null,
-    brand_name: ci.brand_name ?? null,
-    vendor_name: ci.vendor_name ?? null,
-    vendor_sku: ci.vendor_sku ?? null,
-    current_stock: 0,
-    par_level: parFromGuideOrCatalog(ci.item_name, ci.default_par_level),
-    unit_cost: ci.default_unit_cost ?? null,
-  });
-
-  const mapRowLegacy = (ci: (typeof validCatalog)[0]) => {
-    const { catalog_item_id: _c, ...rest } = mapRowWithCatalog(ci);
-    return rest;
-  };
-
-  const preItemsWithCatalog = validCatalog.map(mapRowWithCatalog);
-  let { data: insertedSessionItems, error: sessionItemsInsertError } = await supabase
-    .from("inventory_session_items")
-    .insert(preItemsWithCatalog)
-    .select("id");
-
-  if (sessionItemsInsertError && isInventorySessionItemsCatalogIdSchemaError(sessionItemsInsertError.message)) {
-    console.log("[EnterInventory] Retrying session seed without catalog_item_id (DB column missing).");
-    const preItemsLegacy = validCatalog.map(mapRowLegacy);
-    ({ data: insertedSessionItems, error: sessionItemsInsertError } = await supabase
-      .from("inventory_session_items")
-      .insert(preItemsLegacy)
-      .select("id"));
-  }
-
-  if (sessionItemsInsertError) {
-    console.log("[EnterInventory] inventory_session_items insert (seed) error:", sessionItemsInsertError.message);
-    return { ok: false, count: 0, errorMessage: sessionItemsInsertError.message };
-  }
-
-  return { ok: true, count: insertedSessionItems?.length ?? 0 };
+  return (
+    <>
+      <div
+        className="grid items-center gap-x-2 border-b border-border/20 bg-muted/30 px-2"
+        style={{ gridTemplateColumns: headerGrid }}
+      >
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 pl-3 py-3">Item</div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 text-center py-3">On Hand</div>
+        {parColumnVisible && (
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 text-right py-3">PAR</div>
+        )}
+        {!simplifyCountingRow && (
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 text-right py-3">Price</div>
+        )}
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 text-right py-3">Need</div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 text-center py-3 pr-2">Status</div>
+        <div className="w-10 py-3" aria-hidden />
+      </div>
+      {catItems.length > 0 && (
+        <List
+          listRef={registerListRef}
+          rowCount={catItems.length}
+          rowHeight={DESKTOP_COUNT_ROW_HEIGHT}
+          rowComponent={InventoryRow}
+          rowProps={rowProps}
+          overscanCount={6}
+          style={{ height: listHeight, width: safeWidth }}
+        />
+      )}
+    </>
+  );
 }
 
 export default function EnterInventoryPage() {
@@ -260,98 +368,145 @@ export default function EnterInventoryPage() {
   const isMobile = useIsMobile();
   const { lastOrderDates } = useLastOrderDates(currentRestaurant?.id, currentLocation?.id);
 
-  const [lists, setLists] = useState<any[]>([]);
   const [selectedList, setSelectedList] = useState("");
   const [landingFocusListId, setLandingFocusListId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const [startingListId, setStartingListId] = useState<string | null>(null);
-  const [listSelectorMeta, setListSelectorMeta] = useState<Record<string, { itemCount: number; lastCountedAt: string | null; hasParGuide: boolean }>>({});
-
-  const [inProgressSessions, setInProgressSessions] = useState<any[]>([]);
-  const [reviewSessions, setReviewSessions] = useState<any[]>([]);
-  const [approvedSessions, setApprovedSessions] = useState<any[]>([]);
-  const [sessionStats, setSessionStats] = useState<Record<string, { qty: number; totalValue: number; counted: number; total: number }>>({});
   const [approvedFilter, setApprovedFilter] = useState("30");
 
-  const [activeSession, setActiveSession] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
+  const [activeSession, setActiveSession] = useState<InventorySessionListRow | null>(null);
+  const [itemById, setItemById] = useState<Record<string, InventorySessionItemRow>>({});
+  const [itemOrder, setItemOrder] = useState<string[]>([]);
+  const items = useMemo(
+    () => itemOrder.map((id) => itemById[id]).filter((x): x is InventorySessionItemRow => x != null),
+    [itemOrder, itemById],
+  );
+  /** Staff in an editable count session — used for toolbar + row simplification (must match session editor). */
+  const staffCountingFocus = useMemo(
+    () =>
+      !!activeSession &&
+      isStaffMenu &&
+      activeSession.status !== "IN_REVIEW" &&
+      activeSession.status !== "APPROVED",
+    [activeSession, isStaffMenu],
+  );
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [newItem, setNewItem] = useState({ item_name: "", category: "Cooler", unit: "", current_stock: 0, unit_cost: 0 });
-  const [catalogItems, setCatalogItems] = useState<any[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
 
   const [selectedPar, setSelectedPar] = useState("");
-  const [parGuides, setParGuides] = useState<any[]>([]);
-  const [parItems, setParItems] = useState<any[]>([]);
-
-  const [viewItems, setViewItems] = useState<any[] | null>(null);
-  const [viewSession, setViewSession] = useState<any>(null);
 
   const [clearEntriesSessionId, setClearEntriesSessionId] = useState<string | null>(null);
   const [clearInProgressSessionId, setClearInProgressSessionId] = useState<string | null>(null);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
 
-  const [smartOrderSession, setSmartOrderSession] = useState<any>(null);
+  const [smartOrderSession, setSmartOrderSession] = useState<InventorySessionListRow | null>(null);
   /** New count: require user-confirmed session name before inserting `inventory_sessions`. */
   const [newCountNameDialogOpen, setNewCountNameDialogOpen] = useState(false);
   const [pendingNewCountListId, setPendingNewCountListId] = useState<string | null>(null);
   const [newCountNameInput, setNewCountNameInput] = useState("");
-  const [smartOrderParGuides, setSmartOrderParGuides] = useState<any[]>([]);
   const [smartOrderSelectedPar, setSmartOrderSelectedPar] = useState("");
-  const [smartOrderCreating, setSmartOrderCreating] = useState(false);
 
   // Counting mode state
   const [showOnlyEmpty, setShowOnlyEmpty] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [savedId, setSavedId] = useState<string | null>(null);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
   const [categoryMode, setCategoryMode] = useState<string>("list_order");
   const [viewToggle] = useState<"table" | "compact">("table");
   const [statusFilter, setStatusFilter] = useState<"all" | "uncounted" | "low" | "critical">("all");
   const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const sessionListWidthRef = useRef<HTMLDivElement>(null);
+  const [sessionListWidth, setSessionListWidth] = useState(800);
+  const categoryVirtualListRefs = useRef<Record<string, ListImperativeAPI | null>>({});
 
-  // Inventory schedules
-  const [schedules, setSchedules] = useState<any[]>([]);
+  useLayoutEffect(() => {
+    if (!activeSession) return;
+    const el = sessionListWidthRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && w > 0) setSessionListWidth(Math.floor(w));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeSession?.id]);
+
+  useEffect(() => {
+    categoryVirtualListRefs.current = {};
+  }, [activeSession?.id]);
+
+  /** Staff sessions only use list_order vs alphabetic; coerce AI / My categories. */
+  useEffect(() => {
+    if (!activeSession || !isStaffMenu) return;
+    if (categoryMode !== "list_order" && categoryMode !== "alphabetic") {
+      setCategoryMode("list_order");
+    }
+  }, [activeSession?.id, isStaffMenu, categoryMode]);
+
   const [, setCounterTick] = useState(0);
 
   // Active PAR guide data for read-only display during count entry
-  const [approvedParMap, setApprovedParMap] = useState<Record<string, number>>({});
+  const [approvedParMap] = useState<Record<string, number>>({});
 
   /** Optional read-only PAR column while counting */
   const [parColumnVisible, setParColumnVisible] = useState(false);
   const [parGuidePickerOpen, setParGuidePickerOpen] = useState(false);
-  const [parGuidesPickerOptions, setParGuidesPickerOptions] = useState<Array<{ id: string; name: string; inventory_list_id: string | null }>>([]);
   const [countingParGuideId, setCountingParGuideId] = useState<string | null>(null);
-  const [countingParGuideName, setCountingParGuideName] = useState<string | null>(null);
-  const [countingParByCatalogId, setCountingParByCatalogId] = useState<Record<string, number>>({});
-  const [countingParByNormalizedName, setCountingParByNormalizedName] = useState<Record<string, number>>({});
 
   // Row ⋮ menu sheets (item details, staff requests, manager PAR/price); see renderRowActionsMenu
-  const [editItemDetailsSessionItem, setEditItemDetailsSessionItem] = useState<any>(null);
+  const [editItemDetailsSessionItem, setEditItemDetailsSessionItem] = useState<InventorySessionItemRow | null>(null);
   const [editItemDetailsForm, setEditItemDetailsForm] = useState({ item_name: "", unit: "", pack_size: "" });
-  const [editItemDetailsSaving, setEditItemDetailsSaving] = useState(false);
 
-  const [staffParRequestItem, setStaffParRequestItem] = useState<any>(null);
+  const [staffParRequestItem, setStaffParRequestItem] = useState<InventorySessionItemRow | null>(null);
   const [staffParSuggested, setStaffParSuggested] = useState("");
   const [staffParReason, setStaffParReason] = useState("");
-  const [staffParSending, setStaffParSending] = useState(false);
 
-  const [staffPriceRequestItem, setStaffPriceRequestItem] = useState<any>(null);
+  const [staffPriceRequestItem, setStaffPriceRequestItem] = useState<InventorySessionItemRow | null>(null);
   const [staffPriceSuggested, setStaffPriceSuggested] = useState("");
   const [staffPriceReason, setStaffPriceReason] = useState("");
-  const [staffPriceSending, setStaffPriceSending] = useState(false);
 
-  const [managerParEditItem, setManagerParEditItem] = useState<any>(null);
+  const [managerParEditItem, setManagerParEditItem] = useState<InventorySessionItemRow | null>(null);
   const [managerParInput, setManagerParInput] = useState("");
-  const [managerParSaving, setManagerParSaving] = useState(false);
 
-  const [managerPriceEditItem, setManagerPriceEditItem] = useState<any>(null);
+  const [managerPriceEditItem, setManagerPriceEditItem] = useState<InventorySessionItemRow | null>(null);
   const [managerPriceInput, setManagerPriceInput] = useState("");
-  const [managerPriceSaving, setManagerPriceSaving] = useState(false);
+
+  const {
+    lists,
+    loading,
+    sessionsLoaded,
+    listSelectorMeta,
+    inProgressSessions,
+    reviewSessions,
+    approvedSessions,
+    sessionStats,
+    riskThresholds,
+    catalogItems,
+    parGuides,
+    parItems,
+    schedules,
+    smartOrderParGuides,
+    parGuidesPickerOptions,
+    countingParGuideName,
+    countingParByCatalogId,
+    countingParByNormalizedName,
+    setCatalogItems,
+    refreshSessions,
+    loadCatalogItemsForList,
+    loadLatestParGuide,
+    loadParGuideItems,
+    loadEditorSnapshot,
+    reloadSessionItems,
+    hydrateCountingParMaps,
+    loadParGuidePickerOptions,
+    loadSmartOrderParGuides,
+  } = useEnterInventoryData({
+    currentRestaurantId: currentRestaurant?.id,
+    approvedFilter,
+    selectedList,
+    selectedPar,
+    setSelectedPar,
+  });
 
   const requestedListId = useMemo(() => {
     const state = (location.state as { list_id?: string; listId?: string } | null) || null;
@@ -362,78 +517,11 @@ export default function EnterInventoryPage() {
       || "";
   }, [location.state, searchParams]);
 
-  const fetchSchedules = useCallback(async () => {
-    if (!currentRestaurant) return;
-    const { data } = await supabase
-      .from("reminders")
-      .select("*, inventory_lists(name), locations(name)")
-      .eq("restaurant_id", currentRestaurant.id)
-      .eq("is_enabled", true)
-      .not("inventory_list_id", "is", null);
-    if (data) setSchedules(data);
-  }, [currentRestaurant]);
-
   useEffect(() => {
     if (!currentRestaurant) return;
-    setLoading(true);
-    setSessionsLoaded(false);
     setSelectedList("");
     setLandingFocusListId(null);
-    setListSelectorMeta({});
-
-    const loadLists = async () => {
-      const [{ data: listData }, { data: catalogData }, { data: guideData }, { data: approvedData }] = await Promise.all([
-        supabase.from("inventory_lists").select("*").eq("restaurant_id", currentRestaurant.id),
-        supabase.from("inventory_catalog_items").select("id, inventory_list_id").eq("restaurant_id", currentRestaurant.id),
-        supabase.from("par_guides").select("id, inventory_list_id").eq("restaurant_id", currentRestaurant.id),
-        supabase.from("inventory_sessions").select("inventory_list_id, approved_at")
-          .eq("restaurant_id", currentRestaurant.id)
-          .eq("status", "APPROVED")
-          .not("approved_at", "is", null)
-          .order("approved_at", { ascending: false }),
-      ]);
-
-      const nextLists = listData || [];
-      setLists(nextLists);
-
-      const nextMeta: Record<string, { itemCount: number; lastCountedAt: string | null; hasParGuide: boolean }> = {};
-      nextLists.forEach((list) => {
-        nextMeta[list.id] = { itemCount: 0, lastCountedAt: null, hasParGuide: false };
-      });
-
-      (catalogData || []).forEach((item: any) => {
-        if (!item.inventory_list_id) return;
-        if (!nextMeta[item.inventory_list_id]) {
-          nextMeta[item.inventory_list_id] = { itemCount: 0, lastCountedAt: null, hasParGuide: false };
-        }
-        nextMeta[item.inventory_list_id].itemCount += 1;
-      });
-
-      (guideData || []).forEach((guide: any) => {
-        if (!guide.inventory_list_id) return;
-        if (!nextMeta[guide.inventory_list_id]) {
-          nextMeta[guide.inventory_list_id] = { itemCount: 0, lastCountedAt: null, hasParGuide: false };
-        }
-        nextMeta[guide.inventory_list_id].hasParGuide = true;
-      });
-
-      (approvedData || []).forEach((session: any) => {
-        if (!session.inventory_list_id || !session.approved_at) return;
-        if (!nextMeta[session.inventory_list_id]) {
-          nextMeta[session.inventory_list_id] = { itemCount: 0, lastCountedAt: null, hasParGuide: false };
-        }
-        const existingDate = nextMeta[session.inventory_list_id].lastCountedAt;
-        if (!existingDate || new Date(session.approved_at) > new Date(existingDate)) {
-          nextMeta[session.inventory_list_id].lastCountedAt = session.approved_at;
-        }
-      });
-
-      setListSelectorMeta(nextMeta);
-    };
-
-    loadLists();
-    fetchSchedules();
-  }, [currentRestaurant, fetchSchedules]);
+  }, [currentRestaurant]);
 
   // Default landing list: deep-link wins; else keep user selection; else most recent session activity; else first list.
   useEffect(() => {
@@ -480,84 +568,6 @@ export default function EnterInventoryPage() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!currentRestaurant) return;
-    fetchSessions();
-  }, [currentRestaurant, approvedFilter]);
-
-  const fetchSessions = async () => {
-    if (!currentRestaurant) return;
-    setLoading(true);
-    setSessionsLoaded(false);
-
-    const daysAgo = new Date();
-    daysAgo.setDate(daysAgo.getDate() - parseInt(approvedFilter));
-
-    const sessionSelect = "*, inventory_lists(name), locations(name)";
-
-    const [{ data: ip }, { data: rv }, { data: ap }] = await Promise.all([
-      supabase.from("inventory_sessions").select(sessionSelect).eq("restaurant_id", currentRestaurant.id).eq("status", "IN_PROGRESS").order("updated_at", { ascending: false }),
-      supabase.from("inventory_sessions").select(sessionSelect).eq("restaurant_id", currentRestaurant.id).eq("status", "IN_REVIEW").order("updated_at", { ascending: false }),
-      supabase.from("inventory_sessions").select(sessionSelect).eq("restaurant_id", currentRestaurant.id).eq("status", "APPROVED").gte("approved_at", daysAgo.toISOString()).order("approved_at", { ascending: false }),
-    ]);
-
-    setInProgressSessions(ip || []);
-    setReviewSessions(rv || []);
-    setApprovedSessions(ap || []);
-
-    // Fetch item counts + total values + progress for all sessions
-    const allSessions = [...(ip || []), ...(rv || []), ...(ap || [])];
-    if (allSessions.length > 0) {
-      const sessionIds = allSessions.map((s) => s.id);
-      const { data: statsRaw } = await supabase
-        .from("inventory_session_items")
-        .select("session_id, current_stock, unit_cost")
-        .in("session_id", sessionIds);
-
-      const statsMap: Record<string, { qty: number; totalValue: number; counted: number; total: number }> = {};
-      (statsRaw || []).forEach((row) => {
-        if (!statsMap[row.session_id]) statsMap[row.session_id] = { qty: 0, totalValue: 0, counted: 0, total: 0 };
-        statsMap[row.session_id].qty += Number(row.current_stock ?? 0);
-        statsMap[row.session_id].total += 1;
-        if (row.current_stock !== null && Number(row.current_stock) > 0) {
-          statsMap[row.session_id].counted += 1;
-        }
-        if (row.current_stock != null && row.unit_cost != null) {
-          statsMap[row.session_id].totalValue += Number(row.current_stock) * Number(row.unit_cost);
-        }
-      });
-      setSessionStats(statsMap);
-    }
-
-    setLoading(false);
-    setSessionsLoaded(true);
-  };
-
-  useEffect(() => {
-    if (!currentRestaurant || !selectedList) {
-      setParGuides([]);
-      setSelectedPar("");
-      return;
-    }
-
-    supabase
-      .from("par_guides")
-      .select("*")
-      .eq("restaurant_id", currentRestaurant.id)
-      .eq("inventory_list_id", selectedList)
-      .order("updated_at", { ascending: false })
-      .then(({ data }) => {
-        const guides = data || [];
-        setParGuides(guides);
-        setSelectedPar(guides[0]?.id || "");
-      });
-  }, [currentRestaurant, selectedList]);
-
-  useEffect(() => {
-    if (!selectedPar || selectedPar === "none") { setParItems([]); return; }
-    supabase.from("par_guide_items").select("*").eq("par_guide_id", selectedPar).then(({ data }) => { if (data) setParItems(data); });
-  }, [selectedPar]);
-
   // Restore active session from sessionStorage after a hard refresh (in-progress only)
   useEffect(() => {
     const savedId = sessionStorage.getItem('inv_active_session');
@@ -578,70 +588,6 @@ export default function EnterInventoryPage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [activeSession]);
 
-  const persistSessionCountingParGuide = async (sessionId: string, guideId: string | null) => {
-    try {
-      if (guideId) sessionStorage.setItem(`inv_counting_par_guide_${sessionId}`, guideId);
-      else sessionStorage.removeItem(`inv_counting_par_guide_${sessionId}`);
-    } catch (_) { /* ignore */ }
-    const { error } = await supabase
-      .from("inventory_sessions")
-      .update({
-        counting_par_guide_id: guideId,
-        updated_at: new Date().toISOString(),
-      } as any)
-      .eq("id", sessionId);
-    if (error && /counting_par_guide|schema cache|column/i.test(error.message)) {
-      console.log("[EnterInventory] counting_par_guide_id update skipped:", error.message);
-    }
-  };
-
-  const hydrateCountingParMaps = async (guideId: string | null, catRows: Array<{ id: string; item_name: string | null }>) => {
-    setCountingParGuideId(guideId);
-    if (!guideId) {
-      setCountingParGuideName(null);
-      setCountingParByCatalogId({});
-      setCountingParByNormalizedName({});
-      return;
-    }
-    const { data: gMeta } = await supabase.from("par_guides").select("name").eq("id", guideId).maybeSingle();
-    setCountingParGuideName(gMeta?.name ?? null);
-    const { data: gItems } = await supabase
-      .from("par_guide_items")
-      .select("item_name, par_level")
-      .eq("par_guide_id", guideId);
-    const lookup = buildCountingParLookup(gItems || [], catRows);
-    setCountingParByCatalogId(lookup.byCatalogId);
-    setCountingParByNormalizedName(lookup.byNormalizedName);
-  };
-
-  const openParGuidePicker = async () => {
-    if (!currentRestaurant || !activeSession) return;
-    const { data } = await supabase
-      .from("par_guides")
-      .select("id, name, inventory_list_id")
-      .eq("restaurant_id", currentRestaurant.id);
-    const sessionListId = activeSession.inventory_list_id;
-    const sorted = [...(data || [])].sort((a, b) => {
-      const am = a.inventory_list_id === sessionListId ? 0 : 1;
-      const bm = b.inventory_list_id === sessionListId ? 0 : 1;
-      if (am !== bm) return am - bm;
-      return (a.name || "").localeCompare(b.name || "");
-    });
-    setParGuidesPickerOptions(sorted);
-    setParGuidePickerOpen(true);
-  };
-
-  const applyParGuideSelection = async (guideId: string) => {
-    if (!activeSession?.id || !currentRestaurant) return;
-    await persistSessionCountingParGuide(activeSession.id, guideId);
-    setActiveSession((s: any) => (s ? { ...s, counting_par_guide_id: guideId } : s));
-    const slim = (catalogItems || []).map((c: any) => ({ id: c.id, item_name: c.item_name }));
-    await hydrateCountingParMaps(guideId, slim);
-    setParColumnVisible(true);
-    setParGuidePickerOpen(false);
-    toast.success("PAR guide applied for this count");
-  };
-
   const buildDefaultCountSessionName = (listName: string) => {
     const base = listName.trim() || "Inventory";
     return `${base} Count ${format(new Date(), "MMM d, yyyy")}`;
@@ -660,211 +606,39 @@ export default function EnterInventoryPage() {
   };
 
   const createSessionForList = async (listId: string, name: string) => {
-    if (!currentRestaurant || !user || !listId || !name.trim()) return;
-
-    const listIdTrimmed = listId.trim();
-    setStartingListId(listIdTrimmed);
-
-    try {
-      const { data, error } = await supabase.from("inventory_sessions").insert({
-        restaurant_id: currentRestaurant.id,
-        inventory_list_id: listIdTrimmed,
-        name: name.trim(),
-        created_by: user.id
-      }).select().single();
-      if (error) { toast.error(error.message); return; }
-
-      const catalogSeed = await insertInventorySessionLinesFromCatalog(
-        data.id,
-        listIdTrimmed,
-        currentRestaurant.id,
-      );
-      if (!catalogSeed.ok) {
-        toast.error(catalogSeed.errorMessage || "Could not copy list items into this count.");
-      }
-
-      if (catalogSeed.count === 0) {
-        let resolvedParItems = selectedList === listIdTrimmed ? parItems : [];
-        if (resolvedParItems.length === 0 && listIdTrimmed) {
-          const { data: latestGuide, error: guideSeedErr } = await supabase
-            .from("par_guides")
-            .select("id")
-            .eq("inventory_list_id", listIdTrimmed)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (guideSeedErr) {
-            console.log("[EnterInventory] par_guide (PAR-only seed) error:", guideSeedErr.message);
-          }
-          if (latestGuide) {
-            const { data: latestItems } = await supabase
-              .from("par_guide_items")
-              .select("*")
-              .eq("par_guide_id", latestGuide.id);
-            if (latestItems) resolvedParItems = latestItems;
-          }
-        }
-
-        if (resolvedParItems.length > 0) {
-          const validPar = resolvedParItems.filter((p) => (p.item_name || "").trim().length > 0);
-          const preItems = validPar.map((p) => ({
-            session_id: data.id,
-            item_name: p.item_name.trim(),
-            category: p.category || "Dry",
-            unit: p.unit || "",
-            current_stock: 0,
-            par_level: Number(p.par_level ?? 0),
-          }));
-          const { error: sessionItemsInsertError } = await supabase
-            .from("inventory_session_items")
-            .insert(preItems);
-          if (sessionItemsInsertError) {
-            toast.error(sessionItemsInsertError.message);
-            console.log("[EnterInventory] PAR-only session items insert:", sessionItemsInsertError.message);
-          }
-        }
-      }
-
-      toast.success("Session created — start entering counts");
-      setSelectedPar("");
-      setSelectedList(listIdTrimmed);
-      setLandingFocusListId(listIdTrimmed);
-      await openEditor(data);
-    } finally {
-      setStartingListId(null);
-    }
+    await createSessionForListAction(listId, name);
   };
 
-  const openEditor = async (session: any) => {
-    if (session.status && session.status !== "IN_PROGRESS") {
-      sessionStorage.removeItem('inv_active_session');
-      toast.info("Only in-progress counts can be edited here. Use Review for submitted sessions.");
-      return;
-    }
-    if (!session?.id) {
-      toast.error("Invalid session — could not open count.");
-      return;
-    }
+  const openEditor = async (session: InventorySessionListRow) => {
+    await openEditorAction(session);
+  };
 
-    sessionStorage.setItem('inv_active_session', session.id);
+  const fetchSessions = refreshSessions;
 
-    const { data: sessMeta } = await supabase
-      .from("inventory_sessions")
-      .select("inventory_list_id, counting_par_guide_id")
-      .eq("id", session.id)
-      .maybeSingle();
+  const openParGuidePicker = async () => {
+    if (!currentRestaurant || !activeSession) return;
+    await loadParGuidePickerOptions(activeSession.inventory_list_id);
+    setParGuidePickerOpen(true);
+  };
 
-    let listId = (session.inventory_list_id || sessMeta?.inventory_list_id || "").trim();
-    let resolvedCountingParId: string | null =
-      sessMeta?.counting_par_guide_id ?? (session as any).counting_par_guide_id ?? null;
-    if (!resolvedCountingParId) {
-      try {
-        const raw = sessionStorage.getItem(`inv_counting_par_guide_${session.id}`);
-        if (raw) resolvedCountingParId = raw;
-      } catch (_) { /* ignore */ }
-    }
-
-    setSelectedList(listId);
-    setActiveSession({ ...session, inventory_list_id: listId, counting_par_guide_id: resolvedCountingParId });
-
-    const listPromise = listId
-      ? supabase.from("inventory_lists").select("active_category_mode").eq("id", listId).maybeSingle()
-      : Promise.resolve({ data: null });
-
-    const catalogPromise =
-      currentRestaurant && listId
-        ? supabase
-          .from("inventory_catalog_items")
-          .select("*")
-          .eq("restaurant_id", currentRestaurant.id)
-          .eq("inventory_list_id", listId)
-        : Promise.resolve({ data: null });
-
-    const [{ data: loadedItems, error: itemsError }, listResult, catalogResult] = await Promise.all([
-      supabase.from("inventory_session_items").select("*").eq("session_id", session.id),
-      listPromise,
-      catalogPromise,
-    ]);
-
-    if (itemsError) {
-      toast.error(itemsError.message);
-    }
-
-    let sessionItems = loadedItems ?? [];
-    const shouldTrySeed =
-      currentRestaurant?.id &&
-      !!listId &&
-      (!session.status || session.status === "IN_PROGRESS") &&
-      sessionItems.length === 0;
-
-    if (shouldTrySeed) {
-      const seedResult = await insertInventorySessionLinesFromCatalog(
-        session.id,
-        listId,
-        currentRestaurant.id,
-      );
-      if (!seedResult.ok && seedResult.errorMessage) {
-        toast.error(seedResult.errorMessage);
-      } else if (seedResult.count > 0) {
-        const { data: reloaded, error: reloadErr } = await supabase
-          .from("inventory_session_items")
-          .select("*")
-          .eq("session_id", session.id)
-          .order("item_name", { ascending: true });
-        if (reloadErr) {
-          toast.error(reloadErr.message);
-        } else {
-          sessionItems = reloaded ?? [];
-        }
-      }
-    }
-
-    setItems(sessionItems);
-    const catRowsRaw = catalogResult.data ?? [];
-    if (catalogResult.data) setCatalogItems(catalogResult.data);
-    if (listResult.data?.active_category_mode) {
-      const dbMode = listResult.data.active_category_mode;
-      if (dbMode === "ai" || dbMode === "custom-categories") setCategoryMode("custom-categories");
-      else if (dbMode === "user" || dbMode === "my-categories") setCategoryMode("my-categories");
-      else setCategoryMode("list_order");
-    }
-
-    setParColumnVisible(false);
-    const slimCat = catRowsRaw.map((c: any) => ({ id: c.id, item_name: c.item_name }));
-    let guideIdForHydration: string | null = resolvedCountingParId;
-    if (!guideIdForHydration && listId && currentRestaurant?.id) {
-      const { data: latestGuide, error: parGuideDisplayFallbackErr } = await supabase
-        .from("par_guides")
-        .select("id")
-        .eq("restaurant_id", currentRestaurant.id)
-        .eq("inventory_list_id", listId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (parGuideDisplayFallbackErr) {
-        console.log("[EnterInventory] par_guide (display fallback) error:", parGuideDisplayFallbackErr.message);
-      }
-      if (latestGuide?.id) guideIdForHydration = latestGuide.id;
-    }
-    await hydrateCountingParMaps(guideIdForHydration, slimCat);
+  const applyParGuideSelection = async (guideId: string) => {
+    await applyParGuideSelectionAction(guideId);
   };
 
   const handleLeaveEditorToHub = () => {
     const listId = activeSession?.inventory_list_id || "";
     sessionStorage.removeItem("inv_active_session");
     setActiveSession(null);
-    setItems([]);
+    setItemOrder([]);
+    setItemById({});
     setSelectedPar("");
     setSearch("");
     setFilterCategory("all");
     setStatusFilter("all");
     setParColumnVisible(false);
     setParGuidePickerOpen(false);
-    setParGuidesPickerOptions([]);
     setCountingParGuideId(null);
-    setCountingParGuideName(null);
-    setCountingParByCatalogId({});
-    setCountingParByNormalizedName({});
+    void hydrateCountingParMaps(null);
     setEditItemDetailsSessionItem(null);
     setStaffParRequestItem(null);
     setStaffPriceRequestItem(null);
@@ -882,18 +656,8 @@ export default function EnterInventoryPage() {
     if (!countingParGuideId || !activeSession?.inventory_list_id || !currentRestaurant?.id) return;
     let cancelled = false;
     (async () => {
-      const [{ data: gItems }, { data: cat }] = await Promise.all([
-        supabase.from("par_guide_items").select("item_name, par_level").eq("par_guide_id", countingParGuideId),
-        supabase
-          .from("inventory_catalog_items")
-          .select("id, item_name")
-          .eq("restaurant_id", currentRestaurant.id)
-          .eq("inventory_list_id", activeSession.inventory_list_id),
-      ]);
       if (cancelled) return;
-      const lookup = buildCountingParLookup(gItems || [], cat || []);
-      setCountingParByCatalogId(lookup.byCatalogId);
-      setCountingParByNormalizedName(lookup.byNormalizedName);
+      await hydrateCountingParMaps(countingParGuideId);
     })();
     return () => {
       cancelled = true;
@@ -942,439 +706,114 @@ export default function EnterInventoryPage() {
   };
 
   const handleAddItem = async () => {
-    if (!activeSession) return;
-    if (activeSession.status === "IN_REVIEW" || activeSession.status === "APPROVED") return;
-    const parLevel = approvedParMap[normalizeItemName(newItem.item_name)] ?? 0;
-    const payload = {
-      session_id: activeSession.id,
-      item_name: newItem.item_name,
-      category: newItem.category,
-      unit: newItem.unit,
-      current_stock: newItem.current_stock,
-      par_level: parLevel,
-      unit_cost: newItem.unit_cost || null,
-    };
-    const { data, error } = await supabase.from("inventory_session_items").insert(payload).select().single();
-    if (error) { toast.error(error.message); return; }
-    setItems([...items, data]);
-    setNewItem({ item_name: "", category: "Cooler", unit: "", current_stock: 0, unit_cost: 0 });
-    setCreateOpen(false);
+    await handleAddItemAction();
   };
 
-  const handleAddFromCatalog = async (catalogItem: any) => {
-    if (!activeSession) return;
-    if (activeSession.status === "IN_REVIEW" || activeSession.status === "APPROVED") return;
-    const payload = {
-      session_id: activeSession.id,
-      catalog_item_id: catalogItem.id,
-      item_name: catalogItem.item_name,
-      category: catalogItem.category || "Dry",
-      unit: catalogItem.unit || "",
-      current_stock: 0,
-      par_level: approvedParMap[normalizeItemName(catalogItem.item_name)] ?? catalogItem.default_par_level ?? 0,
-      unit_cost: catalogItem.default_unit_cost || 0,
-      vendor_sku: catalogItem.product_number || catalogItem.vendor_sku || null,
-      pack_size: catalogItem.pack_size || null,
-      vendor_name: catalogItem.vendor_name || null,
-      brand_name: catalogItem.brand_name || null
-    };
-    let { data, error } = await supabase.from("inventory_session_items").insert(payload).select().single();
-    if (error && isInventorySessionItemsCatalogIdSchemaError(error.message)) {
-      const { catalog_item_id: _omit, ...legacy } = payload;
-      ({ data, error } = await supabase.from("inventory_session_items").insert(legacy).select().single());
-    }
-    if (error) { toast.error(error.message); return; }
-    setItems([...items, data]);
-    toast.success(`Added ${catalogItem.item_name}`);
+  const handleAddFromCatalog = async (catalogItem: InventoryCatalogItemRow) => {
+    await handleAddFromCatalogAction(catalogItem);
   };
 
-  const handleUpdateStock = async (id: string, rawValue: string) => {
+  const handleUpdateStock = useCallback((id: string, rawValue: string) => {
     const parsed = parseInputValue(rawValue);
-    setItems(items.map((i) => i.id === id ? { ...i, current_stock: parsed } : i));
+    setItemById((prev) => {
+      const row = prev[id];
+      if (!row) return prev;
+      return { ...prev, [id]: { ...row, current_stock: parsed } };
+    });
     setLastEditedId(id);
-  };
+  }, []);
 
   const handleClearRow = async (id: string) => {
-    if (activeSession?.status === "IN_REVIEW" || activeSession?.status === "APPROVED") return;
-    setItems(items.map((i) => i.id === id ? { ...i, current_stock: null } : i));
-    setSavingId(id);
-    const { error } = await supabase.from("inventory_session_items").update({ current_stock: null } as any).eq("id", id);
-    setSavingId(null);
-    if (error) toast.error("Could not clear");
-    else {
-      setSavedId(id);
-      setTimeout(() => setSavedId(prev => prev === id ? null : prev), 1500);
-    }
+    await handleClearRowAction(id);
   };
 
-  const handleUpdatePrice = (id: string, rawValue: string) => {
+  const handleUpdatePrice = useCallback((id: string, rawValue: string) => {
     const parsed = parseInputValue(rawValue);
-    setItems(items.map((i) => i.id === id ? { ...i, unit_cost: parsed } : i));
-  };
+    setItemById((prev) => {
+      const row = prev[id];
+      if (!row) return prev;
+      return { ...prev, [id]: { ...row, unit_cost: parsed } };
+    });
+  }, []);
 
   const handleSavePrice = useCallback(async (id: string, cost: number | null) => {
-    if (activeSession?.status === "IN_REVIEW" || activeSession?.status === "APPROVED") return;
-    setSavingId(id);
-    const { error } = await supabase.from("inventory_session_items").update({ unit_cost: cost }).eq("id", id);
-    setSavingId(null);
-    if (error) toast.error("Could not save price");
-    else {
-      setSavedId(id);
-      setTimeout(() => setSavedId(prev => prev === id ? null : prev), 1500);
-    }
-  }, [activeSession?.status]);
+    await handleSavePriceAction(id, cost);
+  }, [handleSavePriceAction]);
 
   const handleSaveStock = useCallback(async (id: string, stockVal: number | null) => {
-    if (activeSession?.status === "IN_REVIEW" || activeSession?.status === "APPROVED") return;
-    setSavingId(id);
-    const { error } = await supabase.from("inventory_session_items").update({ current_stock: stockVal ?? null } as any).eq("id", id);
-    setSavingId(null);
-    if (error) {
-      toast.error("Could not save — tap to retry");
-    } else {
-      setSavedId(id);
-      setTimeout(() => setSavedId(prev => prev === id ? null : prev), 1500);
-    }
-  }, [activeSession?.status]);
+    await handleSaveStockAction(id, stockVal);
+  }, [handleSaveStockAction]);
 
   const handleSubmitForReview = async () => {
-    if (!activeSession) return;
-    if (activeSession.status !== "IN_PROGRESS") return;
-    const { error } = await supabase.from("inventory_sessions").update({ status: "IN_REVIEW", updated_at: new Date().toISOString() }).eq("id", activeSession.id);
-    if (error) toast.error(error.message);
-    else { toast.success("Submitted for review!"); sessionStorage.removeItem('inv_active_session'); setActiveSession(null); setItems([]); fetchSessions(); }
+    await handleSubmitForReviewAction();
   };
 
   const handleDeleteSession = async () => {
-    if (!deleteSessionId) return;
-    await supabase.from("inventory_session_items").delete().eq("session_id", deleteSessionId);
-    const { error } = await supabase.from("inventory_sessions").delete().eq("id", deleteSessionId);
-    if (error) toast.error(error.message);
-    else {
-      toast.success("Session deleted");
-      setDeleteSessionId(null);
-      sessionStorage.removeItem("inv_active_session");
-      if (activeSession?.id === deleteSessionId) {
-        setActiveSession(null);
-        setItems([]);
-      }
-      fetchSessions();
-    }
+    await handleDeleteSessionAction(deleteSessionId);
+    setDeleteSessionId(null);
   };
 
   const handleClearInProgressSession = async () => {
-    if (!clearInProgressSessionId) return;
-    await supabase.from("inventory_session_items").delete().eq("session_id", clearInProgressSessionId);
-    const { error } = await supabase.from("inventory_sessions").delete().eq("id", clearInProgressSessionId);
-    if (error) toast.error(error.message);
-    else {
-      toast.success("Cleared — start a fresh count when you're ready");
-      setClearInProgressSessionId(null);
-      sessionStorage.removeItem("inv_active_session");
-      if (activeSession?.id === clearInProgressSessionId) {
-        setActiveSession(null);
-        setItems([]);
-      }
-      fetchSessions();
-    }
+    await handleClearInProgressSessionAction(clearInProgressSessionId);
+    setClearInProgressSessionId(null);
   };
 
   const handleClearEntries = async () => {
-    if (!clearEntriesSessionId) return;
-    const { error } = await supabase.from("inventory_session_items")
-      .update({ current_stock: null } as any)
-      .eq("session_id", clearEntriesSessionId);
-    if (error) toast.error(error.message);
-    else {
-      toast.success("Entries cleared — ready for recount");
-      setClearEntriesSessionId(null);
-      if (activeSession?.id === clearEntriesSessionId) {
-        setItems(items.map(i => ({ ...i, current_stock: null })));
-      }
-    }
-  };
-
-  const autoCreateSmartOrder = async (sessionId: string) => {
-    if (!currentRestaurant || !user) return;
-    try {
-      const { data: session } = await supabase.from("inventory_sessions").select("*").eq("id", sessionId).single();
-      if (!session) return;
-
-      const { data: sessionItems } = await supabase.from("inventory_session_items").select("*").eq("session_id", sessionId);
-      if (!sessionItems || sessionItems.length === 0) return;
-
-      const { data: latestGuide } = await supabase.from("par_guides").select("id")
-        .eq("restaurant_id", currentRestaurant.id)
-        .eq("inventory_list_id", session.inventory_list_id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const parMap = latestGuide
-        ? buildParLevelMap(
-            (await supabase
-              .from("par_guide_items")
-              .select("item_name, par_level")
-              .eq("par_guide_id", latestGuide.id)).data || [],
-          )
-        : {};
-
-      const computed = sessionItems.map(i => {
-        const key = normalizeItemName(i.item_name);
-        const sessionPar = Number(i.par_level ?? 0);
-        const parLevel = latestGuide
-          ? (key in parMap ? parMap[key] : sessionPar)
-          : sessionPar;
-        const currentStock = Number(i.current_stock ?? 0);
-        const risk = computeRiskLevel(currentStock, parLevel);
-        const suggestedOrder = computeOrderQty(currentStock, parLevel, i.unit, i.pack_size);
-        return { ...i, parLevel, currentStock, risk, suggestedOrder };
-      });
-
-      const redCount = computed.filter(i => i.risk === "RED").length;
-      const yellowCount = computed.filter(i => i.risk === "YELLOW").length;
-
-      const { data: run, error: runError } = await supabase.from("smart_order_runs").insert({
-        restaurant_id: currentRestaurant.id,
-        session_id: sessionId,
-        inventory_list_id: session.inventory_list_id,
-        par_guide_id: latestGuide?.id || null,
-        created_by: user.id,
-      }).select().single();
-      if (runError || !run) return;
-
-      const runItems = computed.map(i => ({
-        run_id: run.id,
-        catalog_item_id: i.catalog_item_id || null,
-        item_name: i.item_name,
-        suggested_order: i.suggestedOrder,
-        risk: i.risk,
-        current_stock: i.currentStock,
-        par_level: i.parLevel,
-        unit_cost: i.unit_cost || null,
-        pack_size: i.pack_size || null,
-      }));
-      let itemsErr = (await supabase.from("smart_order_run_items").insert(runItems)).error;
-      if (itemsErr) {
-        console.error("[autoCreateSmartOrder] smart_order_run_items insert:", itemsErr.message);
-        const withoutCatalog = runItems.map(({ catalog_item_id: _c, ...rest }) => rest);
-        itemsErr = (await supabase.from("smart_order_run_items").insert(withoutCatalog)).error;
-        if (itemsErr) {
-          console.error("[autoCreateSmartOrder] retry insert:", itemsErr.message);
-          toast.error(`Smart order lines could not be saved: ${itemsErr.message}`);
-        }
-      }
-
-      if (redCount > 0 || yellowCount > 0) {
-        const { data: prefs } = await supabase.from("notification_preferences")
-          .select("*, alert_recipients(user_id)")
-          .eq("restaurant_id", currentRestaurant.id)
-          .eq("channel_in_app", true)
-          .limit(1)
-          .single();
-
-        if (prefs) {
-          const { data: members } = await supabase.from("restaurant_members")
-            .select("user_id, role")
-            .eq("restaurant_id", currentRestaurant.id);
-
-          let targetUserIds: string[] = [];
-          if (prefs.recipients_mode === "OWNERS_MANAGERS") {
-            targetUserIds = (members || []).filter(m => m.role === "OWNER" || m.role === "MANAGER").map(m => m.user_id);
-          } else if (prefs.recipients_mode === "ALL") {
-            targetUserIds = (members || []).map(m => m.user_id);
-          } else if (prefs.recipients_mode === "CUSTOM") {
-            targetUserIds = (prefs.alert_recipients || []).map((r: any) => r.user_id);
-          }
-
-          if (targetUserIds.length > 0) {
-            const notifications = targetUserIds.map(uid => ({
-              restaurant_id: currentRestaurant.id,
-              user_id: uid,
-              type: "LOW_STOCK",
-              severity: redCount > 0 ? "CRITICAL" : "WARNING" as "CRITICAL" | "WARNING",
-              title: `Inventory Approved — ${redCount + yellowCount} item${redCount + yellowCount > 1 ? "s" : ""} need attention`,
-              message: `${redCount} high risk, ${yellowCount} medium risk items detected`,
-              data: { session_id: sessionId, run_id: run.id, red: redCount, yellow: yellowCount } as any,
-            }));
-            await supabase.from("notifications").insert(notifications);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Auto smart order error:", err);
-    }
+    await handleClearEntriesAction(clearEntriesSessionId);
+    setClearEntriesSessionId(null);
   };
 
   const handleApprove = async (sessionId: string) => {
-    if (!currentRestaurant || !user) return;
-    const { error } = await supabase.from("inventory_sessions").update({
-      status: "APPROVED", approved_at: new Date().toISOString(), approved_by: user.id, updated_at: new Date().toISOString()
-    }).eq("id", sessionId);
-    if (error) { toast.error(error.message); return; }
-    await autoCreateSmartOrder(sessionId);
-    toast.success("Session approved!");
-    fetchSessions();
+    await handleApproveAction(sessionId);
   };
 
   const handleReject = async (sessionId: string) => {
-    const { error } = await supabase.from("inventory_sessions").update({ status: "IN_PROGRESS", updated_at: new Date().toISOString() }).eq("id", sessionId);
-    if (error) toast.error(error.message);
-    else { toast.success("Session sent back"); fetchSessions(); }
+    await handleRejectAction(sessionId);
   };
 
-  const handleView = (session: any) => {
+  const handleView = (session: InventorySessionListRow) => {
     if (session.status === "APPROVED") navigate("/app/inventory/approved");
     else navigate("/app/inventory/review?session=" + session.id);
   };
 
   const handleDeclineToReview = async (sessionId: string) => {
-    const { error } = await supabase.from("inventory_sessions").update({ status: "IN_REVIEW", updated_at: new Date().toISOString() }).eq("id", sessionId);
-    if (error) toast.error(error.message);
-    else { toast.success("Session moved back to Review"); fetchSessions(); }
+    await handleDeclineToReviewAction(sessionId);
   };
 
-  const handleDuplicate = async (session: any) => {
-    if (!currentRestaurant || !user) return;
-    const { data: newSess, error } = await supabase.from("inventory_sessions").insert({
-      restaurant_id: currentRestaurant.id,
-      inventory_list_id: session.inventory_list_id,
-      name: `${session.name} (copy)`,
-      created_by: user.id
-    }).select().single();
-    if (error) { toast.error(error.message); return; }
-    const { data: srcItems } = await supabase.from("inventory_session_items").select("*").eq("session_id", session.id);
-    if (srcItems && srcItems.length > 0) {
-      const duped = srcItems.map(({ id, session_id, ...rest }) => ({ ...rest, session_id: newSess.id }));
-      await supabase.from("inventory_session_items").insert(duped);
-    }
-    toast.success("Session duplicated");
-    fetchSessions();
+  const handleDuplicate = async (session: InventorySessionListRow) => {
+    await handleDuplicateAction(session);
   };
 
-  const openSmartOrderModal = async (session: any) => {
-    setSmartOrderSession(session);
+  const openSmartOrderModal = async (session: InventorySessionListRow) => {
     setSmartOrderSelectedPar("");
-    if (!currentRestaurant) return;
-    const { data } = await supabase.from("par_guides").select("*")
-      .eq("restaurant_id", currentRestaurant.id)
-      .eq("inventory_list_id", session.inventory_list_id);
-    setSmartOrderParGuides(data || []);
+    await openSmartOrderModalAction(session);
   };
 
   const handleCreateSmartOrder = async () => {
-    if (!smartOrderSession || !smartOrderSelectedPar || !currentRestaurant || !user) return;
-    setSmartOrderCreating(true);
-
-    const { data: sessionItems } = await supabase.from("inventory_session_items").select("*").eq("session_id", smartOrderSession.id);
-    const { data: parItemsData } = await supabase.from("par_guide_items").select("*").eq("par_guide_id", smartOrderSelectedPar);
-
-    if (!sessionItems) { toast.error("No session items found"); setSmartOrderCreating(false); return; }
-
-    const parMap = buildParLevelMap(parItemsData || []);
-
-    const computed = sessionItems.map(i => {
-      const key = normalizeItemName(i.item_name);
-      const sessionPar = Number(i.par_level ?? 0);
-      const parLevel = key in parMap ? parMap[key] : sessionPar;
-      const currentStock = Number(i.current_stock ?? 0);
-      const risk = computeRiskLevel(currentStock, parLevel);
-      const suggestedOrder = computeOrderQty(currentStock, parLevel, i.unit, i.pack_size);
-      return {
-        ...i,
-        par_level: parLevel,
-        suggestedOrder,
-        risk,
-      };
-    });
-
-    const { data: run, error } = await supabase.from("smart_order_runs").insert({
-      restaurant_id: currentRestaurant.id,
-      session_id: smartOrderSession.id,
-      inventory_list_id: smartOrderSession.inventory_list_id,
-      par_guide_id: smartOrderSelectedPar,
-      created_by: user.id,
-    }).select().single();
-    if (error) { toast.error(error.message); setSmartOrderCreating(false); return; }
-
-    const runItems = computed.map(i => ({
-      run_id: run.id,
-      catalog_item_id: i.catalog_item_id || null,
-      item_name: i.item_name,
-      suggested_order: i.suggestedOrder,
-      risk: i.risk,
-      current_stock: i.current_stock,
-      par_level: i.par_level,
-      unit_cost: i.unit_cost || null,
-      pack_size: i.pack_size || null,
-    }));
-    let manualItemsErr = (await supabase.from("smart_order_run_items").insert(runItems)).error;
-    if (manualItemsErr) {
-      console.error("[handleCreateSmartOrder] insert:", manualItemsErr.message);
-      const withoutCatalog = runItems.map(({ catalog_item_id: _c, ...rest }) => rest);
-      manualItemsErr = (await supabase.from("smart_order_run_items").insert(withoutCatalog)).error;
-      if (manualItemsErr) {
-        toast.error(`Could not save order lines: ${manualItemsErr.message}`);
-        setSmartOrderCreating(false);
-        return;
-      }
-      toast.info("Saved order lines; some catalog links were cleared due to invalid references.");
-    }
-
-    toast.success("Smart order created — submit from Smart Order to generate the purchase order.");
-    setSmartOrderSession(null);
-    setSmartOrderCreating(false);
-    navigate(`/app/smart-order?viewRun=${run.id}`);
+    await handleCreateSmartOrderAction();
   };
 
-  const nextSchedule = useMemo(() => {
-    if (!schedules.length) return null;
-    let closest: any = null;
-    let closestDate: Date | null = null;
-    for (const s of schedules) {
-      const d = computeNextOccurrence(s);
-      if (d && (!closestDate || d < closestDate)) {
-        closestDate = d;
-        closest = { ...s, nextDate: d };
-      }
-    }
-    return closest;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedules]);
+  const nextSchedule = useMemo(() => findNextSchedule(schedules), [schedules]);
 
-  const landingFocus = useMemo(() => {
-    const effectiveLandingListId =
-      landingFocusListId && lists.some((l) => l.id === landingFocusListId)
-        ? landingFocusListId
-        : lists[0]?.id ?? null;
-    const focusList = lists.find((l) => l.id === effectiveLandingListId) || null;
-    const focusInProgressSession = effectiveLandingListId
-      ? inProgressSessions.find((s) => s.inventory_list_id === effectiveLandingListId) ?? null
-      : null;
-    const focusReviewSession =
-      !focusInProgressSession && effectiveLandingListId
-        ? reviewSessions.find((s) => s.inventory_list_id === effectiveLandingListId) ?? null
-        : null;
-    const meta = effectiveLandingListId
-      ? listSelectorMeta[effectiveLandingListId]
-      : { itemCount: 0, lastCountedAt: null, hasParGuide: false };
-    const stats = focusInProgressSession ? sessionStats[focusInProgressSession.id] : undefined;
-    return {
-      effectiveLandingListId,
-      focusList,
-      focusInProgressSession,
-      focusReviewSession,
-      meta: meta || { itemCount: 0, lastCountedAt: null, hasParGuide: false },
-      stats,
-    };
-  }, [
-    lists,
-    landingFocusListId,
-    inProgressSessions,
-    reviewSessions,
-    sessionStats,
-    listSelectorMeta,
-  ]);
+  const landingFocus = useMemo(
+    () =>
+      buildLandingFocus({
+        lists,
+        landingFocusListId,
+        inProgressSessions,
+        reviewSessions,
+        sessionStats,
+        listSelectorMeta,
+      }),
+    [
+      lists,
+      landingFocusListId,
+      inProgressSessions,
+      reviewSessions,
+      sessionStats,
+      listSelectorMeta,
+    ],
+  );
 
   const mappingMode = categoryMode === "list_order" ? "list_order"
     : categoryMode === "custom-categories" ? "custom-categories"
@@ -1386,124 +825,157 @@ export default function EnterInventoryPage() {
     mappingMode === "list_order" ? "list_order" : mappingMode
   );
 
-  const getItemCategory = (item: any): string => {
-    if (categoryMode === "alphabetic") {
-      return item.item_name.charAt(0).toUpperCase();
-    }
-    if (hasMappings && itemCategoryMap[item.item_name]) {
-      return itemCategoryMap[item.item_name].category_name;
-    }
-    return item.category || "Uncategorized";
-  };
+  const getItemCategoryForView = useCallback(
+    (item: InventorySessionItemRow) =>
+      getItemCategoryHelper({
+        item,
+        categoryMode,
+        hasMappings,
+        itemCategoryMap,
+      }),
+    [categoryMode, hasMappings, itemCategoryMap],
+  );
 
-  const getItemSortOrder = (item: any): number => {
-    if (hasMappings && itemCategoryMap[item.item_name]) {
-      return itemCategoryMap[item.item_name].item_sort_order;
-    }
-    return 0;
-  };
+  const getItemSortOrderForView = useCallback(
+    (item: InventorySessionItemRow) =>
+      getItemSortOrderHelper({
+        item,
+        hasMappings,
+        itemCategoryMap,
+      }),
+    [hasMappings, itemCategoryMap],
+  );
+  const getItemCategory = getItemCategoryForView;
+  const getItemSortOrder = getItemSortOrderForView;
 
-  // Build catalog lookup: item_name -> { catalog_item_id, product_number }
-  const catalogLookup = useMemo(() => {
-    const map: Record<string, { id: string; product_number: string | null }> = {};
-    catalogItems.forEach((ci: any) => {
-      map[ci.item_name] = { id: ci.id, product_number: ci.product_number || ci.vendor_sku || null };
-    });
-    return map;
-  }, [catalogItems]);
+  const catalogLookup = useMemo(() => buildCatalogLookup(catalogItems), [catalogItems]);
+  const catalogDefaultParById = useMemo(
+    () => buildCatalogDefaultParById(catalogItems),
+    [catalogItems],
+  );
+  const catalogDefaultParByName = useMemo(
+    () => buildCatalogDefaultParByName(catalogItems),
+    [catalogItems],
+  );
 
-  const catalogDefaultParById = useMemo(() => {
-    const map: Record<string, number> = {};
-    catalogItems.forEach((ci: any) => {
-      if (!ci.id) return;
-      const parsed = Number(ci.default_par_level ?? 0);
-      map[ci.id] = Number.isFinite(parsed) ? parsed : 0;
-    });
-    return map;
-  }, [catalogItems]);
+  const getApprovedParForView = useCallback(
+    (item: InventorySessionItemRow) =>
+      getApprovedParHelper(item, {
+        countingParGuideId,
+        countingParByCatalogId,
+        countingParByNormalizedName,
+        approvedParMap,
+        catalogDefaultParById,
+        catalogDefaultParByName,
+      }),
+    [
+      countingParGuideId,
+      countingParByCatalogId,
+      countingParByNormalizedName,
+      approvedParMap,
+      catalogDefaultParById,
+      catalogDefaultParByName,
+    ],
+  );
 
-  const catalogDefaultParByName = useMemo(() => {
-    const map: Record<string, number> = {};
-    catalogItems.forEach((ci: any) => {
-      const key = normalizeItemName(ci.item_name);
-      if (!key) return;
-      const parsed = Number(ci.default_par_level ?? 0);
-      map[key] = Number.isFinite(parsed) ? parsed : 0;
-    });
-    return map;
-  }, [catalogItems]);
+  const getCatalogUnitCostForView = useCallback(
+    (catalogItemId: string | null | undefined) =>
+      getCatalogUnitCostHelper(catalogItems, catalogItemId),
+    [catalogItems],
+  );
+  const getApprovedPar = getApprovedParForView;
+  const getCatalogUnitCost = getCatalogUnitCostForView;
 
-  /** Single PAR source for STATUS, NEED, filters, and summary while counting with a selected PAR guide. */
-  const getApprovedPar = useCallback((item: any): number => {
-    if (countingParGuideId) {
-      if (item.catalog_item_id && countingParByCatalogId[item.catalog_item_id] !== undefined) {
-        return countingParByCatalogId[item.catalog_item_id];
-      }
-      const kn = normalizeItemName(item.item_name);
-      if (kn && countingParByNormalizedName[kn] !== undefined) {
-        return countingParByNormalizedName[kn];
-      }
-      const sessionPar = Number(item.par_level);
-      if (item.par_level !== null && item.par_level !== undefined && Number.isFinite(sessionPar)) {
-        return sessionPar;
-      }
-      return 0;
-    }
-
-    const key = normalizeItemName(item.item_name);
-    const guidePar = approvedParMap[key];
-    if (guidePar !== undefined) return guidePar;
-
-    const sessionPar = Number(item.par_level);
-    if (item.par_level !== null && item.par_level !== undefined && Number.isFinite(sessionPar)) {
-      return sessionPar;
-    }
-
-    if (item.catalog_item_id && item.catalog_item_id in catalogDefaultParById) {
-      return catalogDefaultParById[item.catalog_item_id];
-    }
-
-    return catalogDefaultParByName[key] ?? 0;
-  }, [
-    countingParGuideId,
-    countingParByCatalogId,
-    countingParByNormalizedName,
+  const {
+    startingListId,
+    savingId,
+    savedId,
+    smartOrderCreating,
+    editItemDetailsSaving,
+    staffParSending,
+    staffPriceSending,
+    managerParSaving,
+    managerPriceSaving,
+    openEditor: openEditorAction,
+    createSessionForList: createSessionForListAction,
+    applyParGuideSelection: applyParGuideSelectionAction,
+    handleAddItem: handleAddItemAction,
+    handleAddFromCatalog: handleAddFromCatalogAction,
+    handleClearRow: handleClearRowAction,
+    handleSavePrice: handleSavePriceAction,
+    handleSaveStock: handleSaveStockAction,
+    handleSubmitForReview: handleSubmitForReviewAction,
+    handleDeleteSession: handleDeleteSessionAction,
+    handleClearInProgressSession: handleClearInProgressSessionAction,
+    handleClearEntries: handleClearEntriesAction,
+    handleApprove: handleApproveAction,
+    handleReject: handleRejectAction,
+    handleDeclineToReview: handleDeclineToReviewAction,
+    handleDuplicate: handleDuplicateAction,
+    openSmartOrderModal: openSmartOrderModalAction,
+    handleCreateSmartOrder: handleCreateSmartOrderAction,
+    handleSaveEditItemDetails: handleSaveEditItemDetailsAction,
+    handleStaffParChangeRequestSubmit: handleStaffParChangeRequestSubmitAction,
+    handleStaffPriceChangeRequestSubmit: handleStaffPriceChangeRequestSubmitAction,
+    handleManagerParLevelSave: handleManagerParLevelSaveAction,
+    handleManagerPriceSave: handleManagerPriceSaveAction,
+  } = useEnterInventoryActions({
+    currentRestaurantId: currentRestaurant?.id,
+    userId: user?.id,
+    activeSession,
+    selectedList,
+    parItems,
     approvedParMap,
-    catalogDefaultParById,
-    catalogDefaultParByName,
-  ]);
+    countingParGuideId,
+    riskThresholds,
+    smartOrderSession,
+    smartOrderSelectedPar,
+    newItem,
+    editItemDetailsSessionItem,
+    editItemDetailsForm,
+    staffParRequestItem,
+    staffParSuggested,
+    staffParReason,
+    staffPriceRequestItem,
+    staffPriceSuggested,
+    staffPriceReason,
+    managerParEditItem,
+    managerParInput,
+    managerPriceEditItem,
+    managerPriceInput,
+    getApprovedPar,
+    getCatalogUnitCost,
+    navigateTo: navigate,
+    refreshSessions,
+    loadCatalogItemsForList,
+    loadLatestParGuide,
+    loadParGuideItems,
+    loadEditorSnapshot,
+    reloadSessionItems,
+    hydrateCountingParMaps,
+    loadSmartOrderParGuides,
+    setSelectedPar,
+    setSelectedList,
+    setLandingFocusListId,
+    setActiveSession,
+    setItemOrder,
+    setItemById,
+    setCategoryMode,
+    setParColumnVisible,
+    setParGuidePickerOpen,
+    setCountingParGuideId,
+    setCreateOpen,
+    setNewItem,
+    setSmartOrderSession,
+    setCatalogItems,
+    setEditItemDetailsSessionItem,
+    setStaffParRequestItem,
+    setStaffPriceRequestItem,
+    setManagerParEditItem,
+    setManagerPriceEditItem,
+  });
 
-  const getCatalogUnitCost = useCallback((catalogItemId: string | null | undefined): number | null => {
-    if (!catalogItemId) return null;
-    const cat = catalogItems.find((c: any) => c.id === catalogItemId);
-    if (cat?.default_unit_cost == null) return null;
-    const n = Number(cat.default_unit_cost);
-    return Number.isFinite(n) ? n : null;
-  }, [catalogItems]);
-
-  const fetchOwnerManagerRecipientIds = useCallback(async (): Promise<string[]> => {
-    if (!currentRestaurant?.id) return [];
-    const { data: members } = await supabase.from("restaurant_members").select("user_id, role").eq("restaurant_id", currentRestaurant.id);
-    const ids = (members || []).filter((m: any) => m.role === "OWNER" || m.role === "MANAGER").map((m: any) => m.user_id);
-    return [...new Set(ids)];
-  }, [currentRestaurant?.id]);
-
-  const resolveParGuideIdForManagerEdits = useCallback(async (): Promise<string | null> => {
-    if (countingParGuideId) return countingParGuideId;
-    const listId = activeSession?.inventory_list_id;
-    if (!listId || !currentRestaurant?.id) return null;
-    const { data } = await supabase
-      .from("par_guides")
-      .select("id")
-      .eq("restaurant_id", currentRestaurant.id)
-      .eq("inventory_list_id", listId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    return data?.id ?? null;
-  }, [countingParGuideId, activeSession?.inventory_list_id, currentRestaurant?.id]);
-
-  const openEditItemDetails = useCallback((row: any) => {
+  const openEditItemDetails = useCallback((row: InventorySessionItemRow) => {
     setEditItemDetailsSessionItem(row);
     setEditItemDetailsForm({
       item_name: row.item_name || "",
@@ -1513,278 +985,24 @@ export default function EnterInventoryPage() {
   }, []);
 
   const handleSaveEditItemDetails = useCallback(async () => {
-    if (!editItemDetailsSessionItem || !currentRestaurant) return;
-    const trimmed = (editItemDetailsForm.item_name || "").trim();
-    if (!trimmed) {
-      toast.error("Item name is required");
-      return;
-    }
-    setEditItemDetailsSaving(true);
-    const unit = editItemDetailsForm.unit || null;
-    const pack_size = editItemDetailsForm.pack_size || null;
-    const { error: e1 } = await supabase
-      .from("inventory_session_items")
-      .update({ item_name: trimmed, unit, pack_size })
-      .eq("id", editItemDetailsSessionItem.id);
-    if (e1) {
-      toast.error(e1.message);
-      setEditItemDetailsSaving(false);
-      return;
-    }
-    if (editItemDetailsSessionItem.catalog_item_id) {
-      const { error: e2 } = await supabase
-        .from("inventory_catalog_items")
-        .update({
-          item_name: trimmed,
-          unit,
-          pack_size,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", editItemDetailsSessionItem.catalog_item_id);
-      if (e2) {
-        toast.error(e2.message);
-        setEditItemDetailsSaving(false);
-        return;
-      }
-      setCatalogItems((prev) =>
-        prev.map((c: any) =>
-          c.id === editItemDetailsSessionItem.catalog_item_id ? { ...c, item_name: trimmed, unit, pack_size } : c,
-        ),
-      );
-    }
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === editItemDetailsSessionItem.id ? { ...i, item_name: trimmed, unit, pack_size } : i,
-      ),
-    );
-    if (countingParGuideId) {
-      const slim = catalogItems.map((c: any) =>
-        c.id === editItemDetailsSessionItem.catalog_item_id ? { id: c.id, item_name: trimmed } : { id: c.id, item_name: c.item_name },
-      );
-      await hydrateCountingParMaps(countingParGuideId, slim);
-    }
-    toast.success("Item details updated");
-    setEditItemDetailsSessionItem(null);
-    setEditItemDetailsSaving(false);
-  }, [
-    editItemDetailsSessionItem,
-    editItemDetailsForm,
-    currentRestaurant,
-    countingParGuideId,
-    catalogItems,
-  ]);
+    await handleSaveEditItemDetailsAction();
+  }, [handleSaveEditItemDetailsAction]);
 
   const handleStaffParChangeRequestSubmit = useCallback(async () => {
-    if (!staffParRequestItem || !user || !currentRestaurant?.id || !activeSession?.id) return;
-    const suggested = parseFloat(staffParSuggested);
-    if (!Number.isFinite(suggested) || suggested < 0) {
-      toast.error("Enter a valid suggested PAR");
-      return;
-    }
-    setStaffParSending(true);
-    const recipientIds = await fetchOwnerManagerRecipientIds();
-    if (recipientIds.length === 0) {
-      toast.error("No managers or owners found to notify");
-      setStaffParSending(false);
-      return;
-    }
-    const { data: profile } = await supabase.from("profiles").select("full_name, email").eq("id", user.id).maybeSingle();
-    const staffName = profile?.full_name || profile?.email || "A team member";
-    const currentPar = getApprovedPar(staffParRequestItem);
-    const reasonText = staffParReason.trim() || "—";
-    const message = `${staffName} suggested changing ${staffParRequestItem.item_name} PAR from ${currentPar} to ${suggested}. Reason: ${reasonText}`;
-    const dataPayload = {
-      item_name: staffParRequestItem.item_name,
-      current_par: currentPar,
-      suggested_par: suggested,
-      reason: staffParReason.trim() || null,
-      session_id: activeSession.id,
-      requested_by: user.id,
-    };
-    const notifications = recipientIds.map((uid) => ({
-      restaurant_id: currentRestaurant.id,
-      user_id: uid,
-      type: "PAR_CHANGE_REQUEST",
-      title: "PAR change requested",
-      message,
-      severity: "INFO" as const,
-      data: dataPayload as unknown as Record<string, unknown>,
-    }));
-    const { error } = await supabase.from("notifications").insert(notifications);
-    setStaffParSending(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success("PAR change request sent to your manager");
-    setStaffParRequestItem(null);
-  }, [
-    staffParRequestItem,
-    staffParSuggested,
-    staffParReason,
-    user,
-    currentRestaurant,
-    activeSession,
-    fetchOwnerManagerRecipientIds,
-    getApprovedPar,
-  ]);
+    await handleStaffParChangeRequestSubmitAction();
+  }, [handleStaffParChangeRequestSubmitAction]);
 
   const handleStaffPriceChangeRequestSubmit = useCallback(async () => {
-    if (!staffPriceRequestItem || !user || !currentRestaurant?.id || !activeSession?.id) return;
-    const suggested = parseFloat(staffPriceSuggested);
-    if (!Number.isFinite(suggested) || suggested < 0) {
-      toast.error("Enter a valid suggested price");
-      return;
-    }
-    setStaffPriceSending(true);
-    const recipientIds = await fetchOwnerManagerRecipientIds();
-    if (recipientIds.length === 0) {
-      toast.error("No managers or owners found to notify");
-      setStaffPriceSending(false);
-      return;
-    }
-    const { data: profile } = await supabase.from("profiles").select("full_name, email").eq("id", user.id).maybeSingle();
-    const staffName = profile?.full_name || profile?.email || "A team member";
-    const sessionPrice = staffPriceRequestItem.unit_cost;
-    const currentPrice =
-      sessionPrice != null && Number.isFinite(Number(sessionPrice))
-        ? Number(sessionPrice)
-        : getCatalogUnitCost(staffPriceRequestItem.catalog_item_id);
-    const currentLabel = currentPrice != null ? `$${currentPrice.toFixed(2)}` : "—";
-    const reasonText = staffPriceReason.trim() || "—";
-    const message = `${staffName} suggested changing ${staffPriceRequestItem.item_name} unit price from ${currentLabel} to $${suggested.toFixed(2)}. Reason: ${reasonText}`;
-    const dataPayload = {
-      item_name: staffPriceRequestItem.item_name,
-      current_price: currentPrice,
-      suggested_price: suggested,
-      reason: staffPriceReason.trim() || null,
-      session_id: activeSession.id,
-      requested_by: user.id,
-    };
-    const notifications = recipientIds.map((uid) => ({
-      restaurant_id: currentRestaurant.id,
-      user_id: uid,
-      type: "PRICE_CHANGE_REQUEST",
-      title: "Price change requested",
-      message,
-      severity: "INFO" as const,
-      data: dataPayload as unknown as Record<string, unknown>,
-    }));
-    const { error } = await supabase.from("notifications").insert(notifications);
-    setStaffPriceSending(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success("Price change request sent to your manager");
-    setStaffPriceRequestItem(null);
-  }, [
-    staffPriceRequestItem,
-    staffPriceSuggested,
-    staffPriceReason,
-    user,
-    currentRestaurant,
-    activeSession,
-    fetchOwnerManagerRecipientIds,
-    getCatalogUnitCost,
-  ]);
+    await handleStaffPriceChangeRequestSubmitAction();
+  }, [handleStaffPriceChangeRequestSubmitAction]);
 
   const handleManagerParLevelSave = useCallback(async () => {
-    if (!managerParEditItem || !currentRestaurant) return;
-    const n = parseFloat(managerParInput);
-    if (!Number.isFinite(n) || n < 0) {
-      toast.error("Enter a valid PAR level");
-      return;
-    }
-    setManagerParSaving(true);
-    const guideId = await resolveParGuideIdForManagerEdits();
-    if (!guideId) {
-      toast.error("No PAR guide linked to this list");
-      setManagerParSaving(false);
-      return;
-    }
-    const { data: guideRows } = await supabase
-      .from("par_guide_items")
-      .select("id, item_name")
-      .eq("par_guide_id", guideId);
-    const key = normalizeItemName(managerParEditItem.item_name);
-    const match = (guideRows || []).find((r) => normalizeItemName(r.item_name) === key);
-    if (!match) {
-      toast.error("No PAR line for this item in the linked guide");
-      setManagerParSaving(false);
-      return;
-    }
-    const { error: e1 } = await supabase.from("par_guide_items").update({ par_level: n }).eq("id", match.id);
-    if (e1) {
-      toast.error(e1.message);
-      setManagerParSaving(false);
-      return;
-    }
-    if (managerParEditItem.catalog_item_id) {
-      const { error: e2 } = await supabase
-        .from("inventory_catalog_items")
-        .update({ default_par_level: n, updated_at: new Date().toISOString() })
-        .eq("id", managerParEditItem.catalog_item_id);
-      if (e2) {
-        toast.error(e2.message);
-        setManagerParSaving(false);
-        return;
-      }
-      setCatalogItems((prev) =>
-        prev.map((c: any) => (c.id === managerParEditItem.catalog_item_id ? { ...c, default_par_level: n } : c)),
-      );
-    }
-    if (countingParGuideId === guideId) {
-      const slim = catalogItems.map((c: any) => ({ id: c.id, item_name: c.item_name }));
-      await hydrateCountingParMaps(countingParGuideId, slim);
-    }
-    toast.success("PAR level updated");
-    setManagerParEditItem(null);
-    setManagerParSaving(false);
-  }, [
-    managerParEditItem,
-    managerParInput,
-    currentRestaurant,
-    resolveParGuideIdForManagerEdits,
-    countingParGuideId,
-    catalogItems,
-  ]);
+    await handleManagerParLevelSaveAction();
+  }, [handleManagerParLevelSaveAction]);
 
   const handleManagerPriceSave = useCallback(async () => {
-    if (!managerPriceEditItem) return;
-    const price = managerPriceInput === "" ? null : parseFloat(managerPriceInput);
-    if (price != null && (!Number.isFinite(price) || price < 0)) {
-      toast.error("Enter a valid price");
-      return;
-    }
-    setManagerPriceSaving(true);
-    const { error: e1 } = await supabase.from("inventory_session_items").update({ unit_cost: price }).eq("id", managerPriceEditItem.id);
-    if (e1) {
-      toast.error(e1.message);
-      setManagerPriceSaving(false);
-      return;
-    }
-    if (managerPriceEditItem.catalog_item_id) {
-      const { error: e2 } = await supabase
-        .from("inventory_catalog_items")
-        .update({ default_unit_cost: price, updated_at: new Date().toISOString() })
-        .eq("id", managerPriceEditItem.catalog_item_id);
-      if (e2) {
-        toast.error(e2.message);
-        setManagerPriceSaving(false);
-        return;
-      }
-      setCatalogItems((prev) =>
-        prev.map((c: any) =>
-          c.id === managerPriceEditItem.catalog_item_id ? { ...c, default_unit_cost: price } : c,
-        ),
-      );
-    }
-    setItems((prev) => prev.map((i) => (i.id === managerPriceEditItem.id ? { ...i, unit_cost: price } : i)));
-    toast.success("Price updated");
-    setManagerPriceEditItem(null);
-    setManagerPriceSaving(false);
-  }, [managerPriceEditItem, managerPriceInput]);
+    await handleManagerPriceSaveAction();
+  }, [handleManagerPriceSaveAction]);
 
   const getLastOrderDate = (itemName: string): string | null => {
     const cat = catalogLookup[itemName];
@@ -1792,82 +1010,78 @@ export default function EnterInventoryPage() {
     return lastOrderDates[cat.id] || null;
   };
 
-  const getProductNumber = (item: any): string | null => {
-    return item.vendor_sku || catalogLookup[item.item_name]?.product_number || null;
-  };
+  const getProductNumber = (item: InventorySessionItemRow): string | null =>
+    getProductNumberHelper(item, catalogLookup);
 
-  const formatLastOrdered = (date: string | null): string => {
-    if (!date) return "—";
-    try { return format(new Date(date), "MM/dd/yy"); } catch { return "—"; }
-  };
+  const formatLastOrdered = (date: string | null): string =>
+    formatLastOrderedHelper(date);
 
-  // Apply status filter in addition to category/search filters
-  const filteredItems = items.filter((i) => {
-    const cat = getItemCategory(i);
-    if (filterCategory !== "all" && cat !== filterCategory) return false;
-    if (search && !i.item_name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (showOnlyEmpty && Number(i.current_stock) > 0) return false;
-    // Status filter
-    if (statusFilter === "uncounted" && getRowState(i) !== "uncounted") return false;
-    if (statusFilter === "low") {
-      const par = getApprovedPar(i);
-      const risk = getRisk(Number(i.current_stock ?? 0), par);
-      if (risk.label !== "Low") return false;
-    }
-    if (statusFilter === "critical") {
-      const par = getApprovedPar(i);
-      const risk = getRisk(Number(i.current_stock ?? 0), par);
-      if (risk.label !== "Critical") return false;
-    }
-    return true;
-  });
+  const { filteredItems, globalIndexByItemId, categories, groupedItems, sortedCategoryKeys } =
+    useMemo(
+      () =>
+        buildInventoryView({
+          items,
+          filterCategory,
+          search,
+          showOnlyEmpty,
+          statusFilter,
+          categoryMode,
+          hasMappings,
+          mappedCategories,
+          itemCategoryMap,
+          approvedParArgs: {
+            countingParGuideId,
+            countingParByCatalogId,
+            countingParByNormalizedName,
+            approvedParMap,
+            catalogDefaultParById,
+            catalogDefaultParByName,
+          },
+          riskThresholds,
+        }),
+      [
+        items,
+        filterCategory,
+        search,
+        showOnlyEmpty,
+        statusFilter,
+        categoryMode,
+        hasMappings,
+        mappedCategories,
+        itemCategoryMap,
+        countingParGuideId,
+        countingParByCatalogId,
+        countingParByNormalizedName,
+        approvedParMap,
+        catalogDefaultParById,
+        catalogDefaultParByName,
+        riskThresholds,
+      ],
+    );
 
-  if (hasMappings) {
-    filteredItems.sort((a, b) => {
-      const catA = getItemCategory(a);
-      const catB = getItemCategory(b);
-      const catSortA = mappedCategories.find(c => c.name === catA)?.sort_order ?? 999;
-      const catSortB = mappedCategories.find(c => c.name === catB)?.sort_order ?? 999;
-      if (catSortA !== catSortB) return catSortA - catSortB;
-      return getItemSortOrder(a) - getItemSortOrder(b);
-    });
-  }
-
-  if (categoryMode === "alphabetic") {
-    filteredItems.sort((a, b) => a.item_name.localeCompare(b.item_name));
-  }
-
-  const categories = hasMappings
-    ? mappedCategories.map(c => c.name)
-    : [...new Set(items.map((i) => i.category).filter(Boolean))];
   const currentListId = activeSession?.inventory_list_id || selectedList || "";
   const selectedListName = lists.find((l) => l.id === currentListId)?.name || "";
 
-  const groupedItems = filteredItems.reduce<Record<string, any[]>>((acc, item) => {
-    const cat = getItemCategory(item);
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(item);
-    return acc;
-  }, {});
-
-  const sortedCategoryKeys = hasMappings
-    ? Object.keys(groupedItems).sort((a, b) => {
-        const sortA = mappedCategories.find(c => c.name === a)?.sort_order ?? 999;
-        const sortB = mappedCategories.find(c => c.name === b)?.sort_order ?? 999;
-        return sortA - sortB;
-      })
-    : categoryMode === "alphabetic"
-      ? Object.keys(groupedItems).sort()
-      : Object.keys(groupedItems);
-
   const jumpToNextEmpty = () => {
     const emptyItem = filteredItems.find(i => !i.current_stock || Number(i.current_stock) === 0);
-    if (emptyItem && inputRefs.current[emptyItem.id]) {
-      inputRefs.current[emptyItem.id]?.focus();
-      inputRefs.current[emptyItem.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
-    } else {
+    if (!emptyItem) {
       toast.info("All items have been counted!");
+      return;
     }
+    const cat = getItemCategory(emptyItem);
+    const catItems = groupedItems[cat];
+    const idx = catItems?.findIndex(i => i.id === emptyItem.id) ?? -1;
+    const list = categoryVirtualListRefs.current[cat];
+    if (list && idx >= 0) {
+      list.scrollToRow({ align: "smart", index: idx });
+    }
+    requestAnimationFrame(() => {
+      const input = inputRefs.current[emptyItem.id];
+      input?.focus();
+      if ((!list || idx < 0) && input) {
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, currentIndex: number, field: "stock" = "stock") => {
@@ -1900,27 +1114,31 @@ export default function EnterInventoryPage() {
   const progressPct = totalItems > 0 ? Math.round((countedItems / totalItems) * 100) : 0;
 
   // Submit summary stats
-  const submitSummary = useMemo(() => {
-    let lowCount = 0;
-    let criticalCount = 0;
-    let estimatedValue = 0;
-    items.forEach(i => {
-      const par = getApprovedPar(i);
-      const risk = getRisk(Number(i.current_stock ?? 0), par);
-      if (risk.label === "Low") lowCount++;
-      if (risk.label === "Critical") criticalCount++;
-      if (par && par > 0) {
-        const need = Math.ceil(Math.max(0, par - Number(i.current_stock ?? 0)));
-        if (need > 0 && i.unit_cost) estimatedValue += need * Number(i.unit_cost);
-      }
-    });
-    return { counted: countedItems, total: totalItems, lowCount, criticalCount, estimatedValue };
-  }, [
-    items,
-    countedItems,
-    totalItems,
-    getApprovedPar,
-  ]);
+  const submitSummary = useMemo(
+    () =>
+      buildSubmitSummary(
+        items,
+        {
+          countingParGuideId,
+          countingParByCatalogId,
+          countingParByNormalizedName,
+          approvedParMap,
+          catalogDefaultParById,
+          catalogDefaultParByName,
+        },
+        riskThresholds,
+      ),
+    [
+      items,
+      countingParGuideId,
+      countingParByCatalogId,
+      countingParByNormalizedName,
+      approvedParMap,
+      catalogDefaultParById,
+      catalogDefaultParByName,
+      riskThresholds,
+    ],
+  );
 
   if (!activeSession && loading && (lists.length === 0 || !sessionsLoaded)) {
     return (
@@ -1938,33 +1156,45 @@ export default function EnterInventoryPage() {
     const useCompactLayout = isCompact || viewToggle === "compact";
     const isCountingEditable =
       activeSession.status !== "IN_REVIEW" && activeSession.status !== "APPROVED";
+    /** Category order + stock status filters — managers always; staff when not in active count edit. */
+    const showAdvancedListControls = isManagerOrOwner || !isCountingEditable;
+    const sessionModeBadge =
+      activeSession.status === "IN_PROGRESS"
+        ? { label: "Counting", className: "border-amber-500/40 bg-amber-500/12 text-amber-950 dark:text-amber-100" }
+        : activeSession.status === "IN_REVIEW"
+          ? { label: "In review", className: "border-sky-500/35 bg-sky-500/10 text-sky-950 dark:text-sky-100" }
+          : activeSession.status === "APPROVED"
+            ? { label: "Approved", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100" }
+            : { label: activeSession.status, className: "border-border bg-muted/50 text-muted-foreground" };
 
-    const resolveCountingParDisplay = (item: any): number | null => {
-      if (!parColumnVisible || !countingParGuideId) return null;
-      if (item.catalog_item_id && countingParByCatalogId[item.catalog_item_id] !== undefined) {
-        return countingParByCatalogId[item.catalog_item_id];
-      }
-      const kn = normalizeItemName(item.item_name);
-      if (kn && countingParByNormalizedName[kn] !== undefined) return countingParByNormalizedName[kn];
-      return null;
-    };
+    const resolveCountingParDisplay = (item: InventorySessionItemRow): number | null =>
+      resolveCountingParDisplayHelper(
+        item,
+        parColumnVisible,
+        countingParGuideId,
+        countingParByCatalogId,
+        countingParByNormalizedName,
+      );
 
-    const resolveStoredGuideParValue = (item: any): number | null => {
-      if (!countingParGuideId) return null;
-      if (item.catalog_item_id && countingParByCatalogId[item.catalog_item_id] !== undefined) {
-        return countingParByCatalogId[item.catalog_item_id];
-      }
-      const kn = normalizeItemName(item.item_name);
-      if (kn && countingParByNormalizedName[kn] !== undefined) return countingParByNormalizedName[kn];
-      return null;
-    };
+    const resolveStoredGuideParValue = (item: InventorySessionItemRow): number | null =>
+      resolveCountingParDisplayHelper(
+        item,
+        true,
+        countingParGuideId,
+        countingParByCatalogId,
+        countingParByNormalizedName,
+      );
 
-    const formatParColumnCell = (item: any) => {
-      const v = resolveCountingParDisplay(item);
-      return v === null ? "—" : formatNum(v);
-    };
+    const formatParColumnCell = (item: InventorySessionItemRow) =>
+      formatParColumnCellHelper(
+        item,
+        parColumnVisible,
+        countingParGuideId,
+        countingParByCatalogId,
+        countingParByNormalizedName,
+      );
 
-    const renderRowActionsMenu = (item: any) => (
+    const renderRowActionsMenu = (item: InventorySessionItemRow) => (
       <DropdownMenu>
         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
           <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground shrink-0">
@@ -2044,8 +1274,16 @@ export default function EnterInventoryPage() {
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="min-w-0 flex-1">
-              <h1 className="text-base lg:text-lg font-bold tracking-tight truncate">{activeSession.name}</h1>
-              <div className="flex items-center gap-2 mt-0.5">
+              <div className="flex items-start gap-2 min-w-0">
+                <Badge
+                  variant="outline"
+                  className={`shrink-0 mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${sessionModeBadge.className}`}
+                >
+                  {sessionModeBadge.label}
+                </Badge>
+                <h1 className="text-base lg:text-lg font-bold tracking-tight truncate min-w-0 flex-1">{activeSession.name}</h1>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <span className="text-xs text-muted-foreground truncate">
                   {selectedListName ? `List: ${selectedListName}` : ""}
                 </span>
@@ -2063,13 +1301,19 @@ export default function EnterInventoryPage() {
                   </Badge>
                 )}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                {parColumnVisible && countingParGuideName
-                  ? `Showing PAR from “${countingParGuideName}” (read-only)`
-                  : countingParGuideName
-                    ? `PAR guide for this count: “${countingParGuideName}”. Open ⋯ → Show PAR to view the column.`
-                    : "PAR is optional — ⋯ menu → Show PAR to pick a guide and view levels while counting."}
-              </p>
+              {isManagerOrOwner ? (
+                <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                  {parColumnVisible && countingParGuideName
+                    ? `Showing PAR from “${countingParGuideName}” (read-only)`
+                    : countingParGuideName
+                      ? `PAR guide for this count: “${countingParGuideName}”. Open ⋯ → Show PAR to view the column.`
+                      : "PAR is optional — ⋯ menu → Show PAR to pick a guide and view levels while counting."}
+                </p>
+              ) : parColumnVisible && countingParGuideName ? (
+                <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                  PAR reference: “{countingParGuideName}”
+                </p>
+              ) : null}
             </div>
 
             {/* Save status */}
@@ -2083,8 +1327,10 @@ export default function EnterInventoryPage() {
               onClick={() => setSubmitConfirmOpen(true)}
               className="bg-gradient-amber shadow-amber gap-2 h-9 px-5 text-sm shrink-0 hidden lg:flex"
               disabled={!isCountingEditable || items.length === 0}
+              aria-label={isCountingEditable ? "Submit count for manager review" : "Submit for review unavailable"}
+              title={isCountingEditable ? "Send this count to a manager for review" : undefined}
             >
-              <Send className="h-3.5 w-3.5" /> Submit for Review
+              <Send className="h-3.5 w-3.5" /> Submit for review
             </Button>
           </div>
 
@@ -2101,19 +1347,52 @@ export default function EnterInventoryPage() {
               />
             </div>
 
-            {/* Category grouping dropdown */}
-            <Select value={categoryMode} onValueChange={(v) => { setCategoryMode(v); setFilterCategory("all"); }}>
-              <SelectTrigger className="h-10 w-[170px] text-xs">
-                <ListOrdered className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="list_order">List Order</SelectItem>
-                <SelectItem value="custom-categories">AI Categories</SelectItem>
-                <SelectItem value="my-categories">My Categories</SelectItem>
-                <SelectItem value="alphabetic">Alphabetic</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* Staff: shelf order vs A–Z only (list management / shelf order = list_order) */}
+            {isStaffMenu && (
+              <ToggleGroup
+                type="single"
+                value={categoryMode === "alphabetic" ? "alphabetic" : "list_order"}
+                onValueChange={(v) => {
+                  if (v === "list_order" || v === "alphabetic") {
+                    setCategoryMode(v);
+                    setFilterCategory("all");
+                  }
+                }}
+                className="inline-flex h-10 shrink-0 rounded-lg border border-border/50 bg-muted/40 p-0.5"
+                aria-label="Item order"
+              >
+                <ToggleGroupItem
+                  value="list_order"
+                  aria-label="Shelf order"
+                  className="h-9 px-2.5 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm"
+                >
+                  Shelf order
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="alphabetic"
+                  aria-label="Alphabetical A to Z"
+                  className="h-9 px-2.5 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm"
+                >
+                  A–Z
+                </ToggleGroupItem>
+              </ToggleGroup>
+            )}
+
+            {/* Category grouping — managers only (full options); staff use toggle above */}
+            {showAdvancedListControls && !isStaffMenu && (
+              <Select value={categoryMode} onValueChange={(v) => { setCategoryMode(v); setFilterCategory("all"); }}>
+                <SelectTrigger className="h-10 w-[170px] text-xs">
+                  <ListOrdered className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="list_order">List Order</SelectItem>
+                  <SelectItem value="custom-categories">AI Categories</SelectItem>
+                  <SelectItem value="my-categories">My Categories</SelectItem>
+                  <SelectItem value="alphabetic">Alphabetic</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
 
             {/* CENTER: Progress — desktop */}
             <div className="hidden lg:flex items-center gap-3 mx-auto shrink-0">
@@ -2132,19 +1411,23 @@ export default function EnterInventoryPage() {
 
             {/* RIGHT: Filters + Actions */}
             <div className="hidden lg:flex items-center gap-2 ml-auto shrink-0">
-              {/* Status filter dropdown */}
-              <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-                <SelectTrigger className="h-9 w-[130px] text-xs">
-                  <Filter className="h-3.5 w-3.5 mr-1.5" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Show All</SelectItem>
-                  <SelectItem value="uncounted">Uncounted</SelectItem>
-                  <SelectItem value="low">Low Stock</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
+              {showAdvancedListControls && (
+                <Select
+                  value={statusFilter}
+                  onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+                >
+                  <SelectTrigger className="h-9 w-[130px] text-xs">
+                    <Filter className="h-3.5 w-3.5 mr-1.5" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Show All</SelectItem>
+                    <SelectItem value="uncounted">Uncounted</SelectItem>
+                    <SelectItem value="low">Low Stock</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -2170,6 +1453,21 @@ export default function EnterInventoryPage() {
                     <DropdownMenuItem onClick={() => void openParGuidePicker()}>
                       <BookOpen className="h-3.5 w-3.5 mr-2" /> Change PAR guide…
                     </DropdownMenuItem>
+                  )}
+                  {staffCountingFocus && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel>Stock filter</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={statusFilter}
+                        onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+                      >
+                        <DropdownMenuRadioItem value="all">All items</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="uncounted">Uncounted only</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="low">Low stock</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="critical">Critical</DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </>
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -2221,6 +1519,21 @@ export default function EnterInventoryPage() {
                       <BookOpen className="h-3.5 w-3.5 mr-2" /> Change PAR guide…
                     </DropdownMenuItem>
                   )}
+                  {staffCountingFocus && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel>Stock filter</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={statusFilter}
+                        onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+                      >
+                        <DropdownMenuRadioItem value="all">All items</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="uncounted">Uncounted only</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="low">Low stock</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="critical">Critical</DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     disabled={!isCountingEditable}
@@ -2247,8 +1560,16 @@ export default function EnterInventoryPage() {
         </div>
 
         {!isCountingEditable && (
-          <div className="rounded-lg border border-border/50 bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground">
-            This session is submitted or approved and cannot be edited here. Use Review or Approved Inventory to view it.
+          <div className="rounded-lg border border-border/50 bg-muted/30 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className={`text-[10px] font-semibold uppercase tracking-wide ${sessionModeBadge.className}`}>
+                {sessionModeBadge.label}
+              </Badge>
+              <span className="text-sm font-medium text-foreground">View only</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1.5">
+              This count is locked. Open it from Inventory Review or Approved Inventory for full detail and actions.
+            </p>
           </div>
         )}
 
@@ -2293,7 +1614,7 @@ export default function EnterInventoryPage() {
                       const globalIdx = filteredItems.indexOf(item);
                       const rowPar = getApprovedPar(item);
                       const needQty = rowPar > 0 ? computeOrderQty(item.current_stock, rowPar, item.unit, item.pack_size) : null;
-                      const risk = getRisk(item.current_stock, rowPar);
+                      const risk = getRisk(item.current_stock, rowPar, riskThresholds);
                       const rowState = getRowState(item.current_stock);
                       const isRecentlyEdited = lastEditedId === item.id;
 
@@ -2325,7 +1646,11 @@ export default function EnterInventoryPage() {
                                 <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
                                   {getProductNumber(item) && <span className="text-[10px] text-muted-foreground/50">#{getProductNumber(item)}</span>}
                                   {item.pack_size && <span className="text-[10px] text-muted-foreground/50">{item.pack_size}</span>}
-                                  <span className="text-[10px] text-muted-foreground/50">Last: {formatLastOrdered(getLastOrderDate(item.item_name))}</span>
+                                  {!(isStaffMenu && isCountingEditable) && (
+                                    <span className="text-[10px] text-muted-foreground/50">
+                                      Last: {formatLastOrdered(getLastOrderDate(item.item_name))}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
@@ -2420,8 +1745,8 @@ export default function EnterInventoryPage() {
             })}
           </div>
         ) : (
-          /* ─── TABLE LAYOUT (desktop standard) ─── */
-          <div className="mt-4 space-y-6">
+          /* ─── TABLE LAYOUT (desktop standard) — virtualized ─── */
+          <div ref={sessionListWidthRef} className="mt-4 space-y-6">
             {sortedCategoryKeys.map((category) => {
               const catItems = groupedItems[category];
               return (
@@ -2433,108 +1758,31 @@ export default function EnterInventoryPage() {
                       <span className="text-[10px] text-muted-foreground/40 tabular-nums">({catItems.length})</span>
                     </div>
                   </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-b border-border/20 hover:bg-transparent">
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 pl-5">Item</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-36 text-center">On Hand</TableHead>
-                        {parColumnVisible && (
-                          <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-24 text-right">PAR</TableHead>
-                        )}
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-24 text-right">Price</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-20 text-right">Need</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-24 text-center pr-5">Status</TableHead>
-                        <TableHead className="w-10"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {catItems.map((item) => {
-                        const globalIdx = filteredItems.indexOf(item);
-                        const rowPar = getApprovedPar(item);
-                        const needQty = rowPar > 0 ? computeOrderQty(item.current_stock, rowPar, item.unit, item.pack_size) : null;
-                        const risk = getRisk(item.current_stock, rowPar);
-                        const rowState = getRowState(item.current_stock);
-                        const rowBg = getRowBgClass(item.current_stock);
-                        const isRecentlyEdited = lastEditedId === item.id;
-
-                        return (
-                          <TableRow
-                            key={item.id}
-                            className={`border-b border-border/10 transition-all duration-200 hover:bg-muted/20 ${rowBg} ${isRecentlyEdited ? "bg-primary/[0.03]" : ""}`}
-                          >
-                            <TableCell className="pl-5 py-3">
-                              <p className="font-medium text-sm leading-tight">{item.item_name}</p>
-                              <ItemIdentityBlock brandName={item.brand_name} className="block mt-0.5" />
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0 mt-0.5">
-                                {getProductNumber(item) && (
-                                  <span className="text-[11px] text-muted-foreground/50 font-mono">#{getProductNumber(item)}</span>
-                                )}
-                                {item.pack_size && (
-                                  <span className="text-[11px] text-muted-foreground/50">{item.pack_size}</span>
-                                )}
-                                <span className="text-[11px] text-muted-foreground/40">
-                                  {formatLastOrdered(getLastOrderDate(item.item_name)) !== "—"
-                                    ? `Last: ${formatLastOrdered(getLastOrderDate(item.item_name))}`
-                                    : null}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center py-3">
-                              <div className="flex items-center justify-center gap-2">
-                                <Input
-                                  ref={el => { inputRefs.current[item.id] = el; }}
-                                  type="number"
-                                  inputMode="decimal"
-                                  min={0}
-                                  step={0.1}
-                                  readOnly={!isCountingEditable}
-                                  value={inputDisplayValue(item.current_stock)}
-                                  onFocus={(e) => e.target.select()}
-                                  onChange={(e) => handleUpdateStock(item.id, e.target.value)}
-                                  onBlur={() => handleSaveStock(item.id, item.current_stock)}
-                                  onKeyDown={(e) => handleKeyDown(e, globalIdx, "stock")}
-                                  className="w-24 h-10 text-base font-mono text-center font-semibold rounded-lg border-2 border-border/50 focus:border-primary/50 bg-background [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                />
-                                <div className="w-5">
-                                  {savingId === item.id && <span className="text-muted-foreground animate-pulse text-xs">…</span>}
-                                  {savedId === item.id && <Check className="h-3.5 w-3.5 text-success" />}
-                                </div>
-                              </div>
-                            </TableCell>
-                            {parColumnVisible && (
-                              <TableCell className="text-right py-3">
-                                <span className="text-sm font-mono font-semibold tabular-nums text-foreground">
-                                  {formatParColumnCell(item)}
-                                </span>
-                              </TableCell>
-                            )}
-                            <TableCell className="text-right py-3">
-                              <span className="text-sm font-mono tabular-nums text-foreground">
-                                {item.unit_cost != null ? `$${Number(item.unit_cost).toFixed(2)}` : <span className="text-muted-foreground/30">—</span>}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right py-3">
-                              {needQty !== null ? (
-                                <span className={`font-mono text-sm font-semibold ${needQty > 0 ? "text-destructive" : "text-muted-foreground"}`}>
-                                  {formatNum(needQty)}
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground/30 text-sm">—</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center pr-5 py-3">
-                              <Badge className={`${risk.bgClass} ${risk.textClass} border-0 text-[10px] font-medium`}>
-                                {getRiskBadgeLabel(risk)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="py-3 pr-3" onClick={e => e.stopPropagation()}>
-                              {renderRowActionsMenu(item)}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                  <SessionDesktopCategoryList
+                    catItems={catItems}
+                    listWidth={sessionListWidth}
+                    globalIndexByItemId={globalIndexByItemId}
+                    riskThresholds={riskThresholds}
+                    parColumnVisible={parColumnVisible}
+                    simplifyCountingRow={staffCountingFocus}
+                    isCountingEditable={isCountingEditable}
+                    onUpdateStock={handleUpdateStock}
+                    onSaveStock={handleSaveStock}
+                    onKeyDown={handleKeyDown}
+                    inputRefs={inputRefs}
+                    formatParColumnCell={formatParColumnCell}
+                    getProductNumber={getProductNumber}
+                    formatLastOrdered={formatLastOrdered}
+                    getLastOrderDate={getLastOrderDate}
+                    renderRowActionsMenu={renderRowActionsMenu}
+                    savingId={savingId}
+                    savedId={savedId}
+                    lastEditedId={lastEditedId}
+                    getApprovedPar={getApprovedPar}
+                    registerListRef={(instance) => {
+                      categoryVirtualListRefs.current[category] = instance;
+                    }}
+                  />
                 </div>
               );
             })}
@@ -2570,6 +1818,8 @@ export default function EnterInventoryPage() {
                 className="bg-gradient-amber shadow-amber h-11 px-5 text-sm font-medium shrink-0"
                 onClick={() => setSubmitConfirmOpen(true)}
                 disabled={!isCountingEditable || items.length === 0}
+                aria-label={isCountingEditable ? "Submit count for manager review" : "Submit unavailable"}
+                title={isCountingEditable ? "Send this count to a manager for review" : undefined}
               >
                 <Send className="h-4 w-4 mr-1.5" /> Submit
               </Button>
@@ -2815,6 +2065,26 @@ export default function EnterInventoryPage() {
               {managerParEditItem && <p className="text-sm text-muted-foreground truncate">{managerParEditItem.item_name}</p>}
             </SheetHeader>
             <p className="text-xs text-muted-foreground">Updates the linked PAR guide and catalog default PAR.</p>
+            {isManagerOrOwner && countingParGuideId && activeSession?.inventory_list_id && managerParEditItem && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full gap-2 mt-2 text-xs"
+                onClick={() => {
+                  const q = new URLSearchParams({
+                    guide: countingParGuideId,
+                    list: activeSession.inventory_list_id!,
+                  });
+                  if (managerParEditItem.item_name) q.set("focus", managerParEditItem.item_name);
+                  navigate(`/app/par?${q.toString()}`);
+                  setManagerParEditItem(null);
+                }}
+              >
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                Fix PAR in guide
+              </Button>
+            )}
             <div className="flex-1 py-6 space-y-4">
               <div className="space-y-1"><Label>New PAR level</Label><Input type="number" min={0} step={0.1} className="h-10" value={managerParInput} onChange={(e) => setManagerParInput(e.target.value)} /></div>
             </div>

@@ -12,33 +12,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { toast } from "sonner";
 import {
   ArrowLeft, BookmarkPlus, CheckCircle, AlertTriangle, Package, DollarSign,
-  Loader2, Flag, TrendingUp, ExternalLink,
+  Loader2, Flag, TrendingUp,
 } from "lucide-react";
 import { formatNum } from "@/lib/inventory-utils";
+import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
 import {
-  analyzeInvoiceComparison,
   DEFAULT_PRICE_TOLERANCE,
   DEFAULT_QTY_TOLERANCE,
   DEFAULT_TOTAL_TOLERANCE,
-  deriveInvoiceComparisonStatus,
   threeWayQtyAllDivergent,
 } from "@/lib/invoice-comparison";
-import { resolveDocumentTotal } from "@/lib/invoice-totals";
-
-// Returns the catalog_item_id for a purchase_history_item by checking:
-// 1. Already set on the item, 2. SKU match in vendor mappings, 3. Exact learned vendor-item mapping
-function resolveItemMapping(phItem: any, mappings: any[]): string | null {
-  if (phItem.catalog_item_id) return phItem.catalog_item_id;
-  if (phItem.vendor_sku) {
-    const m = mappings.find(m => m.vendor_sku?.toLowerCase() === phItem.vendor_sku?.toLowerCase());
-    if (m) return m.catalog_item_id;
-  }
-  const m = mappings.find(m => m.vendor_item_name?.toLowerCase() === phItem.item_name?.toLowerCase().trim());
-  return m?.catalog_item_id ?? null;
-}
+import {
+  buildCatalogById,
+  buildDerivedComparisonRows,
+  buildLineItemById,
+  groupConfirmResultItems,
+  summarizeInvoiceReview,
+} from "@/domain/invoices/invoiceReviewSelectors";
+import type { InvoiceReviewComparison } from "@/domain/invoices/invoiceReviewTypes";
+import { useInvoiceReviewActions } from "@/hooks/useInvoiceReviewActions";
+import { useInvoiceReviewData } from "@/hooks/useInvoiceReviewData";
 
 function resolveComparisonLineTotal(
   explicitTotal: unknown,
@@ -67,61 +62,75 @@ export default function InvoiceReviewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { currentRestaurant } = useRestaurant();
-
-  const [invoice, setInvoice] = useState<any>(null);
-  const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
-  const [poItems, setPoItems] = useState<any[]>([]);
-  const [comparisons, setComparisons] = useState<any[]>([]);
-  const [issues, setIssues] = useState<any[]>([]);
-  const [catalogItems, setCatalogItems] = useState<any[]>([]);
-  const [vendorMappings, setVendorMappings] = useState<any[]>([]);
   const [catalogOverrides, setCatalogOverrides] = useState<Record<string, string>>({});
-  const [savingMappings, setSavingMappings] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
-  const [confirming, setConfirming] = useState(false);
-  /** Whether this page was loaded from `invoices` or legacy `purchase_history`. */
-  const [reviewDocKind, setReviewDocKind] = useState<"invoice" | "purchase_history">("invoice");
+  const {
+    invoice,
+    setInvoice,
+    invoiceItems,
+    setInvoiceItems,
+    poItems,
+    comparisons,
+    setComparisons,
+    issues,
+    setIssues,
+    catalogItems,
+    setVendorMappings,
+    loading,
+    reviewDocKind,
+  } = useInvoiceReviewData({
+    id,
+    currentRestaurantId: currentRestaurant?.id,
+    navigate,
+  });
 
   const catalogById = useMemo(
-    () => Object.fromEntries(catalogItems.map(c => [c.id, c])),
+    () => buildCatalogById(catalogItems),
     [catalogItems],
   );
 
   const lineItemById = useMemo(
-    () => Object.fromEntries(invoiceItems.map(i => [i.id, i])),
+    () => buildLineItemById(invoiceItems),
     [invoiceItems],
   );
 
   const comparisonRows = useMemo(
-    () => comparisons.map((comp) => {
-      const analysis = analyzeInvoiceComparison(comp);
-      return {
-        ...comp,
-        derived_status: analysis.status,
-        qtyAnalysis: analysis.qty,
-        priceAnalysis: analysis.price,
-        totalAnalysis: analysis.total,
-        receivedVsBilled: analysis.receivedVsBilled,
-        receivedDollar: analysis.receivedDollar,
-      };
-    }),
+    () => buildDerivedComparisonRows(comparisons),
     [comparisons],
   );
 
-  // Confirmation result dialog
-  const [confirmResult, setConfirmResult] = useState<any>(null);
-
   // Report issue sheet
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
-  const [reportItem, setReportItem] = useState<any>(null);
+  const [reportItem, setReportItem] = useState<InvoiceReviewComparison | null>(null);
   const [reportIssueType, setReportIssueType] = useState("short_shipped");
   const [reportNotes, setReportNotes] = useState("");
-  const [reportSaving, setReportSaving] = useState(false);
-
-  useEffect(() => {
-    if (!id || !currentRestaurant) return;
-    loadData();
-  }, [id, currentRestaurant]);
+  const {
+    confirmResult,
+    setConfirmResult,
+    confirming,
+    handleConfirmReceipt,
+    reportSaving,
+    handleSaveIssue,
+    savingMappings,
+    handleSaveMapping,
+    persistReceivedQty,
+  } = useInvoiceReviewActions({
+    id,
+    currentRestaurantId: currentRestaurant?.id,
+    reviewDocKind,
+    invoice,
+    lineItemById,
+    catalogOverrides,
+    reportItem,
+    reportIssueType,
+    reportNotes,
+    setInvoice,
+    setInvoiceItems,
+    setComparisons,
+    setIssues,
+    setVendorMappings,
+    setCatalogOverrides,
+    setReportSheetOpen,
+  });
 
   useEffect(() => {
     const changedRows = comparisonRows.filter((comp) => comp.status !== comp.derived_status);
@@ -149,430 +158,28 @@ export default function InvoiceReviewPage() {
     });
   }, [comparisonRows]);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const { data: invNew, error: invNewErr } = await supabase
-        .from("invoices")
-        .select("*, purchase_orders(id, po_number, smart_order_run_id, purchase_order_items(*))")
-        .eq("id", id!)
-        .eq("restaurant_id", currentRestaurant!.id)
-        .maybeSingle();
-
-      if (invNew && !invNewErr) {
-        setReviewDocKind("invoice");
-        setInvoice(invNew);
-        const [
-          { data: items },
-          { data: cats },
-          { data: comps },
-          { data: issuesList },
-        ] = await Promise.all([
-          supabase.from("invoice_items").select("*").eq("invoice_id", id),
-          supabase.from("inventory_catalog_items").select("id, item_name, vendor_sku, product_number").eq("restaurant_id", currentRestaurant!.id),
-          supabase.from("invoice_line_comparisons").select("*").eq("invoice_id", id!),
-          supabase.from("delivery_issues").select("*").eq("invoice_id", id!),
-        ]);
-        const poItemsList = invNew.purchase_orders?.purchase_order_items || [];
-        setPoItems(poItemsList);
-        setInvoiceItems(items || []);
-        setCatalogItems(cats || []);
-        setIssues(issuesList || []);
-        let mappings: any[] = [];
-        if (invNew.vendor_name) {
-          const { data: mappingsData } = await supabase
-            .from("vendor_item_mappings")
-            .select("*")
-            .eq("restaurant_id", currentRestaurant!.id)
-            .eq("vendor_name", invNew.vendor_name);
-          mappings = mappingsData || [];
-        }
-        setVendorMappings(mappings);
-        setComparisons(comps || []);
-        if ((!comps || comps.length === 0) && items && items.length > 0) {
-          await generateComparisons(invNew, items, poItemsList, mappings, cats || [], "invoice");
-          supabase
-            .rpc("notify_delivery_issues", { p_purchase_history_id: id! })
-            .then(({ error }) => {
-              if (error) console.warn("[notify_delivery_issues]", error.message);
-            });
-        }
-        return;
-      }
-
-      const { data: inv } = await supabase
-        .from("purchase_history")
-        .select("*, smart_order_runs(id, po_number, smart_order_run_items(*))")
-        .eq("id", id)
-        .single();
-      if (!inv) { toast.error("Invoice not found"); navigate(-1); return; }
-      setReviewDocKind("purchase_history");
-      setInvoice(inv);
-
-      const [
-        { data: items },
-        { data: cats },
-        { data: comps },
-        { data: issuesList },
-      ] = await Promise.all([
-        supabase.from("purchase_history_items").select("*").eq("purchase_history_id", id),
-        supabase.from("inventory_catalog_items").select("id, item_name, vendor_sku, product_number").eq("restaurant_id", currentRestaurant!.id),
-        supabase.from("invoice_line_comparisons").select("*").eq("purchase_history_id", id!),
-        supabase.from("delivery_issues").select("*").eq("purchase_history_id", id!),
-      ]);
-
-      const poItemsList = inv.smart_order_runs?.smart_order_run_items || [];
-      setPoItems(poItemsList);
-      setInvoiceItems(items || []);
-      setCatalogItems(cats || []);
-      setIssues(issuesList || []);
-
-      let mappings: any[] = [];
-      if (inv.vendor_name) {
-        const { data: mappingsData } = await supabase
-          .from("vendor_item_mappings")
-          .select("*")
-          .eq("restaurant_id", currentRestaurant!.id)
-          .eq("vendor_name", inv.vendor_name);
-        mappings = mappingsData || [];
-      }
-      setVendorMappings(mappings);
-      setComparisons(comps || []);
-
-      if ((!comps || comps.length === 0) && items && items.length > 0) {
-        await generateComparisons(inv, items, poItemsList, mappings, cats || [], "purchase_history");
-        supabase
-          .rpc("notify_delivery_issues", { p_purchase_history_id: id! })
-          .then(({ error }) => {
-            if (error) console.warn("[notify_delivery_issues]", error.message);
-          });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const generateComparisons = async (
-    inv: any,
-    items: any[],
-    poItemsList: any[],
-    mappings: any[],
-    catalogItemsList: any[],
-    doc: "invoice" | "purchase_history",
-  ) => {
-    const sorId = doc === "invoice" ? inv.purchase_orders?.smart_order_run_id ?? null : inv.smart_order_run_id;
-
-    const lineKeysForItem = (item: any) =>
-      doc === "invoice"
-        ? {
-            invoice_id: inv.id,
-            invoice_item_id: item.id,
-            purchase_history_id: null as string | null,
-            purchase_history_item_id: null as string | null,
-            smart_order_run_id: sorId,
-          }
-        : {
-            purchase_history_id: inv.id,
-            purchase_history_item_id: item.id,
-            invoice_id: null as string | null,
-            invoice_item_id: null as string | null,
-            smart_order_run_id: sorId,
-          };
-
-    const lineKeysSynthetic = () =>
-      doc === "invoice"
-        ? {
-            invoice_id: inv.id,
-            invoice_item_id: null as string | null,
-            purchase_history_id: null as string | null,
-            purchase_history_item_id: null as string | null,
-            smart_order_run_id: sorId,
-          }
-        : {
-            purchase_history_id: inv.id,
-            purchase_history_item_id: null as string | null,
-            invoice_id: null as string | null,
-            invoice_item_id: null as string | null,
-            smart_order_run_id: sorId,
-          };
-
-    const poOrderedQty = (poi: any) => Number(poi.quantity_ordered ?? poi.suggested_order) || 0;
-
-    const resolvedPoItems = poItemsList.map((poi: any) => ({
-      ...poi,
-      resolved_catalog_id: poi.catalog_item_id || null,
-    }));
-
-    const poByCatalogId: Record<string, any> = {};
-    resolvedPoItems.forEach((poi: any) => {
-      if (poi.resolved_catalog_id) poByCatalogId[poi.resolved_catalog_id] = poi;
-    });
-
-    const matchedPoCatalogIds = new Set<string>();
-
-    const rows = items.map(item => {
-      const catalogId = resolveItemMapping(item, mappings);
-      const invoicedQty = Number(item.quantity) || 0;
-      const invoicedCost = item.unit_cost != null ? Number(item.unit_cost) : null;
-      const invoicedTotal = resolveComparisonLineTotal(item.total_cost, invoicedQty, invoicedCost);
-
-      if (!catalogId) {
-        return {
-          ...lineKeysForItem(item),
-          catalog_item_id: null,
-          item_name: item.item_name,
-          purchase_order_item_id: null,
-          po_qty: null,
-          po_unit_cost: null,
-          po_total_cost: null,
-          invoiced_qty: invoicedQty,
-          invoiced_unit_cost: invoicedCost,
-          invoiced_total_cost: invoicedTotal,
-          received_qty: invoicedQty,
-          status: "unmatched",
-        };
-      }
-
-      const po = poByCatalogId[catalogId];
-      if (po) matchedPoCatalogIds.add(catalogId);
-
-      const poQty = po ? poOrderedQty(po) : null;
-      const poCost = po?.unit_cost != null ? Number(po.unit_cost) : null;
-      const poTotal = resolveComparisonLineTotal(null, poQty, poCost);
-
-      let status: string = "ok";
-      if (!po) {
-        status = "extra_on_invoice";
-      } else {
-        status = deriveInvoiceComparisonStatus({
-          po_qty: poQty,
-          invoiced_qty: invoicedQty,
-          received_qty: invoicedQty,
-          po_unit_cost: poCost,
-          invoiced_unit_cost: invoicedCost,
-          po_total_cost: poTotal,
-          invoiced_total_cost: invoicedTotal,
-        });
-      }
-
-      return {
-        ...lineKeysForItem(item),
-        purchase_order_item_id: doc === "invoice" && po ? po.id : null,
-        catalog_item_id: catalogId,
-        item_name: item.item_name,
-        po_qty: poQty,
-        po_unit_cost: poCost,
-        po_total_cost: poTotal,
-        invoiced_qty: invoicedQty,
-        invoiced_unit_cost: invoicedCost,
-        invoiced_total_cost: invoicedTotal,
-        received_qty: invoicedQty,
-        status,
-      };
-    });
-
-    resolvedPoItems.forEach((poi: any) => {
-      if (poOrderedQty(poi) <= 0) return;
-      const catalogId = poi.resolved_catalog_id;
-      if (catalogId && matchedPoCatalogIds.has(catalogId)) return;
-      const pq = poOrderedQty(poi);
-      rows.push({
-        ...lineKeysSynthetic(),
-        purchase_order_item_id: doc === "invoice" ? poi.id : null,
-        catalog_item_id: catalogId || null,
-        item_name: poi.item_name,
-        po_qty: pq,
-        po_unit_cost: poi.unit_cost != null ? Number(poi.unit_cost) : null,
-        po_total_cost: resolveComparisonLineTotal(
-          null,
-          pq,
-          poi.unit_cost != null ? Number(poi.unit_cost) : null,
-        ),
-        invoiced_qty: 0,
-        invoiced_unit_cost: 0,
-        invoiced_total_cost: 0,
-        received_qty: 0,
-        status: "missing_from_invoice",
-      });
-    });
-
-    if (rows.length > 0) {
-      const { data: inserted } = await supabase
-        .from("invoice_line_comparisons")
-        .insert(rows)
-        .select();
-      if (inserted) setComparisons(inserted);
-    }
-  };
-
-  const handleConfirmReceipt = async () => {
-    if (!id || !currentRestaurant) return;
-    setConfirming(true);
-    try {
-      const { data, error } = await supabase.rpc("confirm_invoice_receipt", {
-        p_invoice_id: id,
-        p_restaurant_id: currentRestaurant.id,
-      });
-      if (error) throw error;
-
-      setInvoice((prev: any) =>
-        reviewDocKind === "invoice"
-          ? { ...prev, receipt_status: "confirmed", status: "confirmed" }
-          : { ...prev, receipt_status: "confirmed", invoice_status: "COMPLETE" },
-      );
-
-      setConfirmResult(data);
-    } catch (e: any) {
-      toast.error(`Failed: ${e.message}`);
-    } finally {
-      setConfirming(false);
-    }
-  };
-
-  const openReportIssue = (comp: any) => {
+  const openReportIssue = (comp: InvoiceReviewComparison) => {
     setReportItem(comp);
     setReportIssueType("short_shipped");
     setReportNotes("");
     setTimeout(() => setReportSheetOpen(true), 0);
   };
 
-  const handleSaveIssue = async () => {
-    if (!reportItem || !id) return;
-    setReportSaving(true);
-    try {
-      const issueRow =
-        reviewDocKind === "invoice"
-          ? {
-              invoice_id: id,
-              purchase_history_id: null as string | null,
-              invoice_line_comparison_id: reportItem.id,
-              catalog_item_id: reportItem.catalog_item_id || null,
-              item_name: reportItem.item_name,
-              issue_type: reportIssueType,
-              notes: reportNotes.trim() || null,
-            }
-          : {
-              purchase_history_id: id,
-              invoice_id: null as string | null,
-              invoice_line_comparison_id: reportItem.id,
-              catalog_item_id: reportItem.catalog_item_id || null,
-              item_name: reportItem.item_name,
-              issue_type: reportIssueType,
-              notes: reportNotes.trim() || null,
-            };
-      const { data, error } = await supabase.from("delivery_issues").insert(issueRow).select().single();
-      if (error) throw error;
-      setIssues(prev => [...prev, data]);
-      setReportSheetOpen(false);
+  const {
+    issueCount,
+    invoiceTotal,
+    reportedIssueCount,
+    poLinked,
+    poNum,
+  } = useMemo(
+    () => summarizeInvoiceReview(invoice, invoiceItems, comparisonRows, issues),
+    [comparisonRows, invoice, invoiceItems, issues],
+  );
 
-      if (reviewDocKind === "invoice") {
-        await supabase.from("invoices").update({ receipt_status: "issues_reported" }).eq("id", id);
-      } else {
-        await supabase.from("purchase_history").update({ receipt_status: "issues_reported" }).eq("id", id);
-      }
-      setInvoice((prev: any) => ({ ...prev, receipt_status: "issues_reported" }));
-      toast.success("Issue reported");
-    } catch (e: any) {
-      toast.error(`Failed: ${e.message}`);
-    } finally {
-      setReportSaving(false);
-    }
-  };
-
-  const handleSaveMapping = async (comp: any) => {
-    const selectedCatalogId = catalogOverrides[comp.id];
-    if (!selectedCatalogId || !currentRestaurant || !invoice) return;
-    setSavingMappings(prev => ({ ...prev, [comp.id]: true }));
-    try {
-      const lineId = comp.invoice_item_id || comp.purchase_history_item_id;
-      const lineItem = lineId ? lineItemById[lineId] : null;
-
-      await supabase.from("vendor_item_mappings").upsert(
-        {
-          restaurant_id: currentRestaurant.id,
-          vendor_name: invoice.vendor_name,
-          vendor_sku: lineItem?.vendor_sku || null,
-          vendor_item_name: comp.item_name,
-          catalog_item_id: selectedCatalogId,
-        },
-        { onConflict: "restaurant_id,vendor_name,vendor_item_name" },
-      );
-
-      if (comp.invoice_item_id) {
-        await supabase
-          .from("invoice_items")
-          .update({ catalog_item_id: selectedCatalogId, match_status: "MAPPED" })
-          .eq("id", comp.invoice_item_id);
-        setInvoiceItems(prev =>
-          prev.map(i =>
-            i.id === comp.invoice_item_id
-              ? { ...i, catalog_item_id: selectedCatalogId, match_status: "MAPPED" }
-              : i,
-          ),
-        );
-      } else if (comp.purchase_history_item_id) {
-        await supabase
-          .from("purchase_history_items")
-          .update({ catalog_item_id: selectedCatalogId, match_status: "MAPPED" })
-          .eq("id", comp.purchase_history_item_id);
-        setInvoiceItems(prev =>
-          prev.map(i =>
-            i.id === comp.purchase_history_item_id
-              ? { ...i, catalog_item_id: selectedCatalogId, match_status: "MAPPED" }
-              : i,
-          ),
-        );
-      }
-
-      await supabase
-        .from("invoice_line_comparisons")
-        .update({ catalog_item_id: selectedCatalogId })
-        .eq("id", comp.id);
-
-      setComparisons(prev =>
-        prev.map(c => c.id === comp.id ? { ...c, catalog_item_id: selectedCatalogId } : c),
-      );
-      setVendorMappings(prev => {
-        const idx = prev.findIndex(
-          m => m.vendor_item_name?.toLowerCase() === comp.item_name?.toLowerCase(),
-        );
-        const entry = {
-          restaurant_id: currentRestaurant.id,
-          vendor_name: invoice.vendor_name,
-          vendor_item_name: comp.item_name,
-          vendor_sku: lineItem?.vendor_sku || null,
-          catalog_item_id: selectedCatalogId,
-        };
-        if (idx >= 0) { const next = [...prev]; next[idx] = entry; return next; }
-        return [...prev, entry];
-      });
-      setCatalogOverrides(prev => { const next = { ...prev }; delete next[comp.id]; return next; });
-      toast.success("Mapping saved");
-    } catch (e: any) {
-      toast.error(`Failed: ${e.message}`);
-    } finally {
-      setSavingMappings(prev => ({ ...prev, [comp.id]: false }));
-    }
-  };
-
-  const persistReceivedQty = async (comp: any, raw: string) => {
-    const trimmed = raw.trim();
-    const num = trimmed === "" ? null : Number(trimmed);
-    const fallback = Number(comp.invoiced_qty) || 0;
-    const toSave = num != null && Number.isFinite(num) ? num : fallback;
-    const { error } = await supabase
-      .from("invoice_line_comparisons")
-      .update({ received_qty: toSave })
-      .eq("id", comp.id);
-    if (error) {
-      toast.error("Could not save received quantity");
-      console.error(error);
-      return;
-    }
-    setComparisons((prev) =>
-      prev.map((c) => (c.id === comp.id ? { ...c, received_qty: toSave } : c)),
-    );
-  };
+  const { updatedReceiptItems, skippedReceiptItems } = useMemo(
+    () => groupConfirmResultItems(confirmResult),
+    [confirmResult],
+  );
 
   const statusBadge = (status: string) => {
     switch (status) {
@@ -607,15 +214,6 @@ export default function InvoiceReviewPage() {
     );
   }
 
-  const issueCount = comparisonRows.filter(c => c.derived_status !== "ok").length;
-  const invoiceTotal = resolveDocumentTotal(invoice, invoiceItems);
-  const reportedIssueCount = issues.length;
-  const poNumber = invoice?.purchase_orders?.po_number || invoice?.po_number || invoice?.smart_order_runs?.po_number;
-  const updatedReceiptItems = confirmResult?.items?.filter((i: any) => i.status === "updated") ?? [];
-  const skippedReceiptItems = confirmResult?.items?.filter(
-    (i: any) => i.status === "not_in_session" || i.status === "no_session",
-  ) ?? [];
-
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
@@ -629,7 +227,12 @@ export default function InvoiceReviewPage() {
             <p className="text-sm text-muted-foreground">
               {invoice?.vendor_name}
               {invoice?.invoice_number && ` · #${invoice.invoice_number}`}
-              {poNumber && ` · PO: ${poNumber}`}
+              {" · "}
+              {poLinked ? (
+                <span className="font-mono text-foreground/90">PO: {poNum || "—"}</span>
+              ) : (
+                <span className="text-muted-foreground/50">No purchase order linked</span>
+              )}
             </p>
           </div>
         </div>
@@ -643,7 +246,7 @@ export default function InvoiceReviewPage() {
             onClick={handleConfirmReceipt}
           >
             {confirming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-            Confirm Receipt
+            Post Invoice
           </Button>
         </div>
       </div>
@@ -694,6 +297,9 @@ export default function InvoiceReviewPage() {
           <CardTitle className="text-sm font-semibold">Line Item Comparison</CardTitle>
           <p className="text-[11px] text-muted-foreground">
             Three-way: ordered (PO) vs billed (invoice) vs received (actual delivery). Edit Received to record physical counts. Flags short/over delivery, PO vs invoice qty/price/total above {DEFAULT_QTY_TOLERANCE.percent}% / {DEFAULT_PRICE_TOLERANCE.percent}% / {DEFAULT_TOTAL_TOLERANCE.percent}% (totals after ${formatNum(DEFAULT_TOTAL_TOLERANCE.minAbsolute)}).
+          </p>
+          <p className="text-xs font-medium text-foreground mt-3 pt-3 border-t border-border/50">
+            Review all lines before posting.
           </p>
         </CardHeader>
         <div className="overflow-x-auto">
@@ -819,6 +425,11 @@ export default function InvoiceReviewPage() {
                               </div>
                             );
                           })()}
+                          {comp.derived_status === "unmatched" && (
+                            <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug max-w-[15rem]">
+                              Unmatched = no safe catalog match. Select item manually.
+                            </p>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-right font-mono text-muted-foreground">
@@ -990,13 +601,13 @@ export default function InvoiceReviewPage() {
         </SheetContent>
       </Sheet>
 
-      {/* Confirm Receipt Result Dialog */}
+      {/* Post Invoice result dialog (confirm_invoice_receipt) */}
       <Dialog open={!!confirmResult} onOpenChange={() => setConfirmResult(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-success">
               <CheckCircle className="h-5 w-5" />
-              Delivery Confirmed
+              Invoice posted
             </DialogTitle>
           </DialogHeader>
           {confirmResult && (
@@ -1004,7 +615,7 @@ export default function InvoiceReviewPage() {
               {confirmResult.already_confirmed ? (
                 <div className="rounded-lg border bg-muted/20 px-3 py-2">
                   <p className="text-sm text-muted-foreground">
-                    This receipt was already confirmed earlier. No additional inventory changes were applied.
+                    This invoice was already posted. No additional stock movements were applied.
                   </p>
                 </div>
               ) : (
@@ -1012,12 +623,12 @@ export default function InvoiceReviewPage() {
                   <p className="text-sm text-muted-foreground">
                     {confirmResult.target_session_name ? (
                       <>
-                        Confirmed quantities were posted to{" "}
+                        Posted quantities were synced to{" "}
                         <span className="font-semibold text-foreground">{confirmResult.target_session_name}</span>.
                       </>
                     ) : (
                       <>
-                        Receipt confirmed, but no mutable inventory session was available for stock updates.
+                        Invoice posted. No mutable inventory session was available for in-session stock updates.
                       </>
                     )}
                   </p>
@@ -1047,7 +658,7 @@ export default function InvoiceReviewPage() {
                     <p className="text-xs font-semibold text-success">In-Progress Session Updated</p>
                   </div>
                   <div className="divide-y">
-                    {updatedReceiptItems.map((i: any, idx: number) => (
+                    {updatedReceiptItems.map((i, idx) => (
                         <div key={idx} className="flex items-center justify-between px-3 py-2">
                           <span className="text-sm font-medium">{i.item_name}</span>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
@@ -1069,7 +680,7 @@ export default function InvoiceReviewPage() {
                     <p className="text-xs font-semibold text-warning">Not Posted to Mutable Session</p>
                   </div>
                   <div className="divide-y divide-warning/10">
-                    {skippedReceiptItems.map((i: any, idx: number) => (
+                    {skippedReceiptItems.map((i, idx) => (
                         <div key={idx} className="flex items-center justify-between px-3 py-2">
                           <span className="text-sm text-muted-foreground">{i.item_name}</span>
                           <span className="text-xs text-warning font-mono">+{formatNum(i.quantity_added)} (skipped)</span>
@@ -1094,8 +705,8 @@ export default function InvoiceReviewPage() {
                   </div>
                   <div className="divide-y">
                     {confirmResult.items
-                      .filter((i: any) => i.status === "no_catalog_match")
-                      .map((i: any, idx: number) => (
+                      .filter(i => i.status === "no_catalog_match")
+                      .map((i, idx) => (
                         <div key={idx} className="flex items-center justify-between px-3 py-2">
                           <span className="text-sm text-muted-foreground">{i.item_name}</span>
                           <span className="text-xs text-muted-foreground">no SKU match</span>
@@ -1111,6 +722,9 @@ export default function InvoiceReviewPage() {
               )}
             </div>
           )}
+          <p className="text-[11px] text-muted-foreground pt-3 border-t border-border/60 leading-relaxed">
+            {STOCK_TRUTH_MESSAGE}
+          </p>
           <DialogFooter className="gap-2 mt-2">
             <Button
               variant="outline"

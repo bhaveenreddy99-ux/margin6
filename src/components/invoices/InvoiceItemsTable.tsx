@@ -8,14 +8,49 @@ import {
   Check, AlertTriangle, X, TrendingUp, TrendingDown, Package, Info, Plus
 } from "lucide-react";
 import { formatNum } from "@/lib/inventory-utils";
-import { InvoiceItem } from "./types";
+import { InvoiceItem, LinkedSmartOrderLine } from "./types";
+
+type SessionLineForOh = { catalog_item_id?: string | null; item_name: string; current_stock: number | null };
+
+function resolveSessionStockForExpected(
+  invoiceLine: InvoiceItem,
+  lastSessionItems: SessionLineForOh[],
+): SessionLineForOh | null {
+  const cid = invoiceLine.catalog_item_id;
+  if (cid) {
+    const byId = lastSessionItems.filter((s) => s.catalog_item_id === cid);
+    if (byId.length === 1) return byId[0];
+    return null;
+  }
+  const nk = (invoiceLine.item_name || "").toLowerCase().trim();
+  const byName = lastSessionItems.filter((s) => (s.item_name || "").toLowerCase().trim() === nk);
+  if (byName.length === 1) return byName[0];
+  return null;
+}
+
+function resolveLinkedOrderLine(
+  item: InvoiceItem,
+  linkedSmartOrderItems: LinkedSmartOrderLine[],
+): LinkedSmartOrderLine | undefined {
+  if (item.catalog_item_id) {
+    const m = linkedSmartOrderItems.filter((s) => s.catalog_item_id === item.catalog_item_id);
+    if (m.length === 1) return m[0];
+    if (m.length > 1) return undefined;
+  }
+  const nk = item.item_name.toLowerCase().trim();
+  const byName = linkedSmartOrderItems.filter((s) => (s.item_name || "").toLowerCase().trim() === nk);
+  if (byName.length === 1) return byName[0];
+  return undefined;
+}
 
 interface InvoiceItemsTableProps {
   items: InvoiceItem[];
   catalogItems: any[];
-  linkedSmartOrderItems: any[];
+  linkedSmartOrderItems: LinkedSmartOrderLine[];
   lastSessionItems: any[];
   onUpdateItem: (index: number, field: string, value: any) => void;
+  onItemQuantityChange: (index: number, quantity: number) => void;
+  onItemUnitCostChange: (index: number, unitCost: number | null) => void;
   onRemoveItem: (index: number) => void;
   onMapItem: (index: number, catalogId: string) => void;
   onAddManualItem: () => void;
@@ -23,18 +58,16 @@ interface InvoiceItemsTableProps {
 
 export default function InvoiceItemsTable({
   items, catalogItems, linkedSmartOrderItems, lastSessionItems,
-  onUpdateItem, onRemoveItem, onMapItem, onAddManualItem,
+  onUpdateItem, onItemQuantityChange, onItemUnitCostChange, onRemoveItem, onMapItem, onAddManualItem,
 }: InvoiceItemsTableProps) {
   const unmatchedCount = items.filter(i => i.match_status === "UNMATCHED").length;
   const matchedCount = items.filter(i => i.match_status === "MATCHED").length;
   const invoiceTotal = items.reduce((sum, i) => sum + (i.line_total ?? (i.unit_cost ? i.unit_cost * i.quantity : 0)), 0);
 
-  const getExpectedOnHand = (itemName: string, qtyReceived: number) => {
-    const sessionItem = lastSessionItems.find(s =>
-      s.item_name.toLowerCase() === itemName.toLowerCase()
-    );
+  const getExpectedOnHand = (line: InvoiceItem, qtyReceived: number) => {
+    const sessionItem = resolveSessionStockForExpected(line, lastSessionItems);
     if (!sessionItem) return null;
-    return Number(sessionItem.current_stock) + qtyReceived;
+    return Number(sessionItem.current_stock ?? 0) + qtyReceived;
   };
 
   if (items.length === 0) return null;
@@ -87,10 +120,8 @@ export default function InvoiceItemsTable({
           </TableHeader>
           <TableBody>
             {items.map((item, idx) => {
-              const expectedOH = getExpectedOnHand(item.item_name, item.quantity);
-              const soItem = linkedSmartOrderItems.find(s =>
-                s.item_name.toLowerCase() === item.item_name.toLowerCase()
-              );
+              const expectedOH = getExpectedOnHand(item, item.quantity);
+              const soItem = resolveLinkedOrderLine(item, linkedSmartOrderItems);
               const costVariance = soItem && item.unit_cost != null && soItem.unit_cost != null
                 ? ((item.unit_cost - soItem.unit_cost) / soItem.unit_cost) * 100
                 : null;
@@ -129,7 +160,7 @@ export default function InvoiceItemsTable({
                   </TableCell>
                   <TableCell className="text-right">
                     {item.match_status === "MANUAL" ? (
-                      <Input type="number" value={item.quantity || ""} onChange={e => onUpdateItem(idx, "quantity", Number(e.target.value))}
+                      <Input type="number" value={item.quantity || ""} onChange={e => onItemQuantityChange(idx, Number(e.target.value))}
                         className="h-7 text-xs w-16 text-right" min={0} />
                     ) : (
                       <span className="font-mono text-sm">{formatNum(item.quantity)}</span>
@@ -137,7 +168,7 @@ export default function InvoiceItemsTable({
                   </TableCell>
                   <TableCell className="text-right">
                     {item.match_status === "MANUAL" ? (
-                      <Input type="number" value={item.unit_cost ?? ""} onChange={e => onUpdateItem(idx, "unit_cost", e.target.value ? Number(e.target.value) : null)}
+                      <Input type="number" value={item.unit_cost ?? ""} onChange={e => onItemUnitCostChange(idx, e.target.value ? Number(e.target.value) : null)}
                         className="h-7 text-xs w-20 text-right" min={0} step="0.01" />
                     ) : (
                       <span className="font-mono text-sm">{item.unit_cost != null ? `$${formatNum(item.unit_cost)}` : "—"}</span>
