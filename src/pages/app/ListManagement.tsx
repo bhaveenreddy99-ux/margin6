@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -33,7 +33,7 @@ import {
   Search, ArrowLeft, AlertTriangle, ShoppingCart, ChevronRight,
   GripVertical, Copy, LayoutList, FolderPlus, Check, X,
   Package, FolderOpen, ClipboardList, Sparkles, Clock,
-  ChevronDown, MoveRight, Settings, Link2,
+  ChevronDown, MoveRight, Settings, ShieldCheck,
 } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { DraggableProvided } from "@hello-pangea/dnd";
@@ -43,6 +43,7 @@ import {
   filterCatalogItems,
   getCurrentCategories,
   getCurrentMappings,
+  buildCategorySuggestions,
   getImportFieldLabel,
   getOrderedFullGroupKeys,
   getOrderedNamedCategoryKeys,
@@ -51,6 +52,8 @@ import {
   RESERVED_GROUP_NAMES,
   buildSortedLists,
 } from "@/domain/catalog/listManagementHelpers";
+import type { CategorySuggestion, ListValidationResult } from "@/domain/catalog/listManagementHelpers";
+import { validateCatalogItems } from "@/domain/catalog/listManagementHelpers";
 import {
   OPTIONAL_IMPORT_FIELDS,
   REQUIRED_IMPORT_FIELDS,
@@ -74,6 +77,7 @@ import type {
 } from "@/domain/catalog/listManagementTypes";
 import { useListManagementData } from "@/hooks/useListManagementData";
 import { useListManagementActions } from "@/hooks/useListManagementActions";
+import { downloadInventoryListImportTemplateCsv } from "@/lib/export-utils";
 
 // ─── ISSUE ROW WITH INLINE QUICK FIX ────────────
 function IssueRow({ item, onFix, onQuickSave }: {
@@ -170,7 +174,6 @@ export default function ListManagementPage() {
     categorySets,
     itemCategoryMaps,
     issues,
-    linkedParGuide,
     recentPurchasedItems,
     setCatalogItems,
     setListCategories,
@@ -224,6 +227,8 @@ export default function ListManagementPage() {
 
   // ── Add item
   const [addItemOpen, setAddItemOpen] = useState(false);
+  const addItemNameInputRef = useRef<HTMLInputElement>(null);
+  const [addItemSuccessFlash, setAddItemSuccessFlash] = useState(false);
   const [newItem, setNewItem] = useState<NewItemDraft>({
     item_name: "",
     category: "",
@@ -232,7 +237,14 @@ export default function ListManagementPage() {
     vendor_sku: "",
     vendor_name: "",
     default_unit_cost: 0,
+    par_level: "",
   });
+
+  useEffect(() => {
+    if (!addItemSuccessFlash) return;
+    const t = window.setTimeout(() => setAddItemSuccessFlash(false), 2000);
+    return () => window.clearTimeout(t);
+  }, [addItemSuccessFlash]);
 
   // ── Rename/Delete
   const [renameOpen, setRenameOpen] = useState(false);
@@ -257,6 +269,14 @@ export default function ListManagementPage() {
   const [subCategoryDialogOpen, setSubCategoryDialogOpen] = useState(false);
   const [subCategoryParentId, setSubCategoryParentId] = useState<string | null>(null);
   const [subCategoryName, setSubCategoryName] = useState("");
+
+  // ── Suggest Categories
+  const [suggestCategoriesOpen, setSuggestCategoriesOpen] = useState(false);
+  const [categorySuggestions, setCategorySuggestions] = useState<CategorySuggestion[]>([]);
+
+  // ── Validate List
+  const [validateListOpen, setValidateListOpen] = useState(false);
+  const [validateResult, setValidateResult] = useState<ListValidationResult | null>(null);
 
   // ── Auto-save
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "idle">("idle");
@@ -630,7 +650,7 @@ export default function ListManagementPage() {
                                   <TableCell><Input className="h-8 text-sm" value={editValues.pack_size || ""} onChange={e => setEditValues({ ...editValues, pack_size: e.target.value })} /></TableCell>
                                   <TableCell><Input className="h-8 text-sm" value={editValues.vendor_sku || ""} onChange={e => setEditValues({ ...editValues, vendor_sku: e.target.value })} /></TableCell>
                                   <TableCell className="text-xs text-muted-foreground">—</TableCell>
-                                  <TableCell><Input className="h-8 text-sm w-20" type="number" step="0.01" value={editValues.default_unit_cost ?? ""} onChange={e => setEditValues({ ...editValues, default_unit_cost: e.target.value === "" ? null : +e.target.value })} placeholder="Cost" /></TableCell>
+                                  <TableCell><Input className="h-8 text-sm w-20" type="number" step="0.01" value={editValues.default_unit_cost ?? ""} onChange={e => setEditValues({ ...editValues, default_unit_cost: e.target.value === "" ? null : +e.target.value })} placeholder="$/case" /></TableCell>
                                   <TableCell>
                                     <div className="flex gap-1">
                                       <Button size="sm" variant="ghost" className="h-7 text-xs px-2" onClick={() => handleSaveEdit(item.id)}>Save</Button>
@@ -775,32 +795,6 @@ export default function ListManagementPage() {
               <p className="text-sm text-muted-foreground">
                 {catalogItems.length} items • Updated {listFreshnessLabel}
               </p>
-              <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                {linkedParGuide ? (
-                  <>
-                    <Link2 className="h-3.5 w-3.5" />
-                    <span>PAR Guide: {linkedParGuide.name} • {linkedParGuide.itemCount} items</span>
-                    <button
-                      type="button"
-                      className="font-medium text-primary hover:underline"
-                      onClick={() => navigate("/app/par")}
-                    >
-                      Open PAR Management
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span>No PAR guide linked</span>
-                    <button
-                      type="button"
-                      className="font-medium text-primary hover:underline"
-                      onClick={() => navigate("/app/par")}
-                    >
-                      Set up in PAR Management →
-                    </button>
-                  </>
-                )}
-              </div>
             </div>
           </div>
           <div className="flex items-center gap-2.5">
@@ -841,6 +835,25 @@ export default function ListManagementPage() {
                     <DropdownMenuItem onClick={() => handleExportList(selectedList, "pdf")}>PDF</DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => {
+                  const suggestions = buildCategorySuggestions(catalogItems);
+                  setCategorySuggestions(suggestions);
+                  setSuggestCategoriesOpen(true);
+                }}>
+                  <Sparkles className="h-3.5 w-3.5 mr-2" /> Suggest categories
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  const categorizedIds = new Set(
+                    currentMappingsForView
+                      .filter((m) => m.category_id != null)
+                      .map((m) => m.catalog_item_id),
+                  );
+                  setValidateResult(validateCatalogItems(catalogItems, categorizedIds));
+                  setValidateListOpen(true);
+                }}>
+                  <ShieldCheck className="h-3.5 w-3.5 mr-2" /> Validate list
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive" onClick={() => setDeleteListId(selectedList.id)}>
                   <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete list
@@ -916,14 +929,25 @@ export default function ListManagementPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
+                <Dialog
+                  open={addItemOpen}
+                  onOpenChange={(open) => {
+                    setAddItemOpen(open);
+                    if (!open) setAddItemSuccessFlash(false);
+                  }}
+                >
                   <DialogTrigger asChild>
                     <Button className="bg-gradient-amber gap-1.5 h-10 px-5"><Plus className="h-4 w-4" /> Add Item</Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader><DialogTitle>Add Item</DialogTitle></DialogHeader>
                     <div className="space-y-3">
-                      <div className="space-y-1"><Label className="text-xs">Item Name *</Label><Input value={newItem.item_name} onChange={e => setNewItem({ ...newItem, item_name: e.target.value })} /></div>
+                      {addItemSuccessFlash && (
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 transition-opacity duration-300">
+                          Item added ✓
+                        </p>
+                      )}
+                      <div className="space-y-1"><Label className="text-xs">Item Name *</Label><Input ref={addItemNameInputRef} value={newItem.item_name} onChange={e => setNewItem({ ...newItem, item_name: e.target.value })} /></div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1"><Label className="text-xs">Unit *</Label><Input value={newItem.unit} onChange={e => setNewItem({ ...newItem, unit: e.target.value })} placeholder="e.g. lbs, each" /></div>
                         <div className="space-y-1"><Label className="text-xs">Pack Size *</Label><Input value={newItem.pack_size} onChange={e => setNewItem({ ...newItem, pack_size: e.target.value })} placeholder="e.g. 12 oz" /></div>
@@ -933,7 +957,7 @@ export default function ListManagementPage() {
                           <Select value={newItem.category} onValueChange={v => setNewItem({ ...newItem, category: v })}>
                             <SelectTrigger className="h-9"><SelectValue placeholder="Select..." /></SelectTrigger>
                             <SelectContent>
-                              {currentCats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                              {currentCats.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -941,9 +965,43 @@ export default function ListManagementPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1"><Label className="text-xs">Vendor Name</Label><Input value={newItem.vendor_name} onChange={e => setNewItem({ ...newItem, vendor_name: e.target.value })} placeholder="e.g. Sysco, US Foods" /></div>
-                        <div className="space-y-1"><Label className="text-xs">Unit Cost</Label><Input type="number" step="0.01" value={newItem.default_unit_cost || ""} onChange={e => setNewItem({ ...newItem, default_unit_cost: parseFloat(e.target.value) || 0 })} /></div>
+                        <div className="space-y-1"><Label className="text-xs">Cost per case</Label><Input type="number" step="0.01" value={newItem.default_unit_cost || ""} onChange={e => setNewItem({ ...newItem, default_unit_cost: parseFloat(e.target.value) || 0 })} /></div>
                       </div>
-                      <Button onClick={handleAddItemToList} className="w-full bg-gradient-amber" disabled={!newItem.item_name || !newItem.unit || !newItem.pack_size}>Add Item</Button>
+                      <div className="space-y-1">
+                        <Label className="text-xs">PAR level (cases)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={newItem.par_level}
+                          onChange={e => setNewItem({ ...newItem, par_level: e.target.value })}
+                          placeholder="e.g. 4"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          type="button"
+                          onClick={() => void handleAddItemToList()}
+                          className="flex-1 bg-gradient-amber"
+                          disabled={!newItem.item_name || !newItem.unit || !newItem.pack_size}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="flex-1"
+                          disabled={!newItem.item_name || !newItem.unit || !newItem.pack_size}
+                          onClick={async () => {
+                            const ok = await handleAddItemToList("add_another");
+                            if (ok) {
+                              setAddItemSuccessFlash(true);
+                              requestAnimationFrame(() => addItemNameInputRef.current?.focus());
+                            }
+                          }}
+                        >
+                          Save & Add Another
+                        </Button>
+                      </div>
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -1283,6 +1341,15 @@ export default function ListManagementPage() {
           {importStep === "upload" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Upload a CSV or Excel file with your inventory items.</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => downloadInventoryListImportTemplateCsv()}
+              >
+                <Download className="h-3.5 w-3.5" /> Download Template
+              </Button>
               <div className="space-y-2">
                 <Label className="text-xs">Import into</Label>
                 <Select value={importTargetList} onValueChange={setImportTargetList}>
@@ -1358,6 +1425,8 @@ export default function ListManagementPage() {
                       <TableHead className="text-xs">Item Name</TableHead>
                       <TableHead className="text-xs">Unit</TableHead>
                       <TableHead className="text-xs">Pack Size</TableHead>
+                      <TableHead className="text-xs">Cost per case</TableHead>
+                      <TableHead className="text-xs">Product #</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1367,6 +1436,12 @@ export default function ListManagementPage() {
                         <TableCell className="text-xs">{row.item_name}</TableCell>
                         <TableCell className="text-xs">{row.unit || <span className="text-destructive">—</span>}</TableCell>
                         <TableCell className="text-xs">{row.pack_size || <span className="text-destructive">—</span>}</TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {row.unit_cost_raw ? row.unit_cost_raw : "—"}
+                        </TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {row.vendor_sku.trim() ? row.vendor_sku : "—"}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1578,6 +1653,126 @@ export default function ListManagementPage() {
 
       {/* Import Dialog */}
       {renderImportDialog()}
+
+      {/* Validate List Modal */}
+      <Dialog open={validateListOpen} onOpenChange={setValidateListOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              List health check
+            </DialogTitle>
+            <DialogDescription>
+              Quality scan for &ldquo;{selectedList?.name}&rdquo; — {validateResult?.totalItems ?? 0} items checked. No changes are made automatically.
+            </DialogDescription>
+          </DialogHeader>
+          {validateResult && (
+            <div className="space-y-5">
+              {/* Health score */}
+              <div className="flex items-center gap-4 rounded-lg border p-4">
+                <div className={`text-3xl font-bold tabular-nums ${validateResult.healthPercent >= 80 ? "text-green-600" : validateResult.healthPercent >= 50 ? "text-amber-600" : "text-destructive"}`}>
+                  {validateResult.healthPercent}%
+                </div>
+                <div>
+                  <p className="font-medium text-sm">List health</p>
+                  <p className="text-xs text-muted-foreground">
+                    Items with no issues / total items
+                  </p>
+                </div>
+              </div>
+
+              {/* Critical */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-destructive mb-2">Critical</p>
+                <div className="space-y-1.5">
+                  {[
+                    { label: "Missing price", count: validateResult.missingPrice },
+                    { label: "Duplicate item numbers", count: validateResult.duplicateNames },
+                  ].map(({ label, count }) => (
+                    <div key={label} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className={count === 0 ? "text-green-600 font-medium" : "text-destructive font-semibold"}>
+                        {count === 0 ? "✓ None" : count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Warnings */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-2">Warnings</p>
+                <div className="space-y-1.5">
+                  {[
+                    { label: "Missing vendor / brand", count: validateResult.missingVendor },
+                    { label: "Missing SKU / product number", count: validateResult.missingSku },
+                    { label: "Missing pack size", count: validateResult.missingPackSize },
+                    { label: "Uncategorized items", count: validateResult.uncategorized },
+                    { label: "Unrecognized pack size format", count: validateResult.badPackParse },
+                  ].map(({ label, count }) => (
+                    <div key={label} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className={count === 0 ? "text-green-600 font-medium" : "text-amber-700 font-semibold"}>
+                        {count === 0 ? "✓ None" : count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setValidateListOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suggest Categories Modal */}
+      <Dialog open={suggestCategoriesOpen} onOpenChange={setSuggestCategoriesOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Suggested categories
+            </DialogTitle>
+            <DialogDescription>
+              Categories were detected from item names. Review the groupings below, then apply to save them as keyword groups for this list.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+            {categorySuggestions.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">No items to categorize.</p>
+            ) : (
+              categorySuggestions.map((suggestion) => (
+                <div key={suggestion.categoryName}>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                    {suggestion.categoryName}
+                    <span className="ml-1.5 font-normal normal-case tracking-normal">({suggestion.items.length})</span>
+                  </p>
+                  <ul className="text-sm space-y-0.5">
+                    {suggestion.items.map((item) => (
+                      <li key={item.id} className="text-foreground/80 pl-2 border-l border-border">{item.item_name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter className="pt-4 border-t">
+            <Button variant="outline" onClick={() => setSuggestCategoriesOpen(false)}>Cancel</Button>
+            <Button
+              disabled={categorySuggestions.length === 0}
+              onClick={async () => {
+                setSuggestCategoriesOpen(false);
+                const ok = await handleSaveAICategories();
+                if (ok) setAdvancedListView("keyword-groups");
+              }}
+            >
+              Apply categories
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

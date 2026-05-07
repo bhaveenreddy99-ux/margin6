@@ -20,6 +20,28 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      // If the Vite main module or a chunk 404s, `main.tsx` never runs; surface that instead of a white screen.
+      window.addEventListener(
+        "error",
+        (e) => {
+          const t = e && e.target;
+          if (t && t instanceof HTMLScriptElement && t.src) {
+            const r = document.getElementById("root");
+            if (r) {
+              r.replaceChildren();
+              const p = document.createElement("p");
+              p.setAttribute("style", "font-family: system-ui, sans-serif; padding: 24px; max-width: 40rem; margin: 0 auto;");
+              p.textContent =
+                "Could not load a script. Check the Network tab and that the dev server is running (npm run dev). " +
+                t.src;
+              r.appendChild(p);
+            }
+          }
+        },
+        true,
+      );
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,7 +1,12 @@
 /**
  * PAR guide resolution for session lines and smart order runs.
  * Prefer par_guide_items.catalog_item_id; fall back to normalized item_name when id is missing.
+ *
+ * Canonical resolver: resolveParLevelFromGuideMaps (returns source provenance).
+ * Adapter for ApprovedParLookupArgs callers: resolveParFromLookupArgs.
  */
+
+import type { ApprovedParLookupArgs } from "@/domain/inventory/enterInventoryTypes";
 
 export type ParGuideLevelMaps = {
   byCatalogId: Record<string, number>;
@@ -48,23 +53,122 @@ type LineWithCatalog = {
   item_name: string | null | undefined;
 };
 
+export type ParResolutionResult = {
+  parLevel: number;
+  source: "catalog_id" | "item_name" | "session_default" | "catalog_default" | "no_par";
+};
+
+/** Optional catalog-level PAR defaults — used as last resort when guide and session have no PAR. */
+export type CatalogDefaultParMaps = {
+  byId: Record<string, number>;
+  byName: Record<string, number>;
+};
+
 /**
- * Resolve PAR for a session or smart-order line: guide catalog id match, then guide name match, else sessionPar.
+ * Resolve PAR for a session or smart-order line.
+ *
+ * Resolution order (highest priority first):
+ *   1. Guide match by catalog_item_id
+ *   2. Guide match by normalized item_name
+ *   3. Session item par_level (sessionPar argument)
+ *   4. Catalog default PAR (catalogDefaults, optional — used when no guide is active)
+ *   5. 0 / "no_par"
+ *
+ * `source` records provenance so operators can trace why a PAR was used.
+ *
+ * NOTE: catalogDefaults should be omitted when a counting guide is active; guide-based counting
+ * intentionally does not fall back to catalog defaults (session par is authoritative there).
  */
 export function resolveParLevelFromGuideMaps(
   line: LineWithCatalog,
   maps: ParGuideLevelMaps | null,
   sessionPar: number,
-): number {
-  if (!maps) return sessionPar;
+  catalogDefaults?: CatalogDefaultParMaps,
+): ParResolutionResult {
+  if (!maps) {
+    if (sessionPar > 0) return { parLevel: sessionPar, source: "session_default" };
+    return resolveCatalogDefault(line, catalogDefaults);
+  }
   const cid =
     line.catalog_item_id != null && String(line.catalog_item_id).trim() !== ""
       ? String(line.catalog_item_id).trim()
       : null;
-  if (cid && cid in maps.byCatalogId) return maps.byCatalogId[cid];
+  if (cid) {
+    const fromId = maps.byCatalogId[cid];
+    if (fromId != null) {
+      return { parLevel: fromId, source: "catalog_id" };
+    }
+  }
   const key = normalizeParGuideItemName(line.item_name);
-  if (key && key in maps.byNormalizedName) return maps.byNormalizedName[key];
-  return sessionPar;
+  if (key) {
+    const fromName = maps.byNormalizedName[key];
+    if (fromName != null) {
+      return { parLevel: fromName, source: "item_name" };
+    }
+  }
+  if (sessionPar > 0) {
+    return { parLevel: sessionPar, source: "session_default" };
+  }
+  return resolveCatalogDefault(line, catalogDefaults);
+}
+
+function resolveCatalogDefault(
+  line: LineWithCatalog,
+  catalogDefaults?: CatalogDefaultParMaps,
+): ParResolutionResult {
+  if (!catalogDefaults) return { parLevel: 0, source: "no_par" };
+  const cid =
+    line.catalog_item_id != null && String(line.catalog_item_id).trim() !== ""
+      ? String(line.catalog_item_id).trim()
+      : null;
+  if (cid && catalogDefaults.byId[cid] != null) {
+    return { parLevel: catalogDefaults.byId[cid], source: "catalog_default" };
+  }
+  const key = normalizeParGuideItemName(line.item_name);
+  if (key && catalogDefaults.byName[key] != null) {
+    return { parLevel: catalogDefaults.byName[key], source: "catalog_default" };
+  }
+  return { parLevel: 0, source: "no_par" };
+}
+
+/**
+ * Adapter: resolve PAR using the full ApprovedParLookupArgs structure used by the
+ * inventory review/approve flow. Replaces getApprovedPar while returning provenance.
+ *
+ * When a counting guide is active (countingParGuideId is set), catalog defaults are
+ * intentionally NOT used — the counting guide + session par are authoritative.
+ */
+export function resolveParFromLookupArgs(
+  item: {
+    catalog_item_id?: string | null;
+    item_name: string | null | undefined;
+    par_level: number | string | null | undefined;
+  },
+  args: ApprovedParLookupArgs,
+): ParResolutionResult {
+  const sessionPar = (() => {
+    const n = Number(item.par_level);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+
+  if (args.countingParGuideId) {
+    // Counting guide is active — use its maps, no catalog default fallback
+    const guideMaps: ParGuideLevelMaps = {
+      byCatalogId: args.countingParByCatalogId,
+      byNormalizedName: args.countingParByNormalizedName,
+    };
+    return resolveParLevelFromGuideMaps(item, guideMaps, sessionPar);
+  }
+
+  // No counting guide — use approvedParMap (name-keyed) + catalog defaults
+  const guideMaps: ParGuideLevelMaps = {
+    byCatalogId: {},
+    byNormalizedName: args.approvedParMap,
+  };
+  return resolveParLevelFromGuideMaps(item, guideMaps, sessionPar, {
+    byId: args.catalogDefaultParById,
+    byName: args.catalogDefaultParByName,
+  });
 }
 
 /**

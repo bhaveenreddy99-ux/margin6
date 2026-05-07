@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getRisk } from "../../../src/lib/inventory-utils.ts";
+import { computeRiskLevel } from "../../../src/lib/inventory-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
         const alertItems = items
           .map((i: any) => ({
             ...i,
-            risk: getRisk(Number(i.current_stock), i.par_level, riskThresholds).level,
+            risk: computeRiskLevel(Number(i.current_stock), i.par_level, riskThresholds),
           }))
           .filter((i: any) => i.risk === "RED" || i.risk === "YELLOW");
 

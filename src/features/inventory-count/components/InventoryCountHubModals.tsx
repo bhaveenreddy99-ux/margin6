@@ -118,7 +118,7 @@ export function InventoryCountHubModals({
             </Button>
             <Button
               type="button"
-              className="bg-gradient-amber shadow-amber"
+              className="bg-blue-600 text-white shadow-md shadow-blue-600/20 hover:bg-blue-700"
               disabled={!newCountNameInput.trim() || !!startingListId}
               onClick={() => void onConfirmNewCountSessionName()}
             >
@@ -162,7 +162,7 @@ export function InventoryCountHubModals({
             </div>
             <Button
               onClick={onCreateSmartOrder}
-              className="w-full bg-gradient-amber"
+              className="w-full bg-blue-600 text-white hover:bg-blue-700"
               disabled={!smartOrderSelectedPar || smartOrderCreating}
             >
               {smartOrderCreating ? "Creating..." : "Create Smart Order"}

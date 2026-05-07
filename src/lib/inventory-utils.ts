@@ -2,6 +2,8 @@
  * Shared inventory utilities for formatting, risk calculation, and smart order logic.
  */
 
+import { formatCurrency as formatCurrencyUsd } from "@/lib/format";
+
 // ── Number Formatting ──────────────────────────────────
 /** Format a numeric value for display: max 2 decimals, no trailing zeros, no float artifacts */
 export function formatNum(value: number | null | undefined): string {
@@ -13,11 +15,9 @@ export function formatNum(value: number | null | undefined): string {
   return parseFloat(rounded.toFixed(2)).toString();
 }
 
-/** Format currency */
+/** Format currency (USD) */
 export function formatCurrency(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  const rounded = Math.round(value * 100) / 100;
-  return `$${rounded.toFixed(2)}`;
+  return formatCurrencyUsd(value);
 }
 
 /** Parse input value: handle edge cases like ".", ".1" → 0.1, "" → null */
@@ -182,6 +182,27 @@ export function isDecimalUnitType(unit: string | null | undefined): boolean {
 }
 
 /**
+ * Suggested order quantity in CASES (canonical case-based model).
+ * Always Math.ceil — the planning unit is always a whole case.
+ * Inputs MUST already be in cases.
+ */
+export function computeOrderQtyCases(
+  currentStockCases: number | null | undefined,
+  parLevelCases: number | null | undefined,
+): number {
+  const stock = currentStockCases ?? 0;
+  const par = parLevelCases ?? 0;
+  if (par <= 0) return 0;
+  const need = par - stock;
+  if (need <= 0) return 0;
+  return Math.ceil(need);
+}
+
+/**
+ * @deprecated Use computeOrderQtyCases when inputs are already in cases (canonical model).
+ * This function remains for callers where unit-aware rounding is still needed during migration.
+ * Do NOT add new callers — use computeOrderQtyCases instead.
+ *
  * Suggested order quantity (units depend on item unit — cases vs weight/liquid).
  * Decimal UOMs: 2 decimal places. Case/pack/each (or pack size hint): ceiling whole units.
  */
@@ -205,12 +226,13 @@ export function computeOrderQty(
   return Math.ceil(needRaw);
 }
 
-/** Compute risk level string for smart order storage */
+/** Compute risk level for smart order / dashboard math (uses restaurant thresholds when provided). */
 export function computeRiskLevel(
   currentStock: number | null | undefined,
   parLevel: number | null | undefined,
+  thresholds?: RiskThresholds,
 ): RiskLevel {
-  return getRisk(currentStock, parLevel).level;
+  return getRisk(currentStock, parLevel, thresholds).level;
 }
 
 // ── Row State ──────────────────────────────────

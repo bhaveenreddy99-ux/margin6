@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useRestaurant } from "@/contexts/RestaurantContext";
@@ -59,7 +59,7 @@ function PoLinkBadge(props: {
 }
 
 export default function InvoicesPage() {
-  const { currentRestaurant } = useRestaurant();
+  const { currentRestaurant, currentLocation } = useRestaurant();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
@@ -71,7 +71,7 @@ export default function InvoicesPage() {
   const [createTab, setCreateTab] = useState<InvoiceCreateTab>("manual");
   const [header, setHeader] = useState<InvoiceHeader>({
     vendor_name: "", invoice_number: "", invoice_date: new Date().toISOString().split("T")[0],
-    po_number: "", location_id: "", linked_smart_order_id: "",
+    po_number: "", location_id: currentLocation?.id ?? "", linked_smart_order_id: "",
   });
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -94,6 +94,7 @@ export default function InvoicesPage() {
     loadInvoiceItems,
   } = useInvoicesData({
     currentRestaurantId: currentRestaurant?.id,
+    currentLocationId: currentLocation?.id,
     dateRange,
     linkedSmartOrderId: header.linked_smart_order_id,
   });
@@ -104,14 +105,18 @@ export default function InvoicesPage() {
       invoice_number: "",
       invoice_date: new Date().toISOString().split("T")[0],
       po_number: "",
-      location_id: "",
+      location_id: currentLocation?.id ?? "",
       linked_smart_order_id: "",
     });
     setItems([]);
     setCreateTab("manual");
     setEditingPurchaseId(null);
     setParsedPoNumberFromPdf(null);
-  }, []);
+  }, [currentLocation?.id]);
+
+  useEffect(() => {
+    setHeader(h => ({ ...h, location_id: currentLocation?.id ?? "" }));
+  }, [currentLocation?.id]);
 
   const openInvoiceEditor = useCallback(
     async (invoice: InvoiceListRow, parsedPoForHeader: string | null) => {
@@ -333,12 +338,23 @@ export default function InvoicesPage() {
     return <Badge className={`${config.bgColor} ${config.color} text-[10px] border`}>{config.label}</Badge>;
   }, []);
 
-  const getIssuesReportedBadge = useCallback((receiptStatus: string | null | undefined) => {
+  const getIssuesReportedBadge = useCallback((receiptStatus: string | null | undefined, invoiceId?: string) => {
     if (receiptStatus !== "issues_reported") return null;
+    if (invoiceId) {
+      return (
+        <button
+          className="inline-flex items-center rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 hover:bg-orange-500/20 transition-colors cursor-pointer"
+          onClick={() => navigate(`/app/invoices/${invoiceId}/review`)}
+          title="View reported issues"
+        >
+          Issues Reported
+        </button>
+      );
+    }
     return (
       <Badge className="bg-orange-500/10 text-orange-600 border-0 text-[10px]">Issues Reported</Badge>
     );
-  }, []);
+  }, [navigate]);
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -677,6 +693,7 @@ export default function InvoicesPage() {
           <AlertDescription className="text-sm flex flex-col gap-1">
             <span className="font-semibold text-destructive">
               {deliveryIssuePOs.length} purchase order{deliveryIssuePOs.length > 1 ? 's' : ''} have unresolved delivery issues
+              <span className="font-normal text-muted-foreground ml-1">(all locations)</span>
             </span>
             <div className="flex flex-wrap gap-2 mt-1">
               {deliveryIssuePOs.map((po) => (
@@ -734,7 +751,7 @@ export default function InvoicesPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {getStatusBadge(status)}
-                    {getIssuesReportedBadge(p.receipt_status)}
+                    {getIssuesReportedBadge(p.receipt_status, p.id)}
                     {isEditable && (
                       <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditInvoice(p)}>
                         <PenLine className="h-3.5 w-3.5" />
@@ -802,7 +819,7 @@ export default function InvoicesPage() {
                   {viewItems.map(i => (
                     <TableRow key={i.id}>
                       <TableCell className="text-sm">{i.item_name}</TableCell>
-                      <TableCell className="text-sm text-right font-mono">{formatNum(i.quantity)}</TableCell>
+                      <TableCell className="text-sm text-right font-mono">{formatNum(Number(i.quantity_invoiced ?? 0))}</TableCell>
                       <TableCell className="text-sm text-right font-mono">{i.unit_cost != null ? `$${formatNum(i.unit_cost)}` : "—"}</TableCell>
                       <TableCell className="text-sm text-right font-mono font-semibold">${formatNum(i.total_cost || 0)}</TableCell>
                     </TableRow>

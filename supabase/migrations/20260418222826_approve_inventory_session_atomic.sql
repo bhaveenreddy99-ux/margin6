@@ -278,8 +278,3 @@ begin
     v_catalog_links_stripped;
 end;
 $$;
-
-grant execute on function public.approve_inventory_session_atomic(uuid, uuid, uuid, jsonb)
-to authenticated;
-
-notify pgrst, 'reload schema';

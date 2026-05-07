@@ -8,6 +8,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 export type UseInventoryCountDataArgs = {
   currentRestaurantId: string | null | undefined;
+  currentLocationId?: string | null | undefined;
   approvedFilter: string;
   selectedList: string;
   selectedPar: string;

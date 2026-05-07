@@ -1,4 +1,6 @@
-import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, Users, LogOut, Receipt, Settings, Bell, Trash2, ChefHat } from "lucide-react";
+import { useEffect } from "react";
+import type { LucideIcon } from "lucide-react";
+import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2, ArrowLeftRight } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -6,7 +8,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-
 const mainNav = [
   { title: "Dashboard", url: "/app/dashboard", icon: LayoutDashboard },
 ];
@@ -16,7 +17,6 @@ const inventoryNav = [
   { title: "Inventory Management", url: "/app/inventory/enter", icon: Package },
   { title: "PAR", url: "/app/par", icon: BookOpen },
   { title: "Smart Order", url: "/app/smart-order", icon: ShoppingCart },
-  { title: "Recipes", url: "/app/recipes", icon: ChefHat },
   { title: "Purchase History", url: "/app/purchase-history", icon: Receipt },
 ];
 
@@ -28,10 +28,15 @@ const operationsNav = [
 const insightsNav = [
   { title: "Reports", url: "/app/reports", icon: BarChart3 },
   { title: "Notifications", url: "/app/notifications", icon: Bell },
-];
+] as const;
+
+const locationCompareNavItem = {
+  title: "Location Compare",
+  url: "/app/reports/compare",
+  icon: ArrowLeftRight,
+} as const;
 
 const ownerNav = [
-  { title: "Users & Permissions", url: "/app/staff", icon: Users },
   { title: "Settings", url: "/app/settings", icon: Settings },
 ];
 
@@ -43,11 +48,37 @@ export function AppSidebar() {
 
   const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + "/");
 
-  const rawRole = currentRestaurant?.role ?? (restaurants.some(r => r.role === "OWNER") ? "OWNER" : restaurants.some(r => r.role === "MANAGER" || r.role === "STAFF") ? "MANAGER" : "MANAGER");
-  const effectiveRole = rawRole === "STAFF" ? "MANAGER" : rawRole;
-  const isOwner = effectiveRole === "OWNER";
+  const rawRole =
+    currentRestaurant?.role ??
+    (restaurants.some((r) => r.role === "OWNER")
+      ? "OWNER"
+      : restaurants.some((r) => r.role === "MANAGER" || r.role === "STAFF")
+        ? "MANAGER"
+        : "MANAGER");
+  const isOwner = rawRole === "OWNER";
+  const isStaffAtCurrent = currentRestaurant?.role === "STAFF";
 
-  const renderGroup = (label: string, items: typeof mainNav) => (
+  useEffect(() => {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith("locationSetupWizard")) localStorage.removeItem(k);
+    }
+  }, []);
+
+  const inventoryNavItems = isStaffAtCurrent
+    ? inventoryNav.filter((i) => i.url === "/app/inventory/enter")
+    : inventoryNav;
+
+  const operationsNavItems = isStaffAtCurrent
+    ? operationsNav.filter((i) => i.url === "/app/waste-log")
+    : operationsNav;
+
+  const insightsItems = isOwner
+    ? [insightsNav[0], locationCompareNavItem, insightsNav[1]]
+    : isStaffAtCurrent
+      ? insightsNav.filter((i) => i.url === "/app/notifications")
+      : [...insightsNav];
+
+  const renderGroup = (label: string, items: { title: string; url: string; icon: LucideIcon }[]) => (
     <SidebarGroup key={label}>
       <SidebarGroupLabel className="text-sidebar-foreground/40 text-[10px] font-semibold uppercase tracking-[0.08em] px-3 mb-1">{label}</SidebarGroupLabel>
       <SidebarGroupContent>
@@ -55,7 +86,7 @@ export function AppSidebar() {
           {items.map((item) => (
             <SidebarMenuItem key={item.url}>
               <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                <NavLink to={item.url} end={item.url === "/app/dashboard"}
+                <NavLink to={item.url} end={item.url === "/app/dashboard" || item.url === "/app/reports" || item.url === "/app/settings"}
                   className="gap-3 px-3 py-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground rounded-lg transition-all duration-150"
                   activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
                   <item.icon className="h-4 w-4 shrink-0 opacity-70" />
@@ -83,9 +114,9 @@ export function AppSidebar() {
       </div>
       <SidebarContent className="px-2 pt-2">
         {renderGroup("Overview", mainNav)}
-        {renderGroup("Inventory", inventoryNav)}
-        {renderGroup("Operations", operationsNav)}
-        {renderGroup("Insights", insightsNav)}
+        {renderGroup("Inventory", inventoryNavItems)}
+        {renderGroup("Operations", operationsNavItems)}
+        {insightsItems.length > 0 ? renderGroup("Insights", insightsItems as typeof mainNav) : null}
         {isOwner && renderGroup("Admin", ownerNav)}
       </SidebarContent>
       <SidebarFooter className="p-3">

@@ -19,6 +19,9 @@ export type InvoiceReviewLineItem = {
   item_name: string;
   catalog_item_id: string | null;
   match_status?: string | null;
+  /** invoice_items rows: quantity_invoiced. purchase_history_items rows: quantity. */
+  quantity_invoiced?: number | null;
+  /** Legacy alias used by purchase_history_items. Prefer quantity_invoiced when present. */
   quantity?: number | null;
   total_cost?: number | null;
   unit_cost?: number | null;
@@ -81,23 +84,35 @@ export type InvoiceReviewVendorMapping = Pick<
     vendor_name: string | null;
   };
 
+/** Per-line entries from `confirm_invoice_receipt` RPC `items` array (stock-movement path). */
 export type ConfirmInvoiceReceiptItem = {
   item_name: string;
-  status: string;
-  quantity_added?: number;
-  new_stock?: number | null;
-  quantity_confirmed?: number;
+  status:
+    | "confirmed"
+    | "already_confirmed"
+    | "unit_conversion_failed"
+    | "no_catalog_match";
+  /** Normalized quantity in cases when status === "confirmed". */
+  quantity_confirmed?: number | null;
+  quantity_unit?: string | null;
+  /** Raw received qty before normalization (invoice path). */
+  source_qty?: number | null;
+  source_unit?: string | null;
+  reason?: string | null;
 };
 
 export type ConfirmInvoiceReceiptResult = {
+  /** False when server-side gate blocks the post (e.g. received_qty_not_confirmed). */
+  success?: boolean;
+  error?: string;
+  unconfirmed_count?: number;
   already_confirmed: boolean;
-  target_session_name?: string | null;
-  created_session?: boolean;
-  updated?: number;
   no_catalog: number;
   confirmed?: number;
   inventory_updated?: boolean;
   stock_movements_created?: number;
+  unit_conversion_failed?: number;
+  price_changes?: Array<{ item_name: string; old_cost: number | null; new_cost: number; pct_change: number | null; direction: string }>;
   confirmed_at?: string | null;
   message?: string;
   items?: ConfirmInvoiceReceiptItem[];

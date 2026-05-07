@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Link } from "react-router-dom";
 import { CheckCircle, Eye, Copy, ShoppingCart, XCircle, Trash2, MoreHorizontal } from "lucide-react";
 import type { InventorySessionListRow, SessionStats } from "@/domain/inventory/enterInventoryTypes";
 import { formatSessionRowDate } from "@/domain/inventory/enterInventoryHelpers";
@@ -71,8 +72,13 @@ export function InventoryCountHubApprovedSection({
           <div className="divide-y divide-border/60">
             {approvedSessions.map((s) => {
               const stats = sessionStats[s.id];
-              const total = stats?.total ?? 0;
+              const totalItems = stats?.totalItems ?? stats?.total ?? 0;
               const value = stats?.totalValue ?? 0;
+              const itemsWithCost = stats?.itemsWithCost ?? 0;
+              const itemsWithoutCost = stats?.itemsWithoutCost ?? 0;
+              const noCostData = totalItems > 0 && itemsWithCost === 0;
+              const allHaveCost = totalItems > 0 && itemsWithoutCost === 0;
+              const someMissingCost = itemsWithoutCost > 0 && itemsWithCost > 0;
               return (
                 <div
                   key={s.id}
@@ -86,16 +92,58 @@ export function InventoryCountHubApprovedSection({
                     <p className="text-xs text-muted-foreground truncate">
                       List: {s.inventory_lists?.name || "—"}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {s.locations?.name ? <span>{s.locations.name} · </span> : null}
-                      Approved {formatSessionRowDate(s.approved_at || s.updated_at)}
-                      {value > 0 && (
-                        <span className="text-foreground font-medium"> · {formatCurrency(value)}</span>
+                    <div className="text-[11px] text-muted-foreground space-y-1">
+                      <p>
+                        {s.locations?.name ? <span>{s.locations.name} · </span> : null}
+                        Approved {formatSessionRowDate(s.approved_at || s.updated_at)}
+                      </p>
+                      {noCostData ? (
+                        <>
+                          <p className="text-xs text-amber-600 font-medium">No cost data</p>
+                          <p className="text-[11px] text-muted-foreground leading-snug">
+                            Unit costs not set for any items in this count.{" "}
+                            <Link
+                              to="/app/list-management"
+                              className="text-amber-700 font-medium underline underline-offset-2 hover:text-amber-800"
+                            >
+                              Set costs in List Management
+                            </Link>
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          {allHaveCost && (
+                            <>
+                              <p className="text-foreground font-medium">{formatCurrency(value)}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Est. inventory value · {totalItems} items
+                              </p>
+                            </>
+                          )}
+                          {someMissingCost && (
+                            <>
+                              <p className="text-foreground font-medium">
+                                {formatCurrency(value)}
+                                <span className="text-xs text-amber-600 align-super"> *</span>
+                              </p>
+                              <p className="text-[11px] text-amber-600/90 leading-snug">
+                                Includes {itemsWithCost} of {totalItems} items — {itemsWithoutCost} items have no unit
+                                cost set →{" "}
+                                <Link
+                                  to="/app/list-management"
+                                  className="font-medium underline underline-offset-2 hover:text-amber-700"
+                                >
+                                  Set costs in List Management
+                                </Link>
+                              </p>
+                            </>
+                          )}
+                        </>
                       )}
-                    </p>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 sm:justify-end shrink-0">
-                    <span className="text-xs text-muted-foreground tabular-nums">{total} items</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">{totalItems} items</span>
                     <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => onView(s)}>
                       <Eye className="h-3.5 w-3.5" /> View
                     </Button>

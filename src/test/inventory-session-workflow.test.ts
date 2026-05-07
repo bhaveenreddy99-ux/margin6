@@ -40,15 +40,13 @@ function buildSessionRow(
     location_id: "location-1",
     name: "Friday Count",
     status: "IN_REVIEW",
-    created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     approved_at: null,
     approved_by: null,
     counting_par_guide_id: null,
     created_by: "user-1",
-    notes: null,
     ...overrides,
-  };
+  } as InventorySessionListRow;
 }
 
 function buildSessionItemRow(
@@ -57,21 +55,25 @@ function buildSessionItemRow(
   return {
     id: "item-1",
     session_id: "session-1",
-    item_name: "Tomatoes",
+    brand_name: null,
     category: "Produce",
+    conversion_formula: null,
+    counted_as: null,
+    counted_value: null,
+    item_name: "Tomatoes",
+    lead_time_days: null,
+    metadata: null,
     unit: "ea",
     current_stock: 3,
     par_level: 8,
     unit_cost: 2,
-    created_at: "2026-01-01T00:00:00.000Z",
-    updated_at: "2026-01-01T00:00:00.000Z",
     vendor_sku: null,
     pack_size: null,
     vendor_name: null,
-    brand_name: null,
+    stock_unit: null,
     catalog_item_id: "catalog-1",
     ...overrides,
-  };
+  } as InventorySessionItemRow;
 }
 
 function buildPreparedSmartOrderDraft() {
@@ -218,6 +220,13 @@ describe("inventory session workflow", () => {
           select: vi.fn(() => ({ eq: loadSessionEqMock })),
         };
       }
+      if (table === "inventory_session_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ data: [buildSessionItemRow()], error: null }),
+          })),
+        };
+      }
       throw new Error(`Unexpected table ${table}`);
     });
 
@@ -286,6 +295,13 @@ describe("inventory session workflow", () => {
       if (table === "inventory_sessions") {
         return {
           select: vi.fn(() => ({ eq: loadSessionEqMock })),
+        };
+      }
+      if (table === "inventory_session_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ data: [buildSessionItemRow()], error: null }),
+          })),
         };
       }
       throw new Error(`Unexpected table ${table}`);
@@ -437,6 +453,13 @@ describe("inventory session workflow", () => {
           select: vi.fn(() => ({ eq: loadSessionEqMock })),
         };
       }
+      if (table === "inventory_session_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ data: [buildSessionItemRow()], error: null }),
+          })),
+        };
+      }
       throw new Error(`Unexpected table ${table}`);
     });
 
@@ -454,6 +477,145 @@ describe("inventory session workflow", () => {
     expect(result.ok).toBe(false);
     expect(result.errorMessage).toBe("Atomic approval failed.");
     expect(publishSmartOrderAttentionNotificationsMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks approval before the RPC when session items have duplicate item names", async () => {
+    const loadSessionMaybeSingleMock = vi.fn().mockResolvedValue({
+      data: buildSessionRow({ status: "IN_REVIEW" }),
+      error: null,
+    });
+    const loadSessionEqMock = vi.fn(() => ({ maybeSingle: loadSessionMaybeSingleMock }));
+    const rpcMock = vi.fn();
+
+    const fromMock = vi.fn((table: string) => {
+      if (table === "inventory_sessions") {
+        return {
+          select: vi.fn(() => ({ eq: loadSessionEqMock })),
+        };
+      }
+      if (table === "inventory_session_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({
+              data: [
+                buildSessionItemRow({ id: "item-1", item_name: "Tomatoes" }),
+                buildSessionItemRow({ id: "item-2", item_name: "Tomatoes" }),
+              ],
+              error: null,
+            }),
+          })),
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    const result = await approveInventorySession({
+      supabase: asSupabase({ from: fromMock, rpc: rpcMock }),
+      sessionId: "session-1",
+      restaurantId: "restaurant-1",
+      userId: "user-1",
+      riskThresholds: { redThresholdPercent: 50, yellowThresholdPercent: 100 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Cannot approve/);
+    expect(result.errorMessage).toMatch(/Tomatoes/);
+    expect(prepareSmartOrderFromSessionMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
+    expect(publishSmartOrderAttentionNotificationsMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks approval when items have same name differing only by case or whitespace", async () => {
+    const loadSessionMaybeSingleMock = vi.fn().mockResolvedValue({
+      data: buildSessionRow({ status: "IN_REVIEW" }),
+      error: null,
+    });
+    const loadSessionEqMock = vi.fn(() => ({ maybeSingle: loadSessionMaybeSingleMock }));
+    const rpcMock = vi.fn();
+
+    const fromMock = vi.fn((table: string) => {
+      if (table === "inventory_sessions") {
+        return {
+          select: vi.fn(() => ({ eq: loadSessionEqMock })),
+        };
+      }
+      if (table === "inventory_session_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({
+              data: [
+                buildSessionItemRow({ id: "item-1", item_name: "Tomatoes" }),
+                buildSessionItemRow({ id: "item-2", item_name: " TOMATOES " }),
+              ],
+              error: null,
+            }),
+          })),
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    const result = await approveInventorySession({
+      supabase: asSupabase({ from: fromMock, rpc: rpcMock }),
+      sessionId: "session-1",
+      restaurantId: "restaurant-1",
+      userId: "user-1",
+      riskThresholds: { redThresholdPercent: 50, yellowThresholdPercent: 100 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Cannot approve/);
+    expect(prepareSmartOrderFromSessionMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it("does not block approval when item names are unique", async () => {
+    prepareSmartOrderFromSessionMock.mockResolvedValue({
+      data: buildPreparedSmartOrderDraft(),
+      errorMessage: null,
+    });
+    publishSmartOrderAttentionNotificationsMock.mockResolvedValue(undefined);
+
+    const loadSessionMaybeSingleMock = vi.fn().mockResolvedValue({
+      data: buildSessionRow({ status: "IN_REVIEW" }),
+      error: null,
+    });
+    const loadSessionEqMock = vi.fn(() => ({ maybeSingle: loadSessionMaybeSingleMock }));
+    const rpcMock = vi.fn().mockResolvedValue({
+      data: [{ run_id: "run-1", location_id: "location-1", catalog_links_stripped: false }],
+      error: null,
+    });
+
+    const fromMock = vi.fn((table: string) => {
+      if (table === "inventory_sessions") {
+        return { select: vi.fn(() => ({ eq: loadSessionEqMock })) };
+      }
+      if (table === "inventory_session_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({
+              data: [
+                buildSessionItemRow({ id: "item-1", item_name: "Tomatoes" }),
+                buildSessionItemRow({ id: "item-2", item_name: "Lettuce" }),
+              ],
+              error: null,
+            }),
+          })),
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    const result = await approveInventorySession({
+      supabase: asSupabase({ from: fromMock, rpc: rpcMock }),
+      sessionId: "session-1",
+      restaurantId: "restaurant-1",
+      userId: "user-1",
+      riskThresholds: { redThresholdPercent: 50, yellowThresholdPercent: 100 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(rpcMock).toHaveBeenCalledTimes(1);
   });
 
   it("blocks approved-session reopen when downstream effects exist unless explicitly overridden", async () => {

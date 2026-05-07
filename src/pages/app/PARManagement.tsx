@@ -12,12 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, BookOpen, Trash2, Save, Check, Search, Upload, MoreVertical, FileSpreadsheet, Download, MapPin, Package, Clock, Pencil, Sparkles, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, BookOpen, Trash2, Save, Check, Search, Upload, MoreVertical, FileSpreadsheet, Download, MapPin, Package, Clock, Pencil, Sparkles, TrendingUp, TrendingDown, ChevronDown } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { exportToCSV, exportToExcel, exportToPDF } from "@/lib/export-utils";
 import { useIsCompact } from "@/hooks/use-mobile";
-import { useCategoryMapping } from "@/hooks/useCategoryMapping";
+import { useCategoryMapping, resolveItemCategoryEntry } from "@/hooks/useCategoryMapping";
 import { PARImportDialog } from "@/components/par/PARImportDialog";
 import ItemIdentityBlock from "@/components/ItemIdentityBlock";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
@@ -34,13 +34,14 @@ function isParMissing(parLevel: number | null | undefined): boolean {
 type ParFilterMode = "all" | "missing" | "set";
 
 export default function PARManagementPage() {
-  const { currentRestaurant, locations } = useRestaurant();
+  const { currentRestaurant, currentLocation, locations } = useRestaurant();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isCompact = useIsCompact();
   const parDeepLinkAppliedRef = useRef<string | null>(null);
   const [bulkPctInput, setBulkPctInput] = useState("");
+  const [bulkAdjustOpen, setBulkAdjustOpen] = useState(false);
   const [lists, setLists] = useState<Tables<'inventory_lists'>[]>([]);
   const [selectedList, setSelectedList] = useState("");
   const [guides, setGuides] = useState<Tables<'par_guides'>[]>([]);
@@ -88,11 +89,13 @@ export default function PARManagementPage() {
         if (cancelled) return;
         if (listErr) toast.error(`Could not load inventory lists: ${listErr.message}`);
         else if (listData) setLists(listData);
-        const { data: guideData, error: guideErr } = await supabase
+        let guideQuery = supabase
           .from("par_guides")
           .select("*")
           .eq("restaurant_id", currentRestaurant.id)
           .order("created_at", { ascending: false });
+        if (currentLocation?.id) guideQuery = guideQuery.eq("location_id", currentLocation.id);
+        const { data: guideData, error: guideErr } = await guideQuery;
         if (cancelled) return;
         if (guideErr) {
           toast.error(`Could not load PAR guides: ${guideErr.message}`);
@@ -110,7 +113,7 @@ export default function PARManagementPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [currentRestaurant]);
+  }, [currentRestaurant, currentLocation?.id]);
 
   useEffect(() => {
     if (!guideOpen) {
@@ -243,39 +246,36 @@ export default function PARManagementPage() {
   ) => {
     if (!currentRestaurant || !guide?.inventory_list_id || guideItemsToSync.length === 0) return null;
 
-    let linkedCatalogItems = selectedList === guide.inventory_list_id && catalogItems.length > 0 ? catalogItems : null;
-    if (!linkedCatalogItems) {
+    let catalogLite: { id: string; item_name: string }[];
+    if (selectedList === guide.inventory_list_id && catalogItems.length > 0) {
+      catalogLite = catalogItems.map((c) => ({ id: c.id, item_name: c.item_name }));
+    } else {
       const { data, error } = await supabase
         .from("inventory_catalog_items")
         .select("id, item_name")
         .eq("restaurant_id", currentRestaurant.id)
         .eq("inventory_list_id", guide.inventory_list_id);
       if (error) throw error;
-      linkedCatalogItems = data || [];
+      catalogLite = data ?? [];
     }
 
-    const catalogLite = (linkedCatalogItems as { id: string; item_name: string }[]).map((c) => ({
-      id: c.id,
-      item_name: c.item_name,
-    }));
     const updates = resolveCatalogParUpdates(guideItemsToSync, catalogLite);
 
     const syncedParLevelsByCatalogId = new Map<string, number>();
-    const syncUpdates: Promise<{ error: { message: string } | null }>[] = [];
-
     for (const u of updates) {
       syncedParLevelsByCatalogId.set(u.catalogId, u.parLevel);
-      syncUpdates.push(
-        supabase
-          .from("inventory_catalog_items")
-          .update({ default_par_level: u.parLevel })
-          .eq("id", u.catalogId)
-      );
     }
 
-    if (syncUpdates.length > 0) {
-      const syncResults = await Promise.all(syncUpdates);
-      const syncError = syncResults.find(result => result.error)?.error;
+    if (updates.length > 0) {
+      const syncResults = await Promise.all(
+        updates.map((u) =>
+          supabase
+            .from("inventory_catalog_items")
+            .update({ default_par_level: u.parLevel })
+            .eq("id", u.catalogId),
+        ),
+      );
+      const syncError = syncResults.find((result) => result.error)?.error;
       if (syncError) throw syncError;
     }
 
@@ -308,6 +308,7 @@ export default function PARManagementPage() {
       inventory_list_id: newGuideListId,
       name: newGuide.trim(),
       created_by: user.id,
+      location_id: currentLocation?.id ?? null,
     }).select().single();
     if (error) { toast.error(error.message); return; }
 
@@ -541,18 +542,20 @@ export default function PARManagementPage() {
     return ci ? lastOrderDates[ci.id] || null : null;
   };
 
-  const { categories: mappedCategories, itemCategoryMap, hasMappings } = useCategoryMapping(selectedList);
+  const { categories: mappedCategories, categoryMapping, hasMappings } = useCategoryMapping(selectedList);
 
   const getItemCategory = (item: any): string => {
-    if (hasMappings && itemCategoryMap[item.item_name]) {
-      return itemCategoryMap[item.item_name].category_name;
+    const entry = resolveItemCategoryEntry(item, categoryMapping, hasMappings);
+    if (entry) {
+      return entry.category_name;
     }
     return item.category || "Uncategorized";
   };
 
   const getItemSortOrder = (item: any): number => {
-    if (hasMappings && itemCategoryMap[item.item_name]) {
-      return itemCategoryMap[item.item_name].item_sort_order;
+    const entry = resolveItemCategoryEntry(item, categoryMapping, hasMappings);
+    if (entry) {
+      return entry.item_sort_order;
     }
     return 0;
   };
@@ -569,6 +572,30 @@ export default function PARManagementPage() {
     );
   }, [items, baselineParById, selectedGuide?.id, baselineGuideId]);
 
+  const [showLeaveDialog, setShowLeaveDialog] = useState(false);
+  const pendingNavRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const popHandler = (e: PopStateEvent) => {
+      e.preventDefault();
+      window.history.pushState(null, "", window.location.href);
+      setShowLeaveDialog(true);
+      pendingNavRef.current = () => window.history.back();
+    };
+    const unloadHandler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.history.pushState(null, "", window.location.href);
+    window.addEventListener("popstate", popHandler);
+    window.addEventListener("beforeunload", unloadHandler);
+    return () => {
+      window.removeEventListener("popstate", popHandler);
+      window.removeEventListener("beforeunload", unloadHandler);
+    };
+  }, [hasUnsavedChanges]);
+
   const filteredItems = useMemo(() => {
     let list = items.filter(i => {
       if (search && !i.item_name.toLowerCase().includes(search.toLowerCase())) return false;
@@ -578,42 +605,30 @@ export default function PARManagementPage() {
     });
     if (hasMappings) {
       list = [...list].sort((a, b) => {
-        const catA =
-          hasMappings && itemCategoryMap[a.item_name]
-            ? itemCategoryMap[a.item_name].category_name
-            : a.category || "Uncategorized";
-        const catB =
-          hasMappings && itemCategoryMap[b.item_name]
-            ? itemCategoryMap[b.item_name].category_name
-            : b.category || "Uncategorized";
+        const entryA = resolveItemCategoryEntry(a, categoryMapping, hasMappings);
+        const entryB = resolveItemCategoryEntry(b, categoryMapping, hasMappings);
+        const catA = entryA ? entryA.category_name : a.category || "Uncategorized";
+        const catB = entryB ? entryB.category_name : b.category || "Uncategorized";
         const catSortA = mappedCategories.find(c => c.name === catA)?.sort_order ?? 999;
         const catSortB = mappedCategories.find(c => c.name === catB)?.sort_order ?? 999;
         if (catSortA !== catSortB) return catSortA - catSortB;
-        const sortA =
-          hasMappings && itemCategoryMap[a.item_name]
-            ? itemCategoryMap[a.item_name].item_sort_order
-            : 0;
-        const sortB =
-          hasMappings && itemCategoryMap[b.item_name]
-            ? itemCategoryMap[b.item_name].item_sort_order
-            : 0;
+        const sortA = entryA ? entryA.item_sort_order : 0;
+        const sortB = entryB ? entryB.item_sort_order : 0;
         return sortA - sortB;
       });
     }
     return list;
-  }, [items, search, parFilter, hasMappings, mappedCategories, itemCategoryMap]);
+  }, [items, search, parFilter, hasMappings, mappedCategories, categoryMapping]);
 
   const groupedItems = useMemo(() => {
     return filteredItems.reduce<Record<string, any[]>>((acc, item) => {
-      const cat =
-        hasMappings && itemCategoryMap[item.item_name]
-          ? itemCategoryMap[item.item_name].category_name
-          : item.category || "Uncategorized";
+      const entry = resolveItemCategoryEntry(item, categoryMapping, hasMappings);
+      const cat = entry ? entry.category_name : item.category || "Uncategorized";
       if (!acc[cat]) acc[cat] = [];
       acc[cat].push(item);
       return acc;
     }, {});
-  }, [filteredItems, hasMappings, itemCategoryMap]);
+  }, [filteredItems, hasMappings, categoryMapping]);
 
   const sortedCategoryKeys = useMemo(() => {
     return hasMappings
@@ -867,8 +882,7 @@ export default function PARManagementPage() {
           <div className="border-b border-border/60 pb-4 space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">PAR management</p>
-                <h2 className="text-xl font-bold tracking-tight text-foreground mt-1">{selectedGuide.name}</h2>
+                <h2 className="text-xl font-bold tracking-tight text-foreground">{selectedGuide.name}</h2>
                 <p className="mt-2 text-xs text-muted-foreground max-w-xl leading-relaxed">
                   PAR Guide controls counts. Saving also updates default PAR for this list.
                 </p>
@@ -956,142 +970,124 @@ export default function PARManagementPage() {
                 )}
               </div>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              className="w-full sm:w-auto gap-2 bg-gradient-amber shadow-amber text-primary-foreground hover:opacity-95"
-              onClick={() =>
-                navigate(
-                  selectedGuide.inventory_list_id
-                    ? `/app/par/suggestions?list=${encodeURIComponent(selectedGuide.inventory_list_id)}`
-                    : "/app/par/suggestions",
-                )
-              }
-              title="Open AI PAR suggestions for this list"
-            >
-              <Sparkles className="h-4 w-4 shrink-0" /> Review suggestions
-            </Button>
           </div>
 
-          {/* Search + PAR filter */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="relative max-w-sm w-full">
+          {/* Search + filter + primary actions — all in one row */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+            <div className="relative w-full sm:max-w-xs sm:flex-shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." className="pl-8 h-9 text-sm" />
             </div>
-            <div className="flex flex-col gap-2 sm:items-end">
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="PAR filter">
-                {(["all", "missing", "set"] as const).map(mode => (
+            <div className="flex flex-wrap items-center gap-1.5 flex-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={parFilter === "missing" ? "secondary" : "outline"}
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setParFilter(parFilter === "missing" ? "all" : "missing")}
+              >
+                Missing PAR
+                {missingCount > 0 && (
+                  <span className="inline-flex items-center justify-center h-4 min-w-[1rem] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold tabular-nums">
+                    {missingCount}
+                  </span>
+                )}
+              </Button>
+              {selectedGuide.inventory_list_id && (
+                <>
                   <Button
-                    key={mode}
                     type="button"
+                    variant="outline"
                     size="sm"
-                    variant={parFilter === mode ? "secondary" : "outline"}
-                    className="h-8 text-xs"
-                    onClick={() => setParFilter(mode)}
+                    className="h-8 text-xs gap-1"
+                    onClick={() => navigate(`/app/par/suggestions?list=${encodeURIComponent(selectedGuide.inventory_list_id!)}&filter=likely_low`)}
                   >
-                    {mode === "all" ? "All" : mode === "missing" ? "Missing PAR" : "Set"}
+                    <TrendingUp className="h-3 w-3" /> Likely low
                   </Button>
-                ))}
-              </div>
-              {missingCount > 0 ? (
-                <div
-                  className="flex items-center gap-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-50"
-                  role="status"
-                >
-                  <span className="text-base leading-none" aria-hidden>⚠</span>
-                  <span className="tabular-nums">{missingCount} items need PAR</span>
-                </div>
-              ) : (
-                <p className="text-[11px] text-muted-foreground tabular-nums">All items have PAR set</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1"
+                    onClick={() => navigate(`/app/par/suggestions?list=${encodeURIComponent(selectedGuide.inventory_list_id!)}&filter=likely_high`)}
+                  >
+                    <TrendingDown className="h-3 w-3" /> Likely high
+                  </Button>
+                </>
               )}
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 text-xs gap-1.5 bg-gradient-amber shadow-amber text-primary-foreground hover:opacity-95"
+                onClick={() => navigate(selectedGuide.inventory_list_id
+                  ? `/app/par/suggestions?list=${encodeURIComponent(selectedGuide.inventory_list_id)}`
+                  : "/app/par/suggestions")}
+                title="Open AI PAR suggestions for this list"
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0" /> Review suggestions
+              </Button>
             </div>
           </div>
 
-          {/* Catalog identity + cross-links to AI signals */}
-          {items.length > 0 && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-[11px] text-muted-foreground">
-              <div>
-                <span className="font-medium text-foreground">Catalog links:</span>{" "}
-                {catalogLinkStats.linked} linked · {catalogLinkStats.nameOnly} name-only
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setParFilter("missing")}>
-                  {missingCount} missing
-                </Button>
-                {selectedGuide.inventory_list_id && (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs gap-1"
-                      onClick={() =>
-                        navigate(
-                          `/app/par/suggestions?list=${encodeURIComponent(selectedGuide.inventory_list_id)}&filter=likely_low`,
-                        )
-                      }
-                    >
-                      <TrendingUp className="h-3 w-3" /> Likely low (AI)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs gap-1"
-                      onClick={() =>
-                        navigate(
-                          `/app/par/suggestions?list=${encodeURIComponent(selectedGuide.inventory_list_id)}&filter=likely_high`,
-                        )
-                      }
-                    >
-                      <TrendingDown className="h-3 w-3" /> Likely high (AI)
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
+          {/* Catalog links — demoted to secondary muted text */}
+          {items.length > 0 && (catalogLinkStats.linked > 0 || catalogLinkStats.nameOnly > 0) && (
+            <p className="text-[11px] text-muted-foreground px-0.5">
+              Catalog: {catalogLinkStats.linked} linked · {catalogLinkStats.nameOnly} name-only
+            </p>
           )}
 
           {isManagerOrOwner && filteredItems.length > 0 && (
-            <div className="rounded-lg border border-dashed border-border/80 bg-muted/10 px-3 py-3 space-y-2">
-              <p className="text-[11px] font-medium text-muted-foreground">Adjust filtered rows</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyBulkPercentToFiltered(10)}>
-                  +10%
-                </Button>
-                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyBulkPercentToFiltered(-10)}>
-                  −10%
-                </Button>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    type="number"
-                    step="1"
-                    placeholder="Custom %"
-                    className="h-8 w-24 text-xs"
-                    value={bulkPctInput}
-                    onChange={(e) => setBulkPctInput(e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-8 text-xs"
-                    onClick={() => {
-                      const n = parseFloat(bulkPctInput);
-                      if (!Number.isFinite(n)) {
-                        toast.error("Enter a valid percent");
-                        return;
-                      }
-                      applyBulkPercentToFiltered(n);
-                      setBulkPctInput("");
-                    }}
-                  >
-                    Apply
-                  </Button>
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground gap-1 px-2 -ml-2"
+                onClick={() => setBulkAdjustOpen(o => !o)}
+              >
+                <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${bulkAdjustOpen ? "" : "-rotate-90"}`} />
+                Adjust filtered rows
+              </Button>
+              {bulkAdjustOpen && (
+                <div className="rounded-lg border border-dashed border-border/80 bg-muted/10 px-3 py-3 space-y-2 mt-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyBulkPercentToFiltered(10)}>
+                      +10%
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyBulkPercentToFiltered(-10)}>
+                      −10%
+                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        step="1"
+                        placeholder="Custom %"
+                        className="h-8 w-24 text-xs"
+                        value={bulkPctInput}
+                        onChange={(e) => setBulkPctInput(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() => {
+                          const n = parseFloat(bulkPctInput);
+                          if (!Number.isFinite(n)) {
+                            toast.error("Enter a valid percent");
+                            return;
+                          }
+                          applyBulkPercentToFiltered(n);
+                          setBulkPctInput("");
+                        }}
+                      >
+                        Apply
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">Updates are local until you use Save Levels.</p>
                 </div>
-              </div>
-              <p className="text-[10px] text-muted-foreground">Updates are local until you use Save Levels.</p>
+              )}
             </div>
           )}
 
@@ -1132,7 +1128,7 @@ export default function PARManagementPage() {
                             </div>
                             {isManagerOrOwner ? (
                               <div>
-                                <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">PAR Level</label>
+                                <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">PAR Level (cases)</label>
                                 <Input
                                   ref={el => { inputRefs.current[item.id] = el; }}
                                   inputMode="decimal"
@@ -1145,10 +1141,11 @@ export default function PARManagementPage() {
                                   onKeyDown={e => handleKeyDown(e, globalIdx)}
                                   className="h-14 text-xl font-mono text-center mt-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 />
+                                <p className="text-[10px] text-muted-foreground mt-1 text-center">Enter how many cases you want on hand.</p>
                               </div>
                             ) : (
                               <div className="flex items-center justify-between">
-                                <span className="text-xs text-muted-foreground">PAR Level</span>
+                                <span className="text-xs text-muted-foreground">PAR Level (cases)</span>
                                 <span className="font-mono text-lg">{item.par_level}</span>
                               </div>
                             )}
@@ -1218,6 +1215,8 @@ export default function PARManagementPage() {
                                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pack size</p>
                                 <p className="text-xs text-muted-foreground truncate" title={String(packSize)}>{packSize}</p>
                               </div>
+                              <div className="flex flex-col items-start gap-0.5">
+                                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">PAR Level (cases)</p>
                               <div className="flex items-center gap-2 flex-wrap">
                                 {isManagerOrOwner ? (
                                   <Input
@@ -1249,6 +1248,7 @@ export default function PARManagementPage() {
                                 )}
                                 {savingId === item.id && <span className="text-[10px] text-muted-foreground">Saving…</span>}
                                 {savedId === item.id && <Check className="h-4 w-4 text-success shrink-0" />}
+                              </div>
                               </div>
                             </div>
                           </div>
@@ -1307,6 +1307,26 @@ export default function PARManagementPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => handleDeleteGuide(deleteGuide)}>
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved PAR changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved PAR levels. If you leave now, your changes will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowLeaveDialog(false)}>Stay & Save</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => {
+              setShowLeaveDialog(false);
+              pendingNavRef.current?.();
+            }}>
+              Leave anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

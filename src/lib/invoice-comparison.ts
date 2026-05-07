@@ -50,18 +50,21 @@ export const DEFAULT_TOTAL_TOLERANCE: ToleranceRule = {
   percent: 1,
 };
 
-const FIXED_STATUSES = new Set<InvoiceComparisonStatus>([
+export const FIXED_STATUSES = new Set<InvoiceComparisonStatus>([
   "missing_from_invoice",
   "extra_on_invoice",
   "unmatched",
 ]);
 
 function toNumber(value: VarianceInput): number | null {
+  // Guard null/undefined explicitly: Number(null) === 0 which is a valid number,
+  // but null/undefined here means "value not available", not "value is zero".
+  if (value == null) return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function resolveLineTotal(
+export function resolveLineTotal(
   explicitTotal: VarianceInput,
   quantity: VarianceInput,
   unitCost: VarianceInput,

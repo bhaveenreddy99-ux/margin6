@@ -68,4 +68,67 @@ describe("dollarsForWasteRow", () => {
       ),
     ).toBe(0);
   });
+
+  // ── Non-case unit (lb / each) guards ──────────────────────────────────────
+  it("uses total_cost for lb entry — stored value is always reliable", () => {
+    expect(
+      dollarsForWasteRow(
+        { quantity: 12, quantity_unit: "lb", total_cost: 1.5, unit_cost: 5, catalog_item_id: null },
+        emptyCat,
+        emptySess,
+      ),
+    ).toBe(1.5);
+  });
+
+  it("returns 0 for lb entry when total_cost is null — does NOT multiply per-case unit_cost × lb qty", () => {
+    // If we multiplied naively: $5/case × 12 lb = $60 — this is the bug we are fixing.
+    expect(
+      dollarsForWasteRow(
+        { quantity: 12, quantity_unit: "lb", total_cost: null, unit_cost: 5, catalog_item_id: null },
+        emptyCat,
+        emptySess,
+      ),
+    ).toBe(0);
+  });
+
+  it("returns 0 for lb entry when total_cost is null even with catalog default", () => {
+    const cat = new Map([["a", 4]]);
+    expect(
+      dollarsForWasteRow(
+        { quantity: 12, quantity_unit: "lb", total_cost: null, unit_cost: null, catalog_item_id: "a" },
+        cat,
+        emptySess,
+      ),
+    ).toBe(0);
+  });
+
+  it("returns 0 for each entry when total_cost is null — same protection as lb", () => {
+    expect(
+      dollarsForWasteRow(
+        { quantity: 5, quantity_unit: "each", total_cost: null, unit_cost: 3, catalog_item_id: null },
+        emptyCat,
+        emptySess,
+      ),
+    ).toBe(0);
+  });
+
+  it("treats null quantity_unit as case — backward compat for legacy rows", () => {
+    expect(
+      dollarsForWasteRow(
+        { quantity: 2, quantity_unit: null, total_cost: null, unit_cost: 3, catalog_item_id: null },
+        emptyCat,
+        emptySess,
+      ),
+    ).toBe(6);
+  });
+
+  it("treats missing quantity_unit as case — backward compat for callers not passing the field", () => {
+    expect(
+      dollarsForWasteRow(
+        { quantity: 2, total_cost: null, unit_cost: 3, catalog_item_id: null },
+        emptyCat,
+        emptySess,
+      ),
+    ).toBe(6);
+  });
 });

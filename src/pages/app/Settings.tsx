@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
+import type { LocationPermissions } from "@/contexts/RestaurantContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,21 +14,45 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { toast } from "sonner";
 import {
-  Building2, MapPin, Package, BookOpen,
-  ShoppingCart, FileUp, Users, AlertTriangle, Plus, Trash2, Star,
-  X, Check, Pencil, Power, CalendarClock, ChevronRight, Mail, Copy,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { toast } from "sonner";
+import { formatDistanceToNow } from "date-fns";
+import {
+  Building2, Package, BookOpen, MapPin, Users, Loader2,
+  ShoppingCart, FileUp, AlertTriangle, Plus, Trash2,
+  X, Pencil, CalendarClock, ChevronRight, ChevronDown, Mail, Copy,
 } from "lucide-react";
 import { InventoryScheduleSection } from "@/pages/app/settings/InventorySchedule";
+import {
+  useLocationSettings,
+  DEFAULT_ASSIGNMENT_PERMISSIONS,
+  type Invitation,
+  type LocationWithSettings,
+  type TeamMember,
+} from "@/hooks/useLocationSettings";
+
+const BRAND_OPTIONS = [
+  "Schlotzsky's",
+  "McAlister's Deli",
+  "Moe's Southwest Grill",
+  "Jamba",
+  "Cinnabon",
+  "Auntie Anne's",
+  "Carvel",
+  "Other",
+] as const;
 
 const TOP_NAV = [
   { key: "general",   label: "Business Profile",    icon: Building2,    desc: "Restaurant name, contact info, timezone & currency" },
   { key: "invoice",   label: "Invoice Settings",    icon: Mail,         desc: "Unique address for vendor invoice delivery" },
-  { key: "locations", label: "Locations",            icon: MapPin,       desc: "Manage store locations for multi-location inventory" },
-  { key: "inventory", label: "Inventory",            icon: Package,      desc: "Default categories, units, and entry behavior" },
-  { key: "users",     label: "Users & Permissions",  icon: Users,        desc: "Team roles and default location assignments" },
+  { key: "inventory", label: "Inventory Defaults",   icon: Package,      desc: "Default categories, units, and entry behavior" },
   { key: "schedule",  label: "Inventory Schedule",   icon: CalendarClock, desc: "Reminders and auto-session scheduling", managerOnly: true },
+  { key: "locations", label: "Locations",            icon: MapPin,       desc: "Manage restaurant locations and their settings", ownerOnly: true },
+  { key: "team",      label: "Team & Permissions",   icon: Users,        desc: "Invite members and manage their assignments", ownerOnly: true },
 ];
 
 const ADVANCED_NAV = [
@@ -38,14 +63,15 @@ const ADVANCED_NAV = [
 ];
 
 export default function SettingsPage() {
-  const { currentRestaurant } = useRestaurant();
+  const { currentRestaurant, refetchLocations } = useRestaurant();
   const { user } = useAuth();
   const [section, setSection] = useState("general");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const isOwner = currentRestaurant?.role === "OWNER";
   const isManager = currentRestaurant?.role === "MANAGER" || isOwner;
 
-  // Auto-open advanced section if an advanced item is selected
+  const locationHook = useLocationSettings(isOwner ? currentRestaurant?.id : undefined);
+
   const handleSelect = (key: string) => {
     setSection(key);
     if (ADVANCED_NAV.some(n => n.key === key)) setAdvancedOpen(true);
@@ -81,11 +107,10 @@ export default function SettingsPage() {
       <div className="flex gap-6 min-h-[600px]">
         {/* Left nav */}
         <nav className="w-56 shrink-0 space-y-0.5">
-          {TOP_NAV.filter(item => !item.managerOnly || isManager).map(item => (
+          {TOP_NAV.filter(item => (!item.managerOnly || isManager) && (!item.ownerOnly || isOwner)).map(item => (
             <NavButton key={item.key} navKey={item.key} label={item.label} icon={item.icon} desc={item.desc} />
           ))}
 
-          {/* Advanced Settings collapsible — OWNER/MANAGER only */}
           {isManager && (
             <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
               <CollapsibleTrigger asChild>
@@ -107,14 +132,18 @@ export default function SettingsPage() {
         <div className="flex-1 min-w-0">
           {section === "general"    && <GeneralSection restaurantId={currentRestaurant?.id} isManager={isManager} restaurantName={currentRestaurant?.name} />}
           {section === "invoice"    && <InvoiceSection restaurantId={currentRestaurant?.id} isManager={isManager} restaurantName={currentRestaurant?.name} />}
-          {section === "locations"  && <LocationsSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "inventory"  && <InventorySection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "par"        && <PARSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "smartorder" && <SmartOrderSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "imports"    && <ImportsSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
-          {section === "users"      && <UsersSection restaurantId={currentRestaurant?.id} isOwner={isOwner} isManager={isManager} />}
           {section === "schedule"   && isManager && <InventoryScheduleSection restaurantId={currentRestaurant?.id} isManager={isManager} />}
           {section === "danger"     && isOwner && <DangerSection restaurantId={currentRestaurant?.id} isOwner={isOwner} isManager={isManager} />}
+          {section === "locations"  && isOwner && currentRestaurant?.id && (
+            <LocationsSection locationHook={locationHook} refetchLocations={refetchLocations} />
+          )}
+          {section === "team"       && isOwner && currentRestaurant?.id && (
+            <TeamSection locationHook={locationHook} />
+          )}
         </div>
       </div>
     </div>
@@ -209,16 +238,8 @@ function randomInvoiceSuffix(): string {
   return Array.from(arr, (x) => chars[x % chars.length]).join("");
 }
 
-/* ===== 1b) Invoice (vendor delivery) ===== */
-function InvoiceSection({
-  restaurantId,
-  isManager,
-  restaurantName,
-}: {
-  restaurantId?: string;
-  isManager: boolean;
-  restaurantName?: string;
-}) {
+/* ===== 2) Invoice ===== */
+function InvoiceSection({ restaurantId, isManager, restaurantName }: { restaurantId?: string; isManager: boolean; restaurantName?: string }) {
   const [invoiceEmail, setInvoiceEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -233,9 +254,7 @@ function InvoiceSection({
     setLoading(false);
   }, [restaurantId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const copyAddress = async () => {
     if (!invoiceEmail) return;
@@ -258,24 +277,12 @@ function InvoiceSection({
         const { data: existing } = await supabase.from("restaurant_settings").select("restaurant_id").eq("restaurant_id", restaurantId).maybeSingle();
         if (existing) {
           const { error } = await supabase.from("restaurant_settings").update({ invoice_email: candidate }).eq("restaurant_id", restaurantId);
-          if (!error) {
-            assigned = candidate;
-            break;
-          }
+          if (!error) { assigned = candidate; break; }
           if ((error as { code?: string }).code === "23505") continue;
           throw error;
         } else {
-          const { error } = await supabase.from("restaurant_settings").insert({
-            restaurant_id: restaurantId,
-            invoice_email: candidate,
-            currency: "USD",
-            timezone: "America/New_York",
-            date_format: "MM/DD/YYYY",
-          });
-          if (!error) {
-            assigned = candidate;
-            break;
-          }
+          const { error } = await supabase.from("restaurant_settings").insert({ restaurant_id: restaurantId, invoice_email: candidate, currency: "USD", timezone: "America/New_York", date_format: "MM/DD/YYYY" });
+          if (!error) { assigned = candidate; break; }
           if ((error as { code?: string }).code === "23505") continue;
           throw error;
         }
@@ -289,14 +296,12 @@ function InvoiceSection({
     setGenerating(false);
   };
 
-  if (!restaurantId) {
-    return (
-      <Card>
-        <CardHeader><CardTitle className="text-base">Invoice Settings</CardTitle></CardHeader>
-        <CardContent><p className="text-sm text-muted-foreground">Select a restaurant to view invoice settings.</p></CardContent>
-      </Card>
-    );
-  }
+  if (!restaurantId) return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Invoice Settings</CardTitle></CardHeader>
+      <CardContent><p className="text-sm text-muted-foreground">Select a restaurant to view invoice settings.</p></CardContent>
+    </Card>
+  );
 
   return (
     <div className="space-y-4">
@@ -312,8 +317,7 @@ function InvoiceSection({
             <div className="flex flex-wrap items-center gap-2">
               <code className="text-sm bg-muted px-2.5 py-1.5 rounded-md font-mono break-all">{invoiceEmail}</code>
               <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={copyAddress}>
-                <Copy className="h-3.5 w-3.5" />
-                Copy
+                <Copy className="h-3.5 w-3.5" />Copy
               </Button>
             </div>
           ) : (
@@ -386,135 +390,7 @@ function InvoiceSection({
   );
 }
 
-/* ===== 2) Locations ===== */
-function LocationsSection({ restaurantId, isManager }: { restaurantId?: string; isManager: boolean }) {
-  const [locations, setLocations] = useState<any[]>([]);
-  const [open, setOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", address: "", city: "", state: "", zip: "", storage_types: ["Cooler", "Freezer", "Dry Storage", "Bar"] });
-  const [customStorage, setCustomStorage] = useState("");
-
-  const fetch = useCallback(async () => {
-    if (!restaurantId) return;
-    const { data } = await supabase.from("locations").select("*").eq("restaurant_id", restaurantId).order("created_at");
-    if (data) setLocations(data);
-  }, [restaurantId]);
-  useEffect(() => { fetch(); }, [fetch]);
-
-  const resetForm = () => { setForm({ name: "", address: "", city: "", state: "", zip: "", storage_types: ["Cooler", "Freezer", "Dry Storage", "Bar"] }); setEditId(null); setCustomStorage(""); };
-
-  const handleSave = async () => {
-    if (!restaurantId || !form.name.trim()) { toast.error("Location name is required"); return; }
-    if (editId) {
-      const { error } = await supabase.from("locations").update({ name: form.name, address: form.address, city: form.city, state: form.state, zip: form.zip, storage_types: form.storage_types }).eq("id", editId);
-      if (error) toast.error("Failed to update"); else toast.success("Location updated");
-    } else {
-      const { error } = await supabase.from("locations").insert({ restaurant_id: restaurantId, name: form.name, address: form.address, city: form.city, state: form.state, zip: form.zip, storage_types: form.storage_types });
-      if (error) toast.error("Failed to add location"); else toast.success("Location added");
-    }
-    resetForm(); setOpen(false); fetch();
-  };
-
-  const handleSetDefault = async (id: string) => {
-    await supabase.from("locations").update({ is_default: false }).eq("restaurant_id", restaurantId!);
-    await supabase.from("locations").update({ is_default: true }).eq("id", id);
-    toast.success("Default location set"); fetch();
-  };
-
-  const handleToggleActive = async (id: string, active: boolean) => {
-    await supabase.from("locations").update({ is_active: !active }).eq("id", id);
-    fetch();
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this location? Linked inventory items will be unlinked.")) return;
-    await supabase.from("locations").delete().eq("id", id);
-    toast.success("Location deleted"); fetch();
-  };
-
-  const toggleStorage = (s: string) => {
-    setForm(p => ({ ...p, storage_types: p.storage_types.includes(s) ? p.storage_types.filter(x => x !== s) : [...p.storage_types, s] }));
-  };
-  const addCustomStorage = () => {
-    if (customStorage.trim() && !form.storage_types.includes(customStorage.trim())) {
-      setForm(p => ({ ...p, storage_types: [...p.storage_types, customStorage.trim()] }));
-      setCustomStorage("");
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <div><CardTitle className="text-base">Locations</CardTitle><CardDescription>Manage store locations for multi-location inventory</CardDescription></div>
-          {isManager && <Button size="sm" className="bg-gradient-amber shadow-amber gap-1.5" onClick={() => { resetForm(); setOpen(true); }}><Plus className="h-3.5 w-3.5" />Add Location</Button>}
-        </CardHeader>
-        <CardContent>
-          {locations.length === 0 ? (
-            <div className="empty-state"><MapPin className="empty-state-icon" /><p className="empty-state-title">No locations added</p><p className="empty-state-description">Add your first store location to organize inventory by site.</p></div>
-          ) : (
-            <Table>
-              <TableHeader><TableRow className="bg-muted/30"><TableHead className="text-xs font-semibold">Location Name</TableHead><TableHead className="text-xs font-semibold">Address</TableHead><TableHead className="text-xs font-semibold">Status</TableHead><TableHead className="text-xs font-semibold">Default</TableHead><TableHead className="text-xs font-semibold w-40">Actions</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {locations.map(loc => (
-                  <TableRow key={loc.id} className="hover:bg-muted/30 transition-colors">
-                    <TableCell className="font-medium text-sm">{loc.name}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{[loc.address, loc.city, loc.state, loc.zip].filter(Boolean).join(", ") || "—"}</TableCell>
-                    <TableCell><Badge variant={loc.is_active ? "default" : "secondary"} className="text-[10px]">{loc.is_active ? "Active" : "Inactive"}</Badge></TableCell>
-                    <TableCell>{loc.is_default && <Star className="h-4 w-4 text-warning fill-warning" />}</TableCell>
-                    <TableCell className="flex gap-1">
-                      {isManager && (
-                        <>
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditId(loc.id); setForm({ name: loc.name, address: loc.address || "", city: loc.city || "", state: loc.state || "", zip: loc.zip || "", storage_types: (loc.storage_types as string[]) || [] }); setOpen(true); }}><Pencil className="h-3.5 w-3.5" /></Button>
-                          {!loc.is_default && <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSetDefault(loc.id)}><Star className="h-3.5 w-3.5" /></Button>}
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleToggleActive(loc.id, loc.is_active)}><Power className="h-3.5 w-3.5" /></Button>
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDelete(loc.id)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
-                        </>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Dialog open={open} onOpenChange={v => { if (!v) resetForm(); setOpen(v); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{editId ? "Edit Location" : "Add Location"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5"><Label className="text-xs">Location Name *</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="h-9" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5"><Label className="text-xs">Address</Label><Input value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} className="h-9" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">City</Label><Input value={form.city} onChange={e => setForm(p => ({ ...p, city: e.target.value }))} className="h-9" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">State</Label><Input value={form.state} onChange={e => setForm(p => ({ ...p, state: e.target.value }))} className="h-9" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Zip</Label><Input value={form.zip} onChange={e => setForm(p => ({ ...p, zip: e.target.value }))} className="h-9" /></div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Storage Types</Label>
-              <div className="flex flex-wrap gap-2">
-                {["Cooler", "Freezer", "Dry Storage", "Bar"].map(s => (
-                  <Badge key={s} variant={form.storage_types.includes(s) ? "default" : "outline"} className="cursor-pointer text-xs" onClick={() => toggleStorage(s)}>{s}{form.storage_types.includes(s) && <Check className="h-3 w-3 ml-1" />}</Badge>
-                ))}
-                {form.storage_types.filter(s => !["Cooler", "Freezer", "Dry Storage", "Bar"].includes(s)).map(s => (
-                  <Badge key={s} variant="default" className="cursor-pointer text-xs" onClick={() => toggleStorage(s)}>{s}<X className="h-3 w-3 ml-1" /></Badge>
-                ))}
-              </div>
-              <div className="flex gap-2 mt-1">
-                <Input value={customStorage} onChange={e => setCustomStorage(e.target.value)} placeholder="Custom type" className="h-8 text-xs" onKeyDown={e => e.key === "Enter" && addCustomStorage()} />
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={addCustomStorage}>Add</Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter><Button onClick={handleSave} className="bg-gradient-amber shadow-amber">{editId ? "Update" : "Add Location"}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-/* ===== 3) Inventory Settings ===== */
+/* ===== 3) Inventory Defaults ===== */
 function InventorySection({ restaurantId, isManager }: { restaurantId?: string; isManager: boolean }) {
   const [form, setForm] = useState({ categories: ["Frozen", "Cooler", "Dry", "Bar", "Produce", "Dairy"] as string[], units: ["kg", "lb", "oz", "case", "each", "liter", "gallon"] as string[], auto_category_enabled: false, autosave_enabled: false });
   const [newCat, setNewCat] = useState("");
@@ -538,7 +414,7 @@ function InventorySection({ restaurantId, isManager }: { restaurantId?: string; 
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Inventory Settings</CardTitle><CardDescription>Configure default categories, units, and behavior</CardDescription></CardHeader>
+      <CardHeader><CardTitle className="text-base">Inventory Defaults</CardTitle><CardDescription>Configure default categories, units, and behavior</CardDescription></CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-2">
           <Label className="text-xs font-semibold">Default Categories</Label>
@@ -688,69 +564,7 @@ function ImportsSection({ restaurantId, isManager }: { restaurantId?: string; is
   );
 }
 
-/* ===== 7) Users & Permissions ===== */
-function UsersSection({ restaurantId, isOwner, isManager }: { restaurantId?: string; isOwner: boolean; isManager: boolean }) {
-  const [members, setMembers] = useState<any[]>([]);
-  const [locations, setLocations] = useState<any[]>([]);
-
-  const fetch = useCallback(async () => {
-    if (!restaurantId) return;
-    const [{ data: m }, { data: l }] = await Promise.all([
-      supabase.from("restaurant_members").select("*, profiles(email, full_name)").eq("restaurant_id", restaurantId),
-      supabase.from("locations").select("id, name").eq("restaurant_id", restaurantId).eq("is_active", true),
-    ]);
-    if (m) setMembers(m);
-    if (l) setLocations(l);
-  }, [restaurantId]);
-  useEffect(() => { fetch(); }, [fetch]);
-
-  const handleRoleChange = async (memberId: string, newRole: "OWNER" | "MANAGER" | "STAFF") => {
-    if (!isOwner) { toast.error("Only owners can change roles"); return; }
-    await supabase.from("restaurant_members").update({ role: newRole }).eq("id", memberId);
-    fetch();
-  };
-
-  const handleLocationChange = async (memberId: string, locationId: string) => {
-    if (!isOwner) { toast.error("Only owners can assign locations"); return; }
-    await supabase.from("restaurant_members").update({ default_location_id: locationId === "none" ? null : locationId }).eq("id", memberId);
-    fetch();
-  };
-
-  return (
-    <Card>
-      <CardHeader><CardTitle className="text-base">Users & Permissions</CardTitle><CardDescription>Manage team roles and default locations</CardDescription></CardHeader>
-      <CardContent>
-        {members.length === 0 ? (
-          <div className="empty-state"><Users className="empty-state-icon" /><p className="empty-state-title">No members</p></div>
-        ) : (
-          <Table>
-            <TableHeader><TableRow className="bg-muted/30"><TableHead className="text-xs font-semibold">Name</TableHead><TableHead className="text-xs font-semibold">Email</TableHead><TableHead className="text-xs font-semibold">Role</TableHead><TableHead className="text-xs font-semibold">Default Location</TableHead></TableRow></TableHeader>
-            <TableBody>{members.map(m => (
-              <TableRow key={m.id} className="hover:bg-muted/30 transition-colors">
-                <TableCell className="font-medium text-sm">{m.profiles?.full_name || "—"}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{m.profiles?.email}</TableCell>
-                <TableCell>
-                  <Select value={m.role} onValueChange={(v: "OWNER" | "MANAGER" | "STAFF") => handleRoleChange(m.id, v)} disabled={!isOwner}>
-                    <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="OWNER">Owner</SelectItem><SelectItem value="MANAGER">Manager</SelectItem><SelectItem value="STAFF">Staff</SelectItem></SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <Select value={m.default_location_id || "none"} onValueChange={v => handleLocationChange(m.id, v)} disabled={!isOwner}>
-                    <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="No default" /></SelectTrigger>
-                    <SelectContent><SelectItem value="none">No default</SelectItem>{locations.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                </TableCell>
-              </TableRow>
-            ))}</TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ===== 8) Danger Zone ===== */
+/* ===== 7) Danger Zone ===== */
 function DangerSection({ restaurantId, isOwner, isManager }: { restaurantId?: string; isOwner: boolean; isManager: boolean }) {
   const [confirmText, setConfirmText] = useState("");
   const [activeAction, setActiveAction] = useState<string | null>(null);
@@ -780,7 +594,7 @@ function DangerSection({ restaurantId, isOwner, isManager }: { restaurantId?: st
         await supabase.from("purchase_history").delete().eq("restaurant_id", restaurantId);
       }
       toast.success("Purchase history deleted");
-  } else if (activeAction === "restaurant") {
+    } else if (activeAction === "restaurant") {
       const { error } = await supabase.rpc("delete_restaurant_cascade", { p_restaurant_id: restaurantId });
       if (error) { toast.error("Failed to delete restaurant: " + error.message); setActiveAction(null); setConfirmText(""); return; }
       toast.success("Restaurant deleted");
@@ -813,6 +627,697 @@ function DangerSection({ restaurantId, isOwner, isManager }: { restaurantId?: st
           <DialogFooter><Button variant="destructive" onClick={handleConfirm} disabled={confirmText !== actions.find(a => a.key === activeAction)?.confirm}>Confirm Delete</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ===== 8) Locations ===== */
+function LocationsSection({
+  locationHook,
+  refetchLocations,
+}: {
+  locationHook: ReturnType<typeof useLocationSettings>;
+  refetchLocations: () => Promise<void>;
+}) {
+  const { locations, inactiveLocations, loading, addLocation, updateLocation, deactivateLocation } = locationHook;
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    address: "",
+    city: "",
+    state: "",
+    brand: "Other" as string,
+    food_cost_target_pct: "30",
+    count_frequency_days: "3",
+    count_overdue_alert_hrs: "72",
+  });
+
+  const afterMutation = useCallback(async () => {
+    await refetchLocations();
+  }, [refetchLocations]);
+
+  const resetForm = () => setForm({ name: "", address: "", city: "", state: "", brand: "Other", food_cost_target_pct: "30", count_frequency_days: "3", count_overdue_alert_hrs: "72" });
+
+  const handleAdd = async () => {
+    if (!form.name.trim() || !form.city.trim() || !form.state.trim()) {
+      toast.error("Name, city, and state are required");
+      return;
+    }
+    try {
+      await addLocation({
+        name: form.name.trim(),
+        address: form.address.trim(),
+        city: form.city.trim(),
+        state: form.state.trim(),
+        brand: form.brand === "Other" ? null : form.brand,
+        food_cost_target_pct: Number(form.food_cost_target_pct) || 30,
+        count_frequency_days: Math.max(1, Number(form.count_frequency_days) || 3),
+        count_overdue_alert_hrs: Number(form.count_overdue_alert_hrs) || 72,
+      });
+      toast.success("Location added");
+      setAddOpen(false);
+      resetForm();
+      await afterMutation();
+    } catch {
+      toast.error("Could not add location");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" className="gap-1.5 bg-gradient-amber shadow-amber" onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Add Location
+        </Button>
+      </div>
+
+      {loading && locations.length === 0 ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : locations.length === 0 ? (
+        <Card>
+          <CardContent className="py-16 text-center">
+            <MapPin className="h-10 w-10 text-muted-foreground/25 mx-auto mb-4" />
+            <p className="text-sm font-semibold text-muted-foreground">No locations yet</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">Add your first location to get started.</p>
+            <Button size="sm" className="gap-1.5 bg-gradient-amber shadow-amber mt-4" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" /> Add Location
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {locations.map((loc) => (
+            <LocationCard key={loc.id} loc={loc} onMutate={afterMutation} updateLocation={updateLocation} deactivateLocation={deactivateLocation} />
+          ))}
+        </div>
+      )}
+
+      {inactiveLocations.length > 0 && (
+        <Collapsible className="rounded-lg border border-border/60">
+          <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-3 text-sm font-medium hover:bg-muted/40">
+            <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+            Inactive locations ({inactiveLocations.length})
+          </CollapsibleTrigger>
+          <CollapsibleContent className="px-4 pb-4 space-y-2">
+            {inactiveLocations.map((loc) => (
+              <Card key={loc.id} className="opacity-80">
+                <CardContent className="p-4 flex justify-between items-center">
+                  <div>
+                    <p className="font-medium">{loc.name}</p>
+                    <p className="text-xs text-muted-foreground">{[loc.city, loc.state].filter(Boolean).join(", ") || "—"}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        await updateLocation(loc.id, { is_active: true });
+                        toast.success("Location reactivated");
+                        await afterMutation();
+                      } catch {
+                        toast.error("Could not reactivate");
+                      }
+                    }}
+                  >
+                    Reactivate
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      <Dialog open={addOpen} onOpenChange={(v) => { if (!v) resetForm(); setAddOpen(v); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add location</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Name *</Label>
+              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="h-9" />
+            </div>
+            <div>
+              <Label className="text-xs">Address</Label>
+              <Input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="h-9" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">City *</Label>
+                <Input value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} className="h-9" />
+              </div>
+              <div>
+                <Label className="text-xs">State *</Label>
+                <Input value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} className="h-9" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Brand</Label>
+              <Select value={form.brand} onValueChange={(v) => setForm((f) => ({ ...f, brand: v }))}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {BRAND_OPTIONS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <Label className="text-xs">Food cost target %</Label>
+                <Input type="number" value={form.food_cost_target_pct} onChange={(e) => setForm((f) => ({ ...f, food_cost_target_pct: e.target.value }))} className="h-9" />
+              </div>
+              <div>
+                <Label className="text-xs">Count every (days)</Label>
+                <Input type="number" value={form.count_frequency_days} onChange={(e) => setForm((f) => ({ ...f, count_frequency_days: e.target.value }))} className="h-9" />
+              </div>
+              <div>
+                <Label className="text-xs">Overdue alert (hrs)</Label>
+                <Input type="number" value={form.count_overdue_alert_hrs} onChange={(e) => setForm((f) => ({ ...f, count_overdue_alert_hrs: e.target.value }))} className="h-9" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { resetForm(); setAddOpen(false); }}>Cancel</Button>
+            <Button className="bg-gradient-amber shadow-amber" onClick={() => void handleAdd()}>Save location</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function LocationCard({
+  loc,
+  onMutate,
+  updateLocation,
+  deactivateLocation,
+}: {
+  loc: LocationWithSettings;
+  onMutate: () => Promise<void>;
+  updateLocation: ReturnType<typeof useLocationSettings>["updateLocation"];
+  deactivateLocation: ReturnType<typeof useLocationSettings>["deactivateLocation"];
+}) {
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(loc.name);
+  const [foodCost, setFoodCost] = useState(String(loc.food_cost_target_pct));
+  const [freq, setFreq] = useState(String(loc.count_frequency_days));
+  const [alertHrs, setAlertHrs] = useState(String(loc.count_overdue_alert_hrs));
+
+  useEffect(() => {
+    setNameDraft(loc.name);
+    setFoodCost(String(loc.food_cost_target_pct));
+    setFreq(String(loc.count_frequency_days));
+    setAlertHrs(String(loc.count_overdue_alert_hrs));
+  }, [loc.id, loc.name, loc.food_cost_target_pct, loc.count_frequency_days, loc.count_overdue_alert_hrs]);
+
+  const saveName = async () => {
+    const v = nameDraft.trim();
+    if (!v || v === loc.name) { setEditingName(false); setNameDraft(loc.name); return; }
+    try {
+      await updateLocation(loc.id, { name: v });
+      toast.success("Location updated");
+      await onMutate();
+    } catch {
+      toast.error("Could not save name");
+    }
+    setEditingName(false);
+  };
+
+  const saveSettings = async (patch: Partial<LocationWithSettings>) => {
+    try {
+      await updateLocation(loc.id, patch);
+      toast.success("Saved");
+      await onMutate();
+    } catch {
+      toast.error("Could not save");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 space-y-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            {editingName ? (
+              <Input
+                className="h-8 text-base font-semibold max-w-xs"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => void saveName()}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveName(); }}
+                autoFocus
+              />
+            ) : (
+              <button type="button" className="flex items-center gap-1.5 text-left group" onClick={() => setEditingName(true)}>
+                <CardTitle className="text-base">{loc.name}</CardTitle>
+                <Pencil className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />
+              </button>
+            )}
+            <CardDescription>{[loc.city, loc.state].filter(Boolean).join(", ") || "—"}</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            {loc.brand && <Badge variant="secondary" className="text-[10px]">{loc.brand}</Badge>}
+            <div className="flex items-center gap-2">
+              <Label className="text-[10px] text-muted-foreground whitespace-nowrap">Active</Label>
+              <Switch
+                checked={loc.is_active}
+                onCheckedChange={async (on) => {
+                  if (!on) {
+                    try {
+                      await deactivateLocation(loc.id);
+                      toast.success("Location deactivated");
+                      await onMutate();
+                    } catch {
+                      toast.error("Could not deactivate");
+                    }
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0">
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Food cost target %</Label>
+            <Input className="h-8 mt-0.5" type="number" value={foodCost} onChange={(e) => setFoodCost(e.target.value)} onBlur={() => void saveSettings({ food_cost_target_pct: Number(foodCost) || 30 })} />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Every X days</Label>
+            <Input className="h-8 mt-0.5" type="number" value={freq} onChange={(e) => setFreq(e.target.value)} onBlur={() => void saveSettings({ count_frequency_days: Math.max(1, Number(freq) || 3) })} />
+            <p className="text-[10px] text-muted-foreground mt-0.5">Count frequency</p>
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Overdue after (hrs)</Label>
+            <Input className="h-8 mt-0.5" type="number" value={alertHrs} onChange={(e) => setAlertHrs(e.target.value)} onBlur={() => void saveSettings({ count_overdue_alert_hrs: Number(alertHrs) || 72 })} />
+          </div>
+        </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Brand</Label>
+          <Select value={loc.brand ?? "Other"} onValueChange={(v) => void saveSettings({ brand: v === "Other" ? null : v })}>
+            <SelectTrigger className="h-8 mt-0.5 w-full max-w-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {BRAND_OPTIONS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ===== 9) Team & Permissions ===== */
+function TeamSection({ locationHook }: { locationHook: ReturnType<typeof useLocationSettings> }) {
+  const { locations, teamMembers, pendingInvitations, loading, inviteMember, assignMember, removeMemberFromLocation, cancelInvitation, updatePermissions, refetch } = locationHook;
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"MANAGER" | "STAFF">("MANAGER");
+  const [permMember, setPermMember] = useState<TeamMember | null>(null);
+
+  const handleInvite = async () => {
+    if (!inviteEmail.trim()) { toast.error("Email required"); return; }
+    try {
+      await inviteMember({ email: inviteEmail.trim(), role: inviteRole });
+      toast.success(`Invitation sent to ${inviteEmail.trim()}`);
+      setInviteOpen(false);
+      setInviteEmail("");
+    } catch {
+      toast.error("Could not send invitation");
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-end">
+        <Button size="sm" className="gap-1.5 bg-gradient-amber shadow-amber" onClick={() => setInviteOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Invite Team Member
+        </Button>
+      </div>
+
+      {loading && teamMembers.length === 0 ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : teamMembers.length === 0 ? (
+        <Card>
+          <CardContent className="py-16 text-center">
+            <Users className="h-10 w-10 text-muted-foreground/25 mx-auto mb-4" />
+            <p className="text-sm font-semibold text-muted-foreground">No team members yet</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">Invite your first team member to get started.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {teamMembers.map((m) => (
+            <TeamMemberCard
+              key={m.member_id}
+              member={m}
+              locations={locations}
+              onEditPermissions={() => setPermMember(m)}
+              assignMember={assignMember}
+              removeMemberFromLocation={removeMemberFromLocation}
+              refetch={refetch}
+            />
+          ))}
+        </div>
+      )}
+
+      {pendingInvitations.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Pending invites</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {pendingInvitations.map((inv) => (
+              <div key={inv.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 p-3">
+                <div>
+                  <p className="text-sm font-medium">{inv.email}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {inv.role} · sent {formatDistanceToNow(new Date(inv.created_at), { addSuffix: true })}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-destructive"
+                  onClick={async () => {
+                    try {
+                      await cancelInvitation(inv.id, inv.source);
+                      toast.success("Invitation cancelled");
+                    } catch {
+                      toast.error("Could not cancel");
+                    }
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite team member</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Email *</Label>
+              <Input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="h-9" placeholder="member@example.com" type="email" />
+            </div>
+            <div>
+              <Label className="text-xs">Role</Label>
+              <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as "MANAGER" | "STAFF")}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="MANAGER">Manager</SelectItem>
+                  <SelectItem value="STAFF">Staff</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              After they accept, you can assign them to specific locations from the Team tab.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInviteOpen(false)}>Close</Button>
+            <Button className="bg-gradient-amber shadow-amber" onClick={() => void handleInvite()} disabled={!inviteEmail.trim()}>
+              Send invitation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <PermissionsSheet
+        member={permMember}
+        locations={locations}
+        open={!!permMember}
+        onOpenChange={(o) => !o && setPermMember(null)}
+        updatePermissions={updatePermissions}
+        refetch={refetch}
+      />
+    </div>
+  );
+}
+
+function TeamMemberCard({
+  member,
+  locations,
+  onEditPermissions,
+  assignMember,
+  removeMemberFromLocation,
+  refetch,
+}: {
+  member: TeamMember;
+  locations: LocationWithSettings[];
+  onEditPermissions: () => void;
+  assignMember: ReturnType<typeof useLocationSettings>["assignMember"];
+  removeMemberFromLocation: ReturnType<typeof useLocationSettings>["removeMemberFromLocation"];
+  refetch: () => void;
+}) {
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [pickLoc, setPickLoc] = useState<string>("");
+  const [pickRole, setPickRole] = useState<"MANAGER" | "STAFF">("MANAGER");
+  const [removeTarget, setRemoveTarget] = useState<{ userId: string; locationId: string; label: string } | null>(null);
+
+  const assignableLocations = locations.filter((l) => !member.assignments.some((a) => a.location_id === l.id));
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="font-semibold">{member.full_name || member.email || "Member"}</p>
+            <p className="text-xs text-muted-foreground">{member.email}</p>
+            <Badge variant="outline" className="text-[10px] mt-1">{member.role}</Badge>
+            {member.role !== "OWNER" && member.assignments.length === 0 && (
+              <Badge variant="destructive" className="text-[10px] ml-2">Unassigned</Badge>
+            )}
+          </div>
+          {member.role !== "OWNER" && member.assignments.length > 0 && (
+            <Button variant="outline" size="sm" className="text-xs" onClick={onEditPermissions}>
+              Edit permissions →
+            </Button>
+          )}
+        </div>
+
+        {member.assignments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {member.assignments.map((a) => (
+              <Badge key={a.assignment_id} variant="secondary" className="text-[10px] gap-1 pr-1">
+                {a.location_name}
+                <button
+                  type="button"
+                  className="ml-1 rounded hover:bg-muted px-0.5"
+                  aria-label="Remove assignment"
+                  onClick={() => setRemoveTarget({ userId: member.user_id, locationId: a.location_id, label: a.location_name })}
+                >
+                  ×
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {member.role !== "OWNER" && assignableLocations.length > 0 && (
+          <Button variant="ghost" size="sm" className="text-xs h-7 px-2" onClick={() => setAssignOpen(true)}>
+            Assign to location
+          </Button>
+        )}
+
+        <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Assign to location</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Location</Label>
+                <Select value={pickLoc} onValueChange={setPickLoc}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Choose location" /></SelectTrigger>
+                  <SelectContent>
+                    {assignableLocations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Role at location</Label>
+                <Select value={pickRole} onValueChange={(v) => setPickRole(v as "MANAGER" | "STAFF")}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MANAGER">Manager</SelectItem>
+                    <SelectItem value="STAFF">Staff</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  if (!pickLoc) { toast.error("Pick a location"); return; }
+                  try {
+                    await assignMember(member.user_id, pickLoc, pickRole, { ...DEFAULT_ASSIGNMENT_PERMISSIONS });
+                    toast.success("Assigned");
+                    setAssignOpen(false);
+                    setPickLoc("");
+                    refetch();
+                  } catch {
+                    toast.error("Could not assign");
+                  }
+                }}
+              >
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={!!removeTarget} onOpenChange={(o) => !o && setRemoveTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove from location?</AlertDialogTitle>
+              <AlertDialogDescription>Remove this member from {removeTarget?.label}?</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  if (!removeTarget) return;
+                  try {
+                    await removeMemberFromLocation(removeTarget.userId, removeTarget.locationId);
+                    toast.success("Removed from location");
+                    setRemoveTarget(null);
+                    refetch();
+                  } catch {
+                    toast.error("Could not remove");
+                  }
+                }}
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PermissionsSheet({
+  member,
+  locations,
+  open,
+  onOpenChange,
+  updatePermissions,
+  refetch,
+}: {
+  member: TeamMember | null;
+  locations: LocationWithSettings[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  updatePermissions: ReturnType<typeof useLocationSettings>["updatePermissions"];
+  refetch: () => void;
+}) {
+  const [selectedLocId, setSelectedLocId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [thresholdDraft, setThresholdDraft] = useState("");
+
+  const assignments = member?.assignments ?? [];
+  const selected = assignments.find((a) => a.location_id === selectedLocId) ?? assignments[0];
+
+  useEffect(() => {
+    if (!open || !member || member.assignments.length === 0) { setSelectedLocId(null); return; }
+    setSelectedLocId((prev) => {
+      if (prev && member.assignments.some((a) => a.location_id === prev)) return prev;
+      return member.assignments[0].location_id;
+    });
+  }, [open, member?.member_id]);
+
+  useEffect(() => {
+    if (selected) {
+      setThresholdDraft(selected.permissions.order_approval_threshold != null ? String(selected.permissions.order_approval_threshold) : "");
+    }
+  }, [selected?.location_id, selected?.permissions.order_approval_threshold]);
+
+  const patch = async (partial: Partial<LocationPermissions>) => {
+    if (!member || !selectedLocId) return;
+    setSaving(true);
+    try {
+      await updatePermissions(member.user_id, selectedLocId, partial);
+      refetch();
+    } catch {
+      toast.error("Could not save permissions");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!member || assignments.length === 0) return null;
+
+  const locName = locations.find((l) => l.id === selectedLocId)?.name ?? selected?.location_name ?? "Location";
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Permissions for {member.full_name || member.email} at {locName}</SheetTitle>
+          <SheetDescription>Changes apply to the selected location only.</SheetDescription>
+        </SheetHeader>
+        {assignments.length > 1 && (
+          <div className="mt-4">
+            <Label className="text-xs">Location</Label>
+            <Select value={selectedLocId ?? undefined} onValueChange={setSelectedLocId}>
+              <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {assignments.map((a) => <SelectItem key={a.location_id} value={a.location_id}>{a.location_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {selected && (
+          <div className="mt-6 space-y-6">
+            {saving && <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Saving…</p>}
+            <PermRow label="Approve orders independently" description="Can submit orders without owner approval" checked={selected.permissions.can_approve_orders} onCheckedChange={(v) => void patch({ can_approve_orders: v })} />
+            <PermRow label="See invoice costs" description="Can see unit prices and totals on invoices" checked={selected.permissions.can_see_costs} onCheckedChange={(v) => void patch({ can_see_costs: v })} />
+            <PermRow label="See food cost %" description="Can see food cost percentage reports" checked={selected.permissions.can_see_food_cost_pct} onCheckedChange={(v) => void patch({ can_see_food_cost_pct: v })} />
+            <PermRow label="See inventory value" description="Can see total dollar value of inventory" checked={selected.permissions.can_see_inventory_value} onCheckedChange={(v) => void patch({ can_see_inventory_value: v })} />
+            <PermRow label="Edit PAR levels" description="Can adjust PAR guide levels" checked={selected.permissions.can_edit_par} onCheckedChange={(v) => void patch({ can_edit_par: v })} />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Order approval threshold</Label>
+              <p className="text-[11px] text-muted-foreground">Require approval for orders above this amount. Leave blank for no limit.</p>
+              <Input
+                className="h-9"
+                type="number"
+                placeholder="No limit"
+                value={thresholdDraft}
+                onChange={(e) => setThresholdDraft(e.target.value)}
+                onBlur={() => {
+                  const n = thresholdDraft.trim() === "" ? null : Number(thresholdDraft);
+                  void patch({ order_approval_threshold: n != null && !Number.isNaN(n) ? n : null });
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function PermRow({ label, description, checked, onCheckedChange }: { label: string; description: string; checked: boolean; onCheckedChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border border-border/50 p-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} className="shrink-0" />
     </div>
   );
 }

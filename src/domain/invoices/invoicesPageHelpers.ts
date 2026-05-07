@@ -75,7 +75,7 @@ export function parseInvoiceItemsToInsertRows(
         raw.product_number != null && String(raw.product_number).trim() !== ""
           ? String(raw.product_number).trim()
           : null,
-      quantity: Number.isFinite(quantity) ? quantity : 0,
+      quantity_invoiced: Number.isFinite(quantity) ? quantity : 0,
       unit_cost: unitCost != null && Number.isFinite(unitCost) ? unitCost : null,
       total_cost: totalCost,
       pack_size:
@@ -155,7 +155,7 @@ export function buildInvoiceEditorItems(
         ? String(row.product_number).trim()
         : null,
     item_name: row.item_name,
-    quantity: Number(row.quantity),
+    quantity: Number(row.quantity_invoiced),
     unit_cost: row.unit_cost != null ? Number(row.unit_cost) : null,
     line_total: row.total_cost != null ? Number(row.total_cost) : null,
     unit: row.unit ?? null,

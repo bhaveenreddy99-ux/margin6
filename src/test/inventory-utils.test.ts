@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getRisk, computeOrderQty } from "@/lib/inventory-utils";
+import { getRisk, computeOrderQty, computeRiskLevel } from "@/lib/inventory-utils";
 
 describe("inventory-utils", () => {
   describe("getRisk", () => {
@@ -29,6 +29,15 @@ describe("inventory-utils", () => {
       expect(getRisk(7, 10, { redThresholdPercent: 80, yellowThresholdPercent: 110 }).level).toBe("RED");
       expect(getRisk(10, 10, { redThresholdPercent: 80, yellowThresholdPercent: 110 }).level).toBe("YELLOW");
       expect(getRisk(12, 10, { redThresholdPercent: 80, yellowThresholdPercent: 110 }).level).toBe("GREEN");
+    });
+  });
+
+  describe("computeRiskLevel", () => {
+    it("matches getRisk(...).level with and without restaurant thresholds", () => {
+      expect(computeRiskLevel(4, 10)).toBe(getRisk(4, 10).level);
+      const th = { redThresholdPercent: 80, yellowThresholdPercent: 110 } as const;
+      expect(computeRiskLevel(7, 10, th)).toBe("RED");
+      expect(computeRiskLevel(7, 10, th)).toBe(getRisk(7, 10, th).level);
     });
   });
 

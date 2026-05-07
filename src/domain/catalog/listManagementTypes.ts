@@ -73,7 +73,9 @@ export type ImportField =
   | "pack_size"
   | "vendor_sku"
   | "default_unit_cost"
-  | "brand_name";
+  | "brand_name"
+  | "vendor_name"
+  | "category";
 
 export const REQUIRED_IMPORT_FIELDS = ["item_name"] as const;
 export const OPTIONAL_IMPORT_FIELDS = [
@@ -82,6 +84,8 @@ export const OPTIONAL_IMPORT_FIELDS = [
   "vendor_sku",
   "default_unit_cost",
   "brand_name",
+  "vendor_name",
+  "category",
 ] as const;
 
 export type ImportMapping = Partial<Record<ImportField, string>>;
@@ -97,6 +101,9 @@ export type ImportPreviewRow = {
   vendor_sku: string;
   default_unit_cost: number | null;
   brand_name: string;
+  vendor_name: string;
+  category: string;
+  unit_cost_raw: string;
 };
 
 export type ImportSummary = {
@@ -115,6 +122,7 @@ export type NewItemDraft = {
   vendor_sku: string;
   vendor_name: string;
   default_unit_cost: number;
+  par_level: string;
 };
 
 export type ItemEditDraft = Partial<

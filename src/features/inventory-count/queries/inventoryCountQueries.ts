@@ -1,8 +1,13 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { supabase } from "@/integrations/supabase/client";
+
+type AppSupabase = SupabaseClient<Database>;
 import type {
   InventoryCatalogItemRow,
   InventoryListRow,
   InventorySessionItemRow,
+  InventorySessionItemZoneRow,
   InventorySessionListRow,
   ParGuideItemRow,
   ParGuideRow,
@@ -14,6 +19,7 @@ import type {
   ParGuidePickerOption,
   SessionMetaRow,
 } from "@/features/inventory-count/types";
+import { loadSessionItemsWithZones } from "@/domain/inventory/loadSessionItemsWithZones";
 
 export async function fetchInventoryLists(currentRestaurantId: string) {
   return (supabase
@@ -42,14 +48,16 @@ export async function fetchParGuideListLinks(currentRestaurantId: string) {
   }>;
 }
 
-export async function fetchApprovedSessionDates(currentRestaurantId: string) {
-  return (supabase
+export async function fetchApprovedSessionDates(currentRestaurantId: string, locationId?: string | null) {
+  let query = supabase
     .from("inventory_sessions")
     .select("inventory_list_id, approved_at")
     .eq("restaurant_id", currentRestaurantId)
     .eq("status", "APPROVED")
     .not("approved_at", "is", null)
-    .order("approved_at", { ascending: false })) as unknown as Promise<{
+    .order("approved_at", { ascending: false });
+  if (locationId) query = query.eq("location_id", locationId);
+  return query as unknown as Promise<{
     data: Array<Pick<InventorySessionListRow, "inventory_list_id" | "approved_at">> | null;
   }>;
 }
@@ -69,17 +77,20 @@ export async function fetchInventorySessionsByStatus(
   currentRestaurantId: string,
   status: "IN_PROGRESS" | "IN_REVIEW" | "APPROVED",
   approvedAfterIso?: string,
+  locationId?: string | null,
 ) {
-  const query = supabase
+  let query = supabase
     .from("inventory_sessions")
     .select("*, inventory_lists(name), locations(name)")
     .eq("restaurant_id", currentRestaurantId)
     .eq("status", status);
 
+  if (locationId) query = query.eq("location_id", locationId);
+
   if (status === "APPROVED" && approvedAfterIso) {
-    query.gte("approved_at", approvedAfterIso).order("approved_at", { ascending: false });
+    query = query.gte("approved_at", approvedAfterIso).order("approved_at", { ascending: false });
   } else {
-    query.order("updated_at", { ascending: false });
+    query = query.order("updated_at", { ascending: false });
   }
 
   return query as unknown as Promise<{
@@ -96,14 +107,17 @@ export async function fetchInventorySessionStats(sessionIds: string[]) {
   }>;
 }
 
-export async function fetchLatestParGuide(inventoryListId: string) {
-  return (supabase
-    .from("par_guides")
-    .select("id")
-    .eq("inventory_list_id", inventoryListId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()) as unknown as {
+export async function fetchLatestParGuide(
+  inventoryListId: string,
+  restaurantId?: string | null,
+  locationId?: string | null,
+  supabaseClient?: AppSupabase,
+) {
+  const client = supabaseClient ?? supabase;
+  const baseQuery = client.from("par_guides").select("id").eq("inventory_list_id", inventoryListId);
+  const withRestaurant = restaurantId ? baseQuery.eq("restaurant_id", restaurantId) : baseQuery;
+  const withLocation = locationId ? withRestaurant.eq("location_id", locationId) : withRestaurant;
+  return withLocation.order("created_at", { ascending: false }).limit(1).maybeSingle() as unknown as {
     data: Pick<ParGuideRow, "id"> | null;
     error: { message: string } | null;
   };
@@ -152,24 +166,38 @@ export async function fetchInventoryListMode(listId: string) {
 }
 
 export async function fetchSessionItems(sessionId: string) {
-  return (supabase
-    .from("inventory_session_items")
-    .select("*")
-    .eq("session_id", sessionId)) as unknown as {
+  return loadSessionItemsWithZones(supabase, sessionId) as Promise<{
     data: InventorySessionItemRow[] | null;
     error: { message: string } | null;
-  };
+  }>;
 }
 
 export async function fetchSessionItemsByName(sessionId: string) {
-  return (supabase
-    .from("inventory_session_items")
-    .select("*")
-    .eq("session_id", sessionId)
-    .order("item_name", { ascending: true })) as unknown as {
+  return loadSessionItemsWithZones(supabase, sessionId, { orderByItemName: true }) as Promise<{
     data: InventorySessionItemRow[] | null;
     error: { message: string } | null;
-  };
+  }>;
+}
+
+export async function fetchSessionItemZonesForSessionItem(sessionItemId: string) {
+  return supabase
+    .from("inventory_session_item_zones")
+    .select("*")
+    .eq("session_item_id", sessionItemId) as unknown as Promise<{
+    data: InventorySessionItemZoneRow[] | null;
+    error: { message: string } | null;
+  }>;
+}
+
+export async function fetchSessionItemStock(sessionItemId: string) {
+  return supabase
+    .from("inventory_session_items")
+    .select("id, current_stock")
+    .eq("id", sessionItemId)
+    .maybeSingle() as unknown as Promise<{
+    data: Pick<InventorySessionItemRow, "id" | "current_stock"> | null;
+    error: { message: string } | null;
+  }>;
 }
 
 export async function fetchParGuideName(guideId: string) {
@@ -224,11 +252,13 @@ export async function fetchSmartOrderSettings(currentRestaurantId: string) {
 export async function fetchParGuidesForSelectedList(
   currentRestaurantId: string,
   inventoryListId: string,
+  locationId?: string | null,
 ) {
-  return supabase
+  const baseQuery = supabase
     .from("par_guides")
     .select("*")
     .eq("restaurant_id", currentRestaurantId)
-    .eq("inventory_list_id", inventoryListId)
+    .eq("inventory_list_id", inventoryListId);
+  return (locationId ? baseQuery.eq("location_id", locationId) : baseQuery)
     .order("updated_at", { ascending: false });
 }

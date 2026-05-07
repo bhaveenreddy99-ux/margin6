@@ -150,11 +150,12 @@ export type Database = {
           catalog_item_id: string | null
           created_at: string | null
           id: string
+          invoice_id: string | null
           invoice_line_comparison_id: string | null
           issue_type: string
           item_name: string
           notes: string | null
-          purchase_history_id: string
+          purchase_history_id: string | null
           reported_at: string | null
           resolved_at: string | null
         }
@@ -162,11 +163,12 @@ export type Database = {
           catalog_item_id?: string | null
           created_at?: string | null
           id?: string
+          invoice_id?: string | null
           invoice_line_comparison_id?: string | null
           issue_type: string
           item_name: string
           notes?: string | null
-          purchase_history_id: string
+          purchase_history_id?: string | null
           reported_at?: string | null
           resolved_at?: string | null
         }
@@ -174,11 +176,12 @@ export type Database = {
           catalog_item_id?: string | null
           created_at?: string | null
           id?: string
+          invoice_id?: string | null
           invoice_line_comparison_id?: string | null
           issue_type?: string
           item_name?: string
           notes?: string | null
-          purchase_history_id?: string
+          purchase_history_id?: string | null
           reported_at?: string | null
           resolved_at?: string | null
         }
@@ -188,6 +191,13 @@ export type Database = {
             columns: ["catalog_item_id"]
             isOneToOne: false
             referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_issues_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
             referencedColumns: ["id"]
           },
           {
@@ -340,6 +350,7 @@ export type Database = {
         Row: {
           brand_name: string | null
           category: string | null
+          cost_unit: string | null
           created_at: string
           default_par_level: number | null
           default_unit_cost: number | null
@@ -348,11 +359,16 @@ export type Database = {
           item_name: string
           list_category_id: string | null
           metadata: Json | null
+          pack_parse_success: boolean
           pack_size: string | null
           product_number: string | null
           restaurant_id: string
           sort_order: number
+          total_per_case: number | null
           unit: string | null
+          unit_size: number | null
+          unit_type: string | null
+          units_per_case: number | null
           updated_at: string
           vendor_name: string | null
           vendor_sku: string | null
@@ -360,6 +376,7 @@ export type Database = {
         Insert: {
           brand_name?: string | null
           category?: string | null
+          cost_unit?: string | null
           created_at?: string
           default_par_level?: number | null
           default_unit_cost?: number | null
@@ -368,11 +385,16 @@ export type Database = {
           item_name: string
           list_category_id?: string | null
           metadata?: Json | null
+          pack_parse_success?: boolean
           pack_size?: string | null
           product_number?: string | null
           restaurant_id: string
           sort_order?: number
+          total_per_case?: number | null
           unit?: string | null
+          unit_size?: number | null
+          unit_type?: string | null
+          units_per_case?: number | null
           updated_at?: string
           vendor_name?: string | null
           vendor_sku?: string | null
@@ -380,6 +402,7 @@ export type Database = {
         Update: {
           brand_name?: string | null
           category?: string | null
+          cost_unit?: string | null
           created_at?: string
           default_par_level?: number | null
           default_unit_cost?: number | null
@@ -388,11 +411,16 @@ export type Database = {
           item_name?: string
           list_category_id?: string | null
           metadata?: Json | null
+          pack_parse_success?: boolean
           pack_size?: string | null
           product_number?: string | null
           restaurant_id?: string
           sort_order?: number
+          total_per_case?: number | null
           unit?: string | null
+          unit_size?: number | null
+          unit_type?: string | null
+          units_per_case?: number | null
           updated_at?: string
           vendor_name?: string | null
           vendor_sku?: string | null
@@ -574,12 +602,62 @@ export type Database = {
           },
         ]
       }
+      inventory_session_item_zones: {
+        Row: {
+          created_at: string
+          entered_qty: number
+          entered_unit: string
+          id: string
+          list_category_id: string
+          normalized_qty: number
+          session_item_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          entered_qty?: number
+          entered_unit: string
+          id?: string
+          list_category_id: string
+          normalized_qty?: number
+          session_item_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          entered_qty?: number
+          entered_unit?: string
+          id?: string
+          list_category_id?: string
+          normalized_qty?: number
+          session_item_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_session_item_zones_list_category_id_fkey"
+            columns: ["list_category_id"]
+            isOneToOne: false
+            referencedRelation: "list_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_session_item_zones_session_item_id_fkey"
+            columns: ["session_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_session_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_session_items: {
         Row: {
           brand_name: string | null
-          catalog_item_id: string | null
           category: string | null
-          current_stock: number | null
+          conversion_formula: string | null
+          counted_as: string | null
+          counted_value: number | null
+          current_stock: number
           id: string
           item_name: string
           lead_time_days: number | null
@@ -587,6 +665,7 @@ export type Database = {
           pack_size: string | null
           par_level: number
           session_id: string
+          stock_unit: string | null
           unit: string | null
           unit_cost: number | null
           vendor_name: string | null
@@ -594,9 +673,11 @@ export type Database = {
         }
         Insert: {
           brand_name?: string | null
-          catalog_item_id?: string | null
           category?: string | null
-          current_stock?: number | null
+          conversion_formula?: string | null
+          counted_as?: string | null
+          counted_value?: number | null
+          current_stock?: number
           id?: string
           item_name: string
           lead_time_days?: number | null
@@ -604,6 +685,7 @@ export type Database = {
           pack_size?: string | null
           par_level?: number
           session_id: string
+          stock_unit?: string | null
           unit?: string | null
           unit_cost?: number | null
           vendor_name?: string | null
@@ -611,9 +693,11 @@ export type Database = {
         }
         Update: {
           brand_name?: string | null
-          catalog_item_id?: string | null
           category?: string | null
-          current_stock?: number | null
+          conversion_formula?: string | null
+          counted_as?: string | null
+          counted_value?: number | null
+          current_stock?: number
           id?: string
           item_name?: string
           lead_time_days?: number | null
@@ -621,6 +705,7 @@ export type Database = {
           pack_size?: string | null
           par_level?: number
           session_id?: string
+          stock_unit?: string | null
           unit?: string | null
           unit_cost?: number | null
           vendor_name?: string | null
@@ -805,6 +890,57 @@ export type Database = {
           },
         ]
       }
+      invoice_ingestions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_id: string
+          mime_type: string | null
+          original_filename: string | null
+          restaurant_id: string
+          source_kind: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id: string
+          mime_type?: string | null
+          original_filename?: string | null
+          restaurant_id: string
+          source_kind: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string
+          mime_type?: string | null
+          original_filename?: string | null
+          restaurant_id?: string
+          source_kind?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_ingestions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_ingestions_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_items: {
         Row: {
           brand_name: string | null
@@ -816,7 +952,7 @@ export type Database = {
           match_status: string | null
           pack_size: string | null
           product_number: string | null
-          quantity: number | null
+          quantity_invoiced: number | null
           total_cost: number | null
           unit: string | null
           unit_cost: number | null
@@ -831,7 +967,7 @@ export type Database = {
           match_status?: string | null
           pack_size?: string | null
           product_number?: string | null
-          quantity?: number | null
+          quantity_invoiced?: number | null
           total_cost?: number | null
           unit?: string | null
           unit_cost?: number | null
@@ -846,7 +982,7 @@ export type Database = {
           match_status?: string | null
           pack_size?: string | null
           product_number?: string | null
-          quantity?: number | null
+          quantity_invoiced?: number | null
           total_cost?: number | null
           unit?: string | null
           unit_cost?: number | null
@@ -888,6 +1024,7 @@ export type Database = {
           purchase_order_item_id: string | null
           qty_diff: number | null
           received_qty: number | null
+          received_qty_confirmed: boolean | null
           smart_order_run_id: string | null
           status: string | null
           total_diff: number | null
@@ -911,6 +1048,7 @@ export type Database = {
           purchase_order_item_id?: string | null
           qty_diff?: number | null
           received_qty?: number | null
+          received_qty_confirmed?: boolean | null
           smart_order_run_id?: string | null
           status?: string | null
           total_diff?: number | null
@@ -934,6 +1072,7 @@ export type Database = {
           purchase_order_item_id?: string | null
           qty_diff?: number | null
           received_qty?: number | null
+          received_qty_confirmed?: boolean | null
           smart_order_run_id?: string | null
           status?: string | null
           total_diff?: number | null
@@ -986,57 +1125,6 @@ export type Database = {
             columns: ["smart_order_run_id"]
             isOneToOne: false
             referencedRelation: "smart_order_runs"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      invoice_ingestions: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          id: string
-          invoice_id: string
-          mime_type: string | null
-          original_filename: string | null
-          restaurant_id: string
-          source_kind: string
-          storage_path: string
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          invoice_id: string
-          mime_type?: string | null
-          original_filename?: string | null
-          restaurant_id: string
-          source_kind: string
-          storage_path: string
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          invoice_id?: string
-          mime_type?: string | null
-          original_filename?: string | null
-          restaurant_id?: string
-          source_kind?: string
-          storage_path?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "invoice_ingestions_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_ingestions_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: false
-            referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
         ]
@@ -1249,6 +1337,47 @@ export type Database = {
             columns: ["list_id"]
             isOneToOne: false
             referencedRelation: "inventory_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      location_settings: {
+        Row: {
+          brand: string | null
+          count_frequency_days: number
+          count_overdue_alert_hrs: number
+          created_at: string
+          food_cost_target_pct: number
+          id: string
+          location_id: string
+          updated_at: string
+        }
+        Insert: {
+          brand?: string | null
+          count_frequency_days?: number
+          count_overdue_alert_hrs?: number
+          created_at?: string
+          food_cost_target_pct?: number
+          id?: string
+          location_id: string
+          updated_at?: string
+        }
+        Update: {
+          brand?: string | null
+          count_frequency_days?: number
+          count_overdue_alert_hrs?: number
+          created_at?: string
+          food_cost_target_pct?: number
+          id?: string
+          location_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "location_settings_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: true
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
         ]
@@ -1525,6 +1654,7 @@ export type Database = {
           item_name: string
           par_guide_id: string
           par_level: number
+          par_unit: string | null
           unit: string | null
         }
         Insert: {
@@ -1535,6 +1665,7 @@ export type Database = {
           item_name: string
           par_guide_id: string
           par_level?: number
+          par_unit?: string | null
           unit?: string | null
         }
         Update: {
@@ -1545,6 +1676,7 @@ export type Database = {
           item_name?: string
           par_guide_id?: string
           par_level?: number
+          par_unit?: string | null
           unit?: string | null
         }
         Relationships: [
@@ -1961,6 +2093,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
+          location_id: string | null
           notes: string | null
           po_number: string | null
           restaurant_id: string
@@ -1974,6 +2107,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          location_id?: string | null
           notes?: string | null
           po_number?: string | null
           restaurant_id: string
@@ -1987,6 +2121,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          location_id?: string | null
           notes?: string | null
           po_number?: string | null
           restaurant_id?: string
@@ -1997,6 +2132,13 @@ export type Database = {
           vendor_name?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "purchase_orders_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "purchase_orders_restaurant_id_fkey"
             columns: ["restaurant_id"]
@@ -2009,6 +2151,99 @@ export type Database = {
             columns: ["smart_order_run_id"]
             isOneToOne: false
             referencedRelation: "smart_order_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      /**
+       * Stub schema for dropped tables — keeps TS aligned with UI code paths.
+       * Runtime calls fail until tables are re-created in Postgres.
+       */
+      recipe_ingredients: {
+        Row: {
+          catalog_item_id: string | null
+          created_at: string
+          id: string
+          item_name: string
+          quantity: number
+          recipe_id: string
+          unit: string | null
+        }
+        Insert: {
+          catalog_item_id?: string | null
+          created_at?: string
+          id?: string
+          item_name: string
+          quantity: number
+          recipe_id: string
+          unit?: string | null
+        }
+        Update: {
+          catalog_item_id?: string | null
+          created_at?: string
+          id?: string
+          item_name?: string
+          quantity?: number
+          recipe_id?: string
+          unit?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recipe_ingredients_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recipe_ingredients_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recipes: {
+        Row: {
+          category: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          notes: string | null
+          restaurant_id: string
+          selling_price: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          restaurant_id: string
+          selling_price?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          restaurant_id?: string
+          selling_price?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recipes_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
         ]
@@ -2430,6 +2665,102 @@ export type Database = {
           },
         ]
       }
+      stock_movements: {
+        Row: {
+          catalog_item_id: string
+          conversion_status: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_id: string | null
+          invoice_item_id: string | null
+          location_id: string | null
+          movement_type: string
+          notes: string | null
+          quantity: number
+          quantity_unit: string | null
+          reference_id: string | null
+          reference_type: string | null
+          restaurant_id: string
+          source_quantity: number | null
+          source_quantity_unit: string | null
+        }
+        Insert: {
+          catalog_item_id: string
+          conversion_status?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          invoice_item_id?: string | null
+          location_id?: string | null
+          movement_type: string
+          notes?: string | null
+          quantity: number
+          quantity_unit?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          restaurant_id: string
+          source_quantity?: number | null
+          source_quantity_unit?: string | null
+        }
+        Update: {
+          catalog_item_id?: string
+          conversion_status?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          invoice_item_id?: string | null
+          location_id?: string | null
+          movement_type?: string
+          notes?: string | null
+          quantity?: number
+          quantity_unit?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          restaurant_id?: string
+          source_quantity?: number | null
+          source_quantity_unit?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       usage_events: {
         Row: {
           created_at: string
@@ -2465,6 +2796,131 @@ export type Database = {
           },
           {
             foreignKeyName: "usage_events_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_location_assignments: {
+        Row: {
+          can_approve_orders: boolean
+          can_edit_par: boolean
+          can_see_costs: boolean
+          can_see_food_cost_pct: boolean
+          can_see_inventory_value: boolean
+          created_at: string
+          id: string
+          is_primary: boolean
+          location_id: string
+          order_approval_threshold: number | null
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          can_approve_orders?: boolean
+          can_edit_par?: boolean
+          can_see_costs?: boolean
+          can_see_food_cost_pct?: boolean
+          can_see_inventory_value?: boolean
+          created_at?: string
+          id?: string
+          is_primary?: boolean
+          location_id: string
+          order_approval_threshold?: number | null
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          can_approve_orders?: boolean
+          can_edit_par?: boolean
+          can_see_costs?: boolean
+          can_see_food_cost_pct?: boolean
+          can_see_inventory_value?: boolean
+          created_at?: string
+          id?: string
+          is_primary?: boolean
+          location_id?: string
+          order_approval_threshold?: number | null
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_location_assignments_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_invites: {
+        Row: {
+          accepted_at: string | null
+          can_approve_orders: boolean
+          can_edit_par: boolean
+          can_see_costs: boolean
+          can_see_food_cost_pct: boolean
+          can_see_inventory_value: boolean
+          created_at: string
+          email: string
+          id: string
+          invited_by: string
+          location_id: string
+          order_approval_threshold: number | null
+          restaurant_id: string
+          role: Database["public"]["Enums"]["app_role"]
+          status: Database["public"]["Enums"]["invitation_status"]
+        }
+        Insert: {
+          accepted_at?: string | null
+          can_approve_orders?: boolean
+          can_edit_par?: boolean
+          can_see_costs?: boolean
+          can_see_food_cost_pct?: boolean
+          can_see_inventory_value?: boolean
+          created_at?: string
+          email: string
+          id?: string
+          invited_by: string
+          location_id: string
+          order_approval_threshold?: number | null
+          restaurant_id: string
+          role: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invitation_status"]
+        }
+        Update: {
+          accepted_at?: string | null
+          can_approve_orders?: boolean
+          can_edit_par?: boolean
+          can_see_costs?: boolean
+          can_see_food_cost_pct?: boolean
+          can_see_inventory_value?: boolean
+          created_at?: string
+          email?: string
+          id?: string
+          invited_by?: string
+          location_id?: string
+          order_approval_threshold?: number | null
+          restaurant_id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invitation_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_invites_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_invites_restaurant_id_fkey"
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
@@ -2615,53 +3071,50 @@ export type Database = {
       }
       waste_log: {
         Row: {
-          catalog_item_id: string | null
           created_at: string
           id: string
           item_name: string
+          location_id: string | null
           logged_at: string
           logged_by: string
           notes: string | null
           quantity: number
+          quantity_unit: string | null
           reason: string
           restaurant_id: string
-          total_cost: number | null
-          unit_cost: number | null
         }
         Insert: {
-          catalog_item_id?: string | null
           created_at?: string
           id?: string
           item_name: string
+          location_id?: string | null
           logged_at?: string
           logged_by: string
           notes?: string | null
           quantity: number
+          quantity_unit?: string | null
           reason: string
           restaurant_id: string
-          total_cost?: number | null
-          unit_cost?: number | null
         }
         Update: {
-          catalog_item_id?: string | null
           created_at?: string
           id?: string
           item_name?: string
+          location_id?: string | null
           logged_at?: string
           logged_by?: string
           notes?: string | null
           quantity?: number
+          quantity_unit?: string | null
           reason?: string
           restaurant_id?: string
-          total_cost?: number | null
-          unit_cost?: number | null
         }
         Relationships: [
           {
-            foreignKeyName: "waste_log_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
+            foreignKeyName: "waste_log_location_id_fkey"
+            columns: ["location_id"]
             isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
           {
@@ -2678,8 +3131,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_user_invites: { Args: Record<PropertyKey, never>; Returns: Json }
       alert_pref_restaurant_id: { Args: { pref_id: string }; Returns: string }
+      approve_inventory_session_atomic: {
+        Args: {
+          p_par_guide_id?: string
+          p_run_items?: Json
+          p_session_id: string
+          p_user_id: string
+        }
+        Returns: {
+          catalog_links_stripped: boolean
+          location_id: string
+          run_id: string
+        }[]
+      }
       confirm_invoice_receipt: {
+        Args: { p_invoice_id: string; p_restaurant_id: string }
+        Returns: Json
+      }
+      confirm_invoice_receipt_legacy: {
         Args: { p_invoice_id: string; p_restaurant_id: string }
         Returns: Json
       }
@@ -2698,6 +3169,7 @@ export type Database = {
         }
       }
       custom_list_restaurant_id: { Args: { cl_id: string }; Returns: string }
+      delete_inventory_list: { Args: { list_id: string }; Returns: undefined }
       delete_restaurant_cascade: {
         Args: { p_restaurant_id: string }
         Returns: undefined
@@ -2709,6 +3181,17 @@ export type Database = {
           issue_count: number
           po_number: string
           purchase_history_id: string
+        }[]
+      }
+      get_location_permissions: {
+        Args: { p_location_id: string; p_uid: string }
+        Returns: {
+          can_approve_orders: boolean
+          can_edit_par: boolean
+          can_see_costs: boolean
+          can_see_food_cost_pct: boolean
+          can_see_inventory_value: boolean
+          order_approval_threshold: number
         }[]
       }
       has_restaurant_role: {
@@ -2723,6 +3206,7 @@ export type Database = {
         Returns: boolean
       }
       invitation_restaurant_id: { Args: { inv_id: string }; Returns: string }
+      invoice_restaurant_id: { Args: { p_invoice_id: string }; Returns: string }
       is_member_of: { Args: { r_id: string }; Returns: boolean }
       list_category_restaurant_id: {
         Args: { lc_list_id: string }
@@ -2731,6 +3215,15 @@ export type Database = {
       list_item_map_restaurant_id: {
         Args: { p_list_id: string }
         Returns: string
+      }
+      normalize_received_qty_to_cases: {
+        Args: { p_pack_size: string; p_qty: number; p_unit: string }
+        Returns: {
+          cases: number
+          conv_status: string
+          ok: boolean
+          reason: string
+        }[]
       }
       notify_delivery_issues: {
         Args: { p_purchase_history_id: string }
@@ -2742,27 +3235,29 @@ export type Database = {
         Args: { ph_id: string }
         Returns: string
       }
-      reminder_restaurant_id: { Args: { r_id: string }; Returns: string }
-      session_restaurant_id: { Args: { s_id: string }; Returns: string }
-      approve_inventory_session_atomic: {
-        Args: {
-          p_par_guide_id?: string | null
-          p_run_items?: Json
-          p_session_id: string
-          p_user_id: string
-        }
-        /** PostgREST returns one row per set-returning function as a JSON array. */
-        Returns: {
-          catalog_links_stripped: boolean
-          location_id: string | null
-          run_id: string
-        }[]
+      purchase_order_restaurant_id: {
+        Args: { p_po_id: string }
+        Returns: string
       }
+      reminder_restaurant_id: { Args: { r_id: string }; Returns: string }
+      session_item_restaurant_id: {
+        Args: { p_session_item_id: string }
+        Returns: string
+      }
+      session_restaurant_id: { Args: { s_id: string }; Returns: string }
       smart_order_run_restaurant_id: {
         Args: { sr_id: string }
         Returns: string
       }
       submit_smart_order: { Args: { p_run_id: string }; Returns: Json }
+      user_accessible_location_ids: {
+        Args: { p_uid: string }
+        Returns: string[]
+      }
+      user_can_access_location: {
+        Args: { p_location_id: string; p_uid: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "OWNER" | "MANAGER" | "STAFF"

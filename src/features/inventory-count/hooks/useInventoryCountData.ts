@@ -8,9 +8,9 @@ import {
 import type {
   InventoryCatalogItemRow,
   InventoryListRow,
-  InventorySessionItemRow,
   InventorySessionListRow,
   ListSelectorMeta,
+  ParGuideRow,
   ReminderWithListLocation,
   SessionStats,
 } from "@/domain/inventory/enterInventoryTypes";
@@ -42,6 +42,7 @@ import { useInventoryCountParListState } from "@/features/inventory-count/hooks/
 
 export function useInventoryCountData({
   currentRestaurantId,
+  currentLocationId,
   approvedFilter,
   selectedList,
   selectedPar,
@@ -94,7 +95,7 @@ export function useInventoryCountData({
         fetchInventoryLists(currentRestaurantId),
         fetchInventoryCatalogListLinks(currentRestaurantId),
         fetchParGuideListLinks(currentRestaurantId),
-        fetchApprovedSessionDates(currentRestaurantId),
+        fetchApprovedSessionDates(currentRestaurantId, currentLocationId),
       ]);
 
     setLists(listData ?? []);
@@ -102,7 +103,7 @@ export function useInventoryCountData({
       buildListSelectorMeta(listData ?? [], catalogData ?? [], guideData ?? [], approvedData ?? []),
     );
     setLoading(false);
-  }, [currentRestaurantId]);
+  }, [currentRestaurantId, currentLocationId]);
 
   const refreshSessions = useCallback(async () => {
     if (!currentRestaurantId) return;
@@ -111,12 +112,13 @@ export function useInventoryCountData({
     setSessionsLoaded(false);
 
     const daysAgo = new Date();
-    daysAgo.setDate(daysAgo.getDate() - parseInt(approvedFilter, 10));
+    const parsedDays = parseInt(approvedFilter, 10);
+    daysAgo.setDate(daysAgo.getDate() - (Number.isFinite(parsedDays) ? parsedDays : 30));
 
     const [{ data: ip }, { data: rv }, { data: ap }] = await Promise.all([
-      fetchInventorySessionsByStatus(currentRestaurantId, "IN_PROGRESS"),
-      fetchInventorySessionsByStatus(currentRestaurantId, "IN_REVIEW"),
-      fetchInventorySessionsByStatus(currentRestaurantId, "APPROVED", daysAgo.toISOString()),
+      fetchInventorySessionsByStatus(currentRestaurantId, "IN_PROGRESS", undefined, currentLocationId),
+      fetchInventorySessionsByStatus(currentRestaurantId, "IN_REVIEW", undefined, currentLocationId),
+      fetchInventorySessionsByStatus(currentRestaurantId, "APPROVED", daysAgo.toISOString(), currentLocationId),
     ]);
 
     const nextInProgress = ip ?? [];
@@ -139,11 +141,11 @@ export function useInventoryCountData({
 
     setLoading(false);
     setSessionsLoaded(true);
-  }, [approvedFilter, currentRestaurantId]);
+  }, [approvedFilter, currentRestaurantId, currentLocationId]);
 
   const loadLatestParGuide = useCallback(async (inventoryListId: string) => {
-    return fetchLatestParGuide(inventoryListId);
-  }, []);
+    return fetchLatestParGuide(inventoryListId, currentRestaurantId, currentLocationId);
+  }, [currentRestaurantId, currentLocationId]);
 
   const loadCatalogItemsForList = useCallback(
     async (inventoryListId: string) => {

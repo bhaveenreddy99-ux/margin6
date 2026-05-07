@@ -352,7 +352,7 @@ export function useInvoiceActions({
                   ? String(row.product_number).trim()
                   : null,
               item_name: row.item_name,
-              quantity: Number(row.quantity),
+              quantity: Number(row.quantity_invoiced),
               unit_cost: row.unit_cost != null ? Number(row.unit_cost) : null,
               line_total: row.total_cost != null ? Number(row.total_cost) : null,
               unit: row.unit ?? null,

@@ -1,12 +1,13 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+/* @import must be first (before @tailwind) or Vite/postcss will error and styles may not load. */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @layer base {
   :root {
@@ -19,8 +20,8 @@
     --popover: 240 5% 90%;
     --popover-foreground: 240 5% 10%;
 
-    --primary: 258 89% 66%;
-    --primary-foreground: 250 100% 97%;
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 240 5% 33%;
     --secondary-foreground: 0 0% 98%;
@@ -28,8 +29,8 @@
     --muted: 240 4% 83%;
     --muted-foreground: 240 5% 10%;
 
-    --accent: 269 100% 98%;
-    --accent-foreground: 270 91% 65%;
+    --accent: 25 95% 96%;
+    --accent-foreground: 25 95% 40%;
 
     --destructive: 0 72% 50%;
     --destructive-foreground: 0 85% 97%;
@@ -42,7 +43,7 @@
 
     --border: 240 4% 83%;
     --input: 240 4% 83%;
-    --ring: 258 89% 66%;
+    --ring: 25 95% 53%;
 
     --radius: 0.5rem;
 
@@ -91,8 +92,8 @@
     --popover: 240 5% 26%;
     --popover-foreground: 0 0% 98%;
 
-    --primary: 255 91% 76%;
-    --primary-foreground: 261 72% 22%;
+    --primary: 25 95% 60%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 240 3% 46%;
     --secondary-foreground: 0 0% 98%;
@@ -100,8 +101,8 @@
     --muted: 240 3% 46%;
     --muted-foreground: 0 0% 98%;
 
-    --accent: 273 86% 20%;
-    --accent-foreground: 270 95% 75%;
+    --accent: 25 50% 20%;
+    --accent-foreground: 25 95% 70%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 85% 97%;
@@ -114,16 +115,16 @@
 
     --border: 240 5% 33%;
     --input: 240 5% 33%;
-    --ring: 255 91% 76%;
+    --ring: 25 95% 60%;
 
     --sidebar-background: 222 32% 6%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 255 91% 76%;
-    --sidebar-primary-foreground: 261 72% 22%;
-    --sidebar-accent: 270 95% 75%;
-    --sidebar-accent-foreground: 273 86% 20%;
+    --sidebar-primary: 25 95% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 25 50% 20%;
+    --sidebar-accent-foreground: 25 95% 70%;
     --sidebar-border: 240 5% 33%;
-    --sidebar-ring: 255 91% 76%;
+    --sidebar-ring: 25 95% 60%;
     --sidebar-muted: 222 22% 13%;
     --chart-1: 252 94% 85%;
     --chart-2: 269 97% 85%;

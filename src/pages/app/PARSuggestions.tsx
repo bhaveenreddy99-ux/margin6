@@ -103,9 +103,11 @@ export default function PARSuggestionsPage() {
   // Load PAR guides when list changes
   useEffect(() => {
     if (!currentRestaurant || selectedList === "all") { setParGuides([]); setSelectedGuide("all"); return; }
-    supabase.from("par_guides").select("id, name").eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", selectedList)
-      .then(({ data }) => { if (data) setParGuides(data); setSelectedGuide("all"); });
-  }, [selectedList, currentRestaurant]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let guideQ: any = supabase.from("par_guides").select("id, name").eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", selectedList);
+    if (currentLocation?.id) guideQ = guideQ.eq("location_id", currentLocation.id);
+    guideQ.then(({ data }: { data: { id: string; name: string }[] | null }) => { if (data) setParGuides(data); setSelectedGuide("all"); });
+  }, [selectedList, currentRestaurant, currentLocation?.id]);
 
   // ─── Shared PAR computation ──────────────────────────────────────────────
   const generateSuggestions = useCallback(async () => {
@@ -176,8 +178,10 @@ export default function PARSuggestionsPage() {
         setApplying(false);
         return;
       }
-      const { data: guides } = await supabase.from("par_guides")
-        .select("id").eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", listId).limit(1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let existingGuideQ: any = supabase.from("par_guides").select("id").eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", listId);
+      if (currentLocation?.id) existingGuideQ = existingGuideQ.eq("location_id", currentLocation.id);
+      const { data: guides } = await existingGuideQ.limit(1);
       targetGuideId = guides?.[0]?.id;
 
       if (!targetGuideId) {
@@ -186,6 +190,7 @@ export default function PARSuggestionsPage() {
           inventory_list_id: listId,
           name: `AI Suggested PAR – ${new Date().toLocaleDateString()}`,
           created_by: user.id,
+          location_id: currentLocation?.id ?? null,
         }).select("id").single();
         if (error || !newGuide) {
           toast.error("Failed to create PAR guide.");

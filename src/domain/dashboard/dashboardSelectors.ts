@@ -2,6 +2,8 @@ import { endOfWeek, startOfDay, startOfWeek, subDays, subWeeks, format } from "d
 import { computeInventoryItem, computeReorderSummary, type InventoryItemInput } from "@/domain/inventory/reorderEngine";
 import type { ReorderSummary } from "@/domain/inventory/reorderEngine";
 import type { RiskThresholds } from "@/lib/inventory-utils";
+import { computeLineInventoryValue } from "@/domain/inventory/casePlanningEngine";
+import { catalogIdFromSessionItem } from "@/domain/inventory/sessionItemCatalogLink";
 import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
 import type {
   DashboardInvoiceStatusRow,
@@ -15,6 +17,7 @@ import type {
   PortfolioRestaurantRow,
   ProfitIntelligenceAction,
   TopReorderItem,
+  TopSessionItemByValue,
   WasteLogSnapshotRow,
 } from "@/domain/dashboard/dashboardTypes";
 
@@ -121,6 +124,7 @@ export function isInvoiceLineComparisonProblem(row: InvoiceLineComparisonRow): b
 }
 
 export function linePriceIncreaseImpact(row: InvoiceLineComparisonRow): number {
+  if (row.invoiced_unit_cost == null || row.po_unit_cost == null) return 0;
   const invoicedUnitCost = Number(row.invoiced_unit_cost);
   const purchaseOrderUnitCost = Number(row.po_unit_cost);
   if (
@@ -153,11 +157,12 @@ export function buildLatestInventorySnapshot(
 ): LatestInventorySnapshot {
   const latestSessionUnitCostByCatalogId: Record<string, number> = {};
   for (const item of items) {
-    if (!item.catalog_item_id) continue;
+    const cid = catalogIdFromSessionItem(item);
+    if (!cid) continue;
     const unitCost = Number(item.unit_cost);
     if (!Number.isFinite(unitCost) || unitCost < 0) continue;
-    if (latestSessionUnitCostByCatalogId[item.catalog_item_id] !== undefined) continue;
-    latestSessionUnitCostByCatalogId[item.catalog_item_id] = unitCost;
+    if (latestSessionUnitCostByCatalogId[cid] !== undefined) continue;
+    latestSessionUnitCostByCatalogId[cid] = unitCost;
   }
 
   const inputs: InventoryItemInput[] = items.map((item) => ({
@@ -186,10 +191,16 @@ export function buildLatestInventorySnapshot(
     .slice(0, 8);
 
   const inventoryValue = items.reduce(
-    (sum, item) => sum + Number(item.current_stock ?? 0) * (item.unit_cost || 0),
+    (sum, item) =>
+      sum +
+      computeLineInventoryValue({
+        currentStockCases: item.current_stock,
+        parLevelCases: item.par_level,
+        unitCostPerCase: item.unit_cost,
+      }).dollars,
     0,
   );
-  const missingCostCount = items.filter((item) => !item.unit_cost).length;
+  const missingCostCount = items.filter((item) => item.unit_cost == null).length;
   const missingParCount = items.filter((item) => isMissingParLevel(item.par_level)).length;
 
   return {
@@ -204,6 +215,30 @@ export function buildLatestInventorySnapshot(
   };
 }
 
+/**
+ * Same per-line dollar formula as {@link buildLatestInventorySnapshot} inventory total,
+ * limited to rows with truthy `unit_cost` (matches legacy Reports “top items” filter).
+ */
+export function buildTopSessionItemsByValue(
+  items: InventorySessionItemRow[],
+  limit = 8,
+): TopSessionItemByValue[] {
+  return items
+    .filter((i) => Boolean(i.unit_cost))
+    .map((i) => ({
+      item_name: i.item_name,
+      total_value: computeLineInventoryValue({
+        currentStockCases: i.current_stock,
+        parLevelCases: i.par_level,
+        unitCostPerCase: i.unit_cost,
+      }).dollars,
+      current_stock: Number(i.current_stock),
+      unit: i.unit ?? "",
+    }))
+    .sort((a, b) => b.total_value - a.total_value)
+    .slice(0, limit);
+}
+
 export function buildInventoryTrendData(
   trendSessions: InventoryTrendSessionRow[],
   trendLinesBySessionId: Map<string, { current_stock: number | null; unit_cost: number | null }[]>,
@@ -212,7 +247,13 @@ export function buildInventoryTrendData(
     .map((session) => {
       const items = trendLinesBySessionId.get(session.id) ?? [];
       const value = items.reduce(
-        (sum, item) => sum + Number(item.current_stock ?? 0) * (Number(item.unit_cost) || 0),
+        (sum, item) =>
+          sum +
+          computeLineInventoryValue({
+            currentStockCases: item.current_stock,
+            parLevelCases: null,
+            unitCostPerCase: item.unit_cost,
+          }).dollars,
         0,
       );
       return {
@@ -244,7 +285,7 @@ export function buildProfitIntelligenceActions(args: {
   if (args.deliveryIssuesCount > 0) {
     actions.push({
       type: "CRITICAL",
-      message: `${args.deliveryIssuesCount} delivery issue${args.deliveryIssuesCount !== 1 ? "s" : ""} need attention`,
+      message: `${args.deliveryIssuesCount} delivery problem${args.deliveryIssuesCount !== 1 ? "s" : ""} caught — review invoices`,
     });
   }
   if (totalWaste > 0) {
@@ -256,7 +297,7 @@ export function buildProfitIntelligenceActions(args: {
   if (args.priceIncreaseImpact > 0) {
     actions.push({
       type: "WARNING",
-      message: `Prices increased by $${args.priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })} this period`,
+      message: `RestaurantIQ flagged $${args.priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })} in supplier price increases`,
     });
   }
   if (args.missingParCount > 0) {

@@ -5,7 +5,7 @@ import { fetchParGuideItems, fetchParGuidesForSelectedList } from "@/features/in
 
 type Args = Pick<
   UseInventoryCountDataArgs,
-  "currentRestaurantId" | "selectedList" | "selectedPar" | "setSelectedPar"
+  "currentRestaurantId" | "currentLocationId" | "selectedList" | "selectedPar" | "setSelectedPar"
 >;
 
 /**
@@ -14,6 +14,7 @@ type Args = Pick<
  */
 export function useInventoryCountParListState({
   currentRestaurantId,
+  currentLocationId,
   selectedList,
   selectedPar,
   setSelectedPar,
@@ -28,7 +29,7 @@ export function useInventoryCountParListState({
       return;
     }
     let cancelled = false;
-    fetchParGuidesForSelectedList(currentRestaurantId, selectedList).then(({ data }) => {
+    fetchParGuidesForSelectedList(currentRestaurantId, selectedList, currentLocationId).then(({ data }) => {
       if (cancelled) return;
       const nextGuides = (data ?? []) as ParGuideRow[];
       setParGuides(nextGuides);
@@ -37,7 +38,7 @@ export function useInventoryCountParListState({
     return () => {
       cancelled = true;
     };
-  }, [currentRestaurantId, selectedList, setSelectedPar]);
+  }, [currentRestaurantId, currentLocationId, selectedList, setSelectedPar]);
 
   useEffect(() => {
     if (!selectedPar || selectedPar === "none") {

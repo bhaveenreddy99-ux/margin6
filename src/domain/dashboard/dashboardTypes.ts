@@ -1,5 +1,8 @@
 import type { ReorderSummary } from "@/domain/inventory/reorderEngine";
+import type { InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
 import type { Database } from "@/integrations/supabase/types";
+
+export type { InventorySessionItemRow };
 
 export type DashboardTimeFilter = "this_week" | "last_week" | "30_days";
 
@@ -13,11 +16,17 @@ export type InventoryTrendSessionRow = Pick<
   "id" | "approved_at"
 >;
 
-export type InventorySessionItemRow = Database["public"]["Tables"]["inventory_session_items"]["Row"];
-
 export type TopReorderItem = InventorySessionItemRow & {
   suggestedOrder: number;
   ratio: number;
+};
+
+/** Priced session lines ranked by stock dollar value — shared by Dashboard loader and Reports. */
+export type TopSessionItemByValue = {
+  item_name: string;
+  total_value: number;
+  current_stock: number;
+  unit: string;
 };
 
 export type SmartOrderSettingsRow = Pick<
@@ -30,10 +39,19 @@ export type WasteLogSnapshotRow = Pick<
   "item_name" | "quantity" | "reason" | "logged_at"
 >;
 
+/**
+ * Period rollup rows for `loadWasteMetrics` — select must include cost/FK columns so
+ * {@link dollarsForWasteRow} / {@link aggregateWasteRows} match persisted data.
+ * (Codegen may lag migrations; treat cost fields as optional only for type compatibility.)
+ */
 export type WasteLogPeriodRow = Pick<
   Database["public"]["Tables"]["waste_log"]["Row"],
-  "quantity" | "total_cost" | "unit_cost" | "catalog_item_id" | "logged_at"
->;
+  "quantity" | "quantity_unit" | "logged_at" | "item_name"
+> & {
+  catalog_item_id?: string | null;
+  unit_cost?: number | null;
+  total_cost?: number | null;
+};
 
 export type InventoryCatalogDefaultCostRow = Pick<
   Database["public"]["Tables"]["inventory_catalog_items"]["Row"],
@@ -98,6 +116,7 @@ export type ProfitIntelligenceAction = {
 };
 
 export type PortfolioLocationBreakdown = {
+  /** Real location UUID, or `__unassigned__` for latest approved count with `location_id` IS NULL. */
   locationId: string;
   locationName: string;
   red: number;
@@ -147,13 +166,12 @@ export type LatestInventorySnapshot = {
   missingParCount: number;
 };
 
-export type SingleDashboardData = {
+export type KPISnapshot = {
   stockStatus: DashboardStockStatus;
   topReorder: TopReorderItem[];
   reorderSummary: ReorderSummary | null;
   highUsage: import("@/lib/usage-analytics").ComputedUsageItem[];
   recommendations: import("@/lib/usage-analytics").PARRecommendation[];
-  loading: boolean;
   inventoryValue: number;
   missingCostCount: number;
   trendData: DashboardTrendPoint[];
@@ -170,4 +188,10 @@ export type SingleDashboardData = {
   recordedWasteValue: number;
   recordedWasteCount: number;
   wasteItemsMissingCost: number;
+};
+
+export type SingleDashboardData = KPISnapshot & {
+  loading: boolean;
+  error: Error | null;
+  refetch: () => void;
 };

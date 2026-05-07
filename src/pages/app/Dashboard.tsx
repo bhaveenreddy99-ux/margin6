@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Package, AlertTriangle, TrendingUp, TrendingDown, ShoppingCart,
   Building2, Bell, DollarSign, BarChart3, Sparkles,
@@ -9,7 +10,7 @@ import {
   CalendarDays, Activity, Receipt, Trash2, Truck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Navigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -40,6 +41,7 @@ import type {
 } from "@/domain/dashboard/dashboardTypes";
 import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
 import { useDashboardData, usePortfolioDashboardData } from "@/hooks/useDashboardData";
+import { useLocationPermissions } from "@/hooks/useLocationPermissions";
 
 // ─── Today's Briefing ───
 function TodaysBriefing({
@@ -832,6 +834,7 @@ function PortfolioDashboard({
 }) {
   const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
   const navigate = useNavigate();
+  const { restaurants: switcherRestaurants } = useRestaurant();
   const { data, loading } = usePortfolioDashboardData(timeFilter);
 
   if (loading) {
@@ -856,6 +859,25 @@ function PortfolioDashboard({
           <p className="text-sm text-muted-foreground mt-0.5">{restaurants.length} location{restaurants.length !== 1 ? "s" : ""} · Overview</p>
         </div>
       </div>
+
+      <Alert className="border-amber-400/70 bg-amber-50 text-amber-900 dark:border-amber-600/50 dark:bg-amber-950/40 dark:text-amber-100 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-400">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle className="text-sm font-semibold">Do not use for ordering decisions</AlertTitle>
+        <AlertDescription className="text-sm leading-snug">
+          Portfolio rollups (stock levels, spend, overstock) are approximate and can differ from individual site dashboards.
+          {" "}Open a single restaurant for accurate data before placing orders or making purchasing decisions.
+          {switcherRestaurants.length > 0 ? (
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto p-0 pl-1 text-sm font-semibold text-amber-800 dark:text-amber-300 underline-offset-2"
+              onClick={() => setCurrentRestaurant(switcherRestaurants[0])}
+            >
+              Open a restaurant →
+            </Button>
+          ) : null}
+        </AlertDescription>
+      </Alert>
 
       <TodaysBriefing
         timeFilter={timeFilter}
@@ -908,7 +930,8 @@ function PortfolioDashboard({
 
 // ─── Single Restaurant Dashboard ───
 function SingleDashboard() {
-  const { currentRestaurant, currentLocation } = useRestaurant();
+  const { currentRestaurant, currentLocation, locations } = useRestaurant();
+  const perms = useLocationPermissions();
   const navigate = useNavigate();
   const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
   const {
@@ -918,6 +941,8 @@ function SingleDashboard() {
     highUsage,
     recommendations,
     loading,
+    error,
+    refetch,
     inventoryValue,
     missingCostCount,
     trendData,
@@ -1001,6 +1026,24 @@ function SingleDashboard() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
+        <AlertTriangle className="h-10 w-10 text-destructive/40" />
+        <div>
+          <p className="text-sm font-semibold">Dashboard data couldn't load</p>
+          <p className="text-xs text-muted-foreground mt-1">Check your connection and try again.</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={refetch}>Retry</Button>
+      </div>
+    );
+  }
+
+  const ownerActiveLocationCount =
+    currentRestaurant?.role === "OWNER"
+      ? locations.filter((l) => l.restaurant_id === currentRestaurant.id && l.is_active).length
+      : 0;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -1018,6 +1061,21 @@ function SingleDashboard() {
         </div>
       </div>
 
+      {currentRestaurant?.role === "OWNER" && ownerActiveLocationCount > 1 && currentLocation ? (
+        <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3 text-sm">
+          <span className="text-muted-foreground">Viewing </span>
+          <span className="font-medium text-foreground">{currentLocation.name}</span>
+          <span className="text-muted-foreground"> — </span>
+          <Link
+            to="/app/dashboard/all"
+            className="font-semibold text-primary hover:underline inline-flex items-center gap-1"
+          >
+            See all {ownerActiveLocationCount} locations
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      ) : null}
+
       {/* Today's Briefing */}
       <TodaysBriefing
         timeFilter={timeFilter}
@@ -1027,6 +1085,15 @@ function SingleDashboard() {
         pendingInvoices={pendingInvoices}
         daysSinceLastCount={daysSinceLastCount}
       />
+
+      {missingCostCount > 0 ? (
+        <Alert className="border-amber-200/80 bg-amber-50/80 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/25 dark:text-amber-100/95 [&>svg]:text-amber-700 dark:[&>svg]:text-amber-400">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            {missingCostCount} item{missingCostCount === 1 ? "" : "s"} missing cost. Inventory and reorder values may be understated.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {/* Section 1 — Today's situation */}
       <section className="space-y-4" aria-labelledby="dash-today-heading">
@@ -1089,9 +1156,11 @@ function SingleDashboard() {
             icon={DollarSign}
             label="Inventory value"
             value={
-              inventoryValue > 0
-                ? `$${inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
+              !perms.can_see_inventory_value
+                ? "—"
+                : inventoryValue > 0
+                  ? `$${inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                  : "$0"
             }
             accent="primary"
             changeLabel={inventoryValueLabel}
@@ -1159,7 +1228,7 @@ function SingleDashboard() {
             label="Delivery issues"
             value={String(deliveryIssuesCount)}
             accent={deliveryIssuesCount > 0 ? "destructive" : "primary"}
-            changeLabel="Missing items, shorts, or reported problems"
+            changeLabel="Invoice discrepancies caught this period"
           />
           <KpiCard
             icon={TrendingUp}
@@ -1170,7 +1239,7 @@ function SingleDashboard() {
                 : "$0"
             }
             accent="warning"
-            changeLabel="Versus what you ordered, when both costs are known"
+            changeLabel="vs. PO prices — flagged automatically"
           />
         </div>
       </section>
@@ -1246,10 +1315,40 @@ function SingleDashboard() {
 
 // ─── Main Dashboard Page ───
 export default function DashboardPage() {
-  const { isPortfolioMode, setCurrentRestaurant } = useRestaurant();
+  const {
+    isPortfolioMode,
+    setCurrentRestaurant,
+    currentRestaurant,
+    currentLocation,
+    locations,
+    loading,
+  } = useRestaurant();
+
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <Skeleton className="h-16 rounded-xl" />
+        <Skeleton className="h-5 w-40 rounded-md" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-32 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (isPortfolioMode) {
     return <PortfolioDashboard setCurrentRestaurant={setCurrentRestaurant} />;
+  }
+
+  const ownerActiveLocs =
+    currentRestaurant?.role === "OWNER"
+      ? locations.filter((l) => l.restaurant_id === currentRestaurant.id && l.is_active)
+      : [];
+
+  if (currentRestaurant?.role === "OWNER" && ownerActiveLocs.length > 1 && !currentLocation) {
+    return <Navigate to="/app/dashboard/all" replace />;
   }
 
   return <SingleDashboard />;

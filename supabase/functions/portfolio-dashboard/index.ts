@@ -1,5 +1,31 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getRisk, computeOrderQty } from "../../../src/lib/inventory-utils.ts";
+import { computeOrderQtyCases, computeRiskLevel } from "../../../src/lib/inventory-utils.ts";
+
+/**
+ * Dollar overstock above PAR — parity with {@link computeLineOverstockValue} in
+ * `src/domain/inventory/casePlanningEngine.ts` (rounded to 2 decimals).
+ * Inlined so Deno can bundle this function without resolving `@/` in that module.
+ * - `unit_cost === 0` is valid (contributes $0 overstock, not treated as missing).
+ * - `null` / `undefined` cost → $0 overstock when overage > 0.
+ */
+function lineOverstockDollars(
+  currentStockCases: number | null | undefined,
+  parLevelCases: number | null | undefined,
+  unitCostPerCase: number | null | undefined,
+): number {
+  const stock = currentStockCases ?? 0;
+  const par = parLevelCases ?? 0;
+  const overage = Math.max(0, stock - par);
+  if (overage === 0) return 0;
+  if (unitCostPerCase == null) return 0;
+  return Math.round(overage * unitCostPerCase * 100) / 100;
+}
+
+function parseUnitCostPerCase(raw: unknown): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,17 +129,33 @@ Deno.serve(async (req) => {
 
       const locationResults: any[] = [];
 
-      // Process per-location if locations exist, otherwise process restaurant-level
-      const locationIds = locations?.map(l => l.id) || [];
-      const processTargets = locationIds.length > 0 
-        ? locationIds.map(lid => ({ locationId: lid, locationName: locations!.find(l => l.id === lid)?.name || "" }))
-        : [{ locationId: null as string | null, locationName: null as string | null }];
+      // Process per-location if locations exist, otherwise one restaurant-level pass (no location filter).
+      // When locations exist, also process sessions with location_id IS NULL ("Unassigned") — same idea as
+      // loadInventoryMetrics: with a locationId you filter; without, unscoped / null-specific queries apply.
+      const locationIds = locations?.map((l) => l.id) || [];
+      type ProcessTarget = {
+        locationId: string | null;
+        locationName: string | null;
+        /** If true, filter .is("location_id", null) — matches unassigned approved counts */
+        isNullLocation?: boolean;
+      };
+      const processTargets: ProcessTarget[] =
+        locationIds.length > 0
+          ? [
+              ...locationIds.map((lid) => ({
+                locationId: lid,
+                locationName: locations!.find((l) => l.id === lid)?.name || "",
+                isNullLocation: false,
+              })),
+              { locationId: null, locationName: "Unassigned", isNullLocation: true },
+            ]
+          : [{ locationId: null, locationName: null, isNullLocation: false }];
 
       let restRed = 0, restYellow = 0, restGreen = 0;
       let restOverstockValue = 0;
 
       for (const target of processTargets) {
-        // Latest approved session for this location
+        // Latest approved session for this location (or unassigned), aligned with client session queries
         let sessionQuery = supabase
           .from("inventory_sessions")
           .select("id, approved_at")
@@ -122,7 +164,9 @@ Deno.serve(async (req) => {
           .order("approved_at", { ascending: false })
           .limit(1);
 
-        if (target.locationId) {
+        if (target.isNullLocation) {
+          sessionQuery = sessionQuery.is("location_id", null);
+        } else if (target.locationId) {
           sessionQuery = sessionQuery.eq("location_id", target.locationId);
         }
 
@@ -142,24 +186,20 @@ Deno.serve(async (req) => {
             items.forEach((i: any) => {
               const stock = Number(i.current_stock ?? 0);
               const par = Number(i.par_level ?? 0);
-              const risk = getRisk(stock, i.par_level, riskThresholds).level;
+              const risk = computeRiskLevel(stock, i.par_level, riskThresholds);
               if (risk === "RED") locRed++;
               else if (risk === "YELLOW") locYellow++;
               else if (risk === "GREEN") locGreen++;
-              // Estimated overstock value above PAR
-              if (par > 0 && stock > par && i.unit_cost) {
-                locOverstockValue += (stock - par) * Number(i.unit_cost);
-              }
+              locOverstockValue += lineOverstockDollars(
+                i.current_stock,
+                i.par_level,
+                parseUnitCostPerCase(i.unit_cost),
+              );
             });
             topItems = items
               .map((i: any) => ({
                 ...i,
-                suggested: computeOrderQty(
-                  i.current_stock,
-                  i.par_level,
-                  i.unit,
-                  i.pack_size,
-                ),
+                suggested: computeOrderQtyCases(i.current_stock, i.par_level),
                 ratio: Number(i.current_stock) / Math.max(Number(i.par_level), 1),
               }))
               .sort((a: any, b: any) => b.suggested - a.suggested)
@@ -172,10 +212,10 @@ Deno.serve(async (req) => {
         restGreen += locGreen;
         restOverstockValue += locOverstockValue;
 
-        if (target.locationId) {
+        if (target.locationId || target.isNullLocation) {
           locationResults.push({
-            locationId: target.locationId,
-            locationName: target.locationName,
+            locationId: target.isNullLocation ? "__unassigned__" : target.locationId,
+            locationName: target.locationName ?? "",
             red: locRed,
             yellow: locYellow,
             green: locGreen,

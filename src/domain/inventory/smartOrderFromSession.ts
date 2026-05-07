@@ -10,9 +10,9 @@ import type {
   InventorySessionListRow,
   NotificationPreferenceRow,
   ParGuideItemRow,
-  ParGuideRow,
 } from "@/domain/inventory/enterInventoryTypes";
 import { buildParGuideLevelMaps } from "@/domain/inventory/parGuideLevels";
+import { fetchLatestParGuide } from "@/features/inventory-count/queries/inventoryCountQueries";
 import type { RiskThresholds } from "@/lib/inventory-utils";
 
 type AppSupabase = SupabaseClient<Database>;
@@ -51,7 +51,7 @@ function buildPreparedSmartOrderRunItems(items: SmartOrderComputedItem[]): Prepa
     risk: item.risk,
     current_stock: item.currentStock,
     par_level: item.parLevel,
-    unit_cost: item.unit_cost || null,
+    unit_cost: item.unit_cost ?? null,
     pack_size: item.pack_size || null,
     brand_name: item.brand_name || null,
   }));
@@ -141,6 +141,8 @@ export async function prepareSmartOrderFromSession(args: {
   supabase: AppSupabase;
   sessionId: string;
   restaurantId: string;
+  /** Scoped PAR guide lookup; when omitted, uses the loaded session's `location_id`. */
+  locationId?: string | null;
   riskThresholds: RiskThresholds;
   parGuideId?: string | null;
 }) {
@@ -175,16 +177,13 @@ export async function prepareSmartOrderFromSession(args: {
 
   let resolvedParGuideId = args.parGuideId ?? null;
   if (!resolvedParGuideId) {
-    const latestGuide = (await args.supabase
-      .from("par_guides")
-      .select("id")
-      .eq("restaurant_id", args.restaurantId)
-      .eq("inventory_list_id", session.inventory_list_id)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()) as unknown as {
-      data: Pick<ParGuideRow, "id"> | null;
-    };
+    const parLocationId = args.locationId ?? session.location_id ?? null;
+    const latestGuide = await fetchLatestParGuide(
+      session.inventory_list_id,
+      args.restaurantId,
+      parLocationId,
+      args.supabase,
+    );
     resolvedParGuideId = latestGuide.data?.id ?? null;
   }
 

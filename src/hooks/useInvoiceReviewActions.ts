@@ -1,6 +1,13 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { analyzeInvoiceComparison } from "@/lib/invoice-comparison";
+import {
+  countMissingReceivedQty,
+  countUnconfirmedReceivedQty,
+} from "@/domain/invoices/invoiceReviewSelectors";
+import { validateReceivingBeforeConfirm } from "@/domain/invoices/receivingEngine";
+import { FIXED_STATUSES } from "@/domain/invoices/invoiceStatusLifecycle";
 import type {
   ConfirmInvoiceReceiptResult,
   InvoiceReviewComparison,
@@ -33,6 +40,35 @@ type UseInvoiceReviewActionsArgs = {
   setReportSheetOpen: StateSetter<boolean>;
 };
 
+/** Returns false for statuses that must never be overridden by a client-derived value. */
+function shouldPersistDerivedStatus(currentDbStatus: string | null | undefined): boolean {
+  return currentDbStatus == null || !FIXED_STATUSES.has(currentDbStatus as never);
+}
+
+type StatusPersistResult = { persisted: false } | { persisted: true; status: string };
+
+/**
+ * Writes the derived status to the DB if the current DB status is not a FIXED_STATUS.
+ * Toasts on write failure; never throws.
+ */
+async function persistStatusIfAllowed(
+  comparisonId: string,
+  currentDbStatus: string | null | undefined,
+  newDerivedStatus: string,
+): Promise<StatusPersistResult> {
+  if (!shouldPersistDerivedStatus(currentDbStatus)) return { persisted: false };
+  const { error } = await supabase
+    .from("invoice_line_comparisons")
+    .update({ status: newDerivedStatus })
+    .eq("id", comparisonId);
+  if (error) {
+    toast.error("Could not update line status");
+    console.error(error);
+    return { persisted: false };
+  }
+  return { persisted: true, status: newDerivedStatus };
+}
+
 function getErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "message" in error) {
     return String((error as { message?: unknown }).message ?? "Unknown error");
@@ -41,12 +77,6 @@ function getErrorMessage(error: unknown) {
   return String(error);
 }
 
-function countMissingReceivedQty(comparisons: InvoiceReviewComparison[]): number {
-  return comparisons.filter((comparison) => {
-    const invoicedQty = Number(comparison.invoiced_qty);
-    return comparison.received_qty == null && Number.isFinite(invoicedQty) && invoicedQty > 0;
-  }).length;
-}
 
 export function useInvoiceReviewActions({
   id,
@@ -71,17 +101,37 @@ export function useInvoiceReviewActions({
   const [confirmResult, setConfirmResult] = useState<ConfirmInvoiceReceiptResult | null>(null);
   const [savingMappings, setSavingMappings] = useState<Record<string, boolean>>({});
   const [reportSaving, setReportSaving] = useState(false);
-  const [receivedMissingCount, setReceivedMissingCount] = useState(0);
 
-  useEffect(() => {
-    setReceivedMissingCount(countMissingReceivedQty(comparisons));
-  }, [comparisons]);
+  // Single source of truth — derived from comparisons on every render.
+  // Eliminates the useState+useEffect+eager-update triple that could disagree.
+  const receivedMissingCount = useMemo(
+    () => countMissingReceivedQty(comparisons),
+    [comparisons],
+  );
+
+  // Phase 4: count rows auto-filled but not yet manager-confirmed
+  const receivedUnconfirmedCount = useMemo(
+    () => countUnconfirmedReceivedQty(comparisons),
+    [comparisons],
+  );
+
+  // Non-stale read for handleConfirmReceipt: comparisons prop updates each render,
+  // but the async handler captures a closure snapshot. The ref always holds current.
+  const comparisonsRef = useRef(comparisons);
+  useEffect(() => { comparisonsRef.current = comparisons; }, [comparisons]);
 
   const handleConfirmReceipt = async () => {
     if (!id || !currentRestaurantId) return;
 
-    const missingCount = countMissingReceivedQty(comparisons);
-    setReceivedMissingCount(missingCount);
+    // Phase 4: validate both missing qty AND unconfirmed qty using receivingEngine
+    const validation = validateReceivingBeforeConfirm({ comparisons: comparisonsRef.current });
+    if (!validation.valid) {
+      toast.error(validation.reason ?? "Please confirm all received quantities before posting.");
+      return;
+    }
+
+    // Guard for legacy countMissingReceivedQty (belt-and-suspenders)
+    const missingCount = countMissingReceivedQty(comparisonsRef.current);
     if (missingCount > 0) return;
 
     setConfirming(true);
@@ -91,6 +141,14 @@ export function useInvoiceReviewActions({
         p_restaurant_id: currentRestaurantId,
       });
       if (error) throw error;
+
+      // Server-side gate can return success:false (e.g. received_qty_not_confirmed)
+      // without raising a PostgREST error — handle it explicitly.
+      if (data && typeof data === "object" && "success" in data && data.success === false) {
+        const msg = (data as { message?: string }).message ?? "Receipt could not be posted.";
+        toast.error(msg);
+        return;
+      }
 
       setInvoice((prev) => {
         if (!prev) return prev;
@@ -107,10 +165,7 @@ export function useInvoiceReviewActions({
           p_purchase_history_id: id,
         })
         .then(({ error }) => {
-          if (error) console.warn(
-            "[notify_delivery_issues after confirm]",
-            error.message,
-          );
+          if (error) toast.error("Delivery issue notification failed — issues were saved but the notification could not be sent");
         });
     } catch (error: unknown) {
       toast.error(`Failed: ${getErrorMessage(error)}`);
@@ -221,10 +276,18 @@ export function useInvoiceReviewActions({
         .update({ catalog_item_id: selectedCatalogId })
         .eq("id", comparison.id);
 
+      const newDerivedStatus = analyzeInvoiceComparison(comparison).status;
+      const statusResult = await persistStatusIfAllowed(comparison.id, comparison.status, newDerivedStatus);
+
       setComparisons((prev) =>
-        prev.map((row) =>
-          row.id === comparison.id ? { ...row, catalog_item_id: selectedCatalogId } : row,
-        ),
+        prev.map((row) => {
+          if (row.id !== comparison.id) return row;
+          return {
+            ...row,
+            catalog_item_id: selectedCatalogId,
+            ...(statusResult.persisted ? { status: statusResult.status } : {}),
+          };
+        }),
       );
       setVendorMappings((prev) => {
         const index = prev.findIndex(
@@ -263,14 +326,16 @@ export function useInvoiceReviewActions({
     const numeric = trimmed === "" ? null : Number(trimmed);
     const invalidNumber = trimmed !== "" && !Number.isFinite(numeric);
     const toSave = numeric != null && Number.isFinite(numeric) ? numeric : null;
-    const { error } = await supabase
+
+    // Phase 4: user explicitly edited this row → mark it manager-confirmed
+    const { error: qtyError } = await supabase
       .from("invoice_line_comparisons")
-      .update({ received_qty: toSave })
+      .update({ received_qty: toSave, received_qty_confirmed: true })
       .eq("id", comparison.id);
 
-    if (error) {
+    if (qtyError) {
       toast.error("Could not save received quantity");
-      console.error(error);
+      console.error(qtyError);
       return;
     }
 
@@ -278,13 +343,63 @@ export function useInvoiceReviewActions({
       toast.error("Received quantity must be a number — left blank");
     }
 
-    const nextComparisons = comparisons.map((row) =>
-      row.id === comparison.id ? { ...row, received_qty: toSave } : row,
-    );
+    const newDerivedStatus = analyzeInvoiceComparison({ ...comparison, received_qty: toSave }).status;
+    const statusResult = await persistStatusIfAllowed(comparison.id, comparison.status, newDerivedStatus);
+
     setComparisons((prev) =>
-      prev.map((row) => (row.id === comparison.id ? { ...row, received_qty: toSave } : row)),
+      prev.map((row) => {
+        if (row.id !== comparison.id) return row;
+        return {
+          ...row,
+          received_qty: toSave,
+          received_qty_confirmed: true,
+          ...(statusResult.persisted ? { status: statusResult.status } : {}),
+        };
+      }),
     );
-    setReceivedMissingCount(countMissingReceivedQty(nextComparisons));
+  };
+
+  /**
+   * Phase 4: Marks ALL real invoice lines as manager-confirmed without changing quantities.
+   * Intended for the "Confirm all received quantities are correct" button.
+   */
+  const handleConfirmAllReceivedQty = async () => {
+    if (!id) return;
+
+    const realLines = comparisonsRef.current.filter((c) => {
+      const invoicedQty = Number(c.invoiced_qty ?? 0);
+      return Number.isFinite(invoicedQty) && invoicedQty > 0 && c.status !== "missing_from_invoice";
+    });
+    if (realLines.length === 0) return;
+
+    // For purchase_history docs comparisons are keyed by purchase_history_id, not invoice_id.
+    const confirmAllQuery = supabase
+      .from("invoice_line_comparisons")
+      .update({ received_qty_confirmed: true })
+      .neq("status", "missing_from_invoice");
+
+    const { error } = await (
+      reviewDocKind === "invoice"
+        ? confirmAllQuery.eq("invoice_id", id)
+        : confirmAllQuery.eq("purchase_history_id", id)
+    );
+
+    if (error) {
+      toast.error("Could not confirm received quantities");
+      console.error(error);
+      return;
+    }
+
+    setComparisons((prev) =>
+      prev.map((row) => {
+        const invoicedQty = Number(row.invoiced_qty ?? 0);
+        if (!Number.isFinite(invoicedQty) || invoicedQty <= 0) return row;
+        if (row.status === "missing_from_invoice") return row;
+        return { ...row, received_qty_confirmed: true };
+      }),
+    );
+
+    toast.success("All received quantities confirmed");
   };
 
   return {
@@ -298,5 +413,7 @@ export function useInvoiceReviewActions({
     handleSaveMapping,
     persistReceivedQty,
     receivedMissingCount,
+    receivedUnconfirmedCount,
+    handleConfirmAllReceivedQty,
   };
 }

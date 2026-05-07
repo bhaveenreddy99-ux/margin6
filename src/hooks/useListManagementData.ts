@@ -14,8 +14,6 @@ import type {
   ListCategory,
   ParGuideRow,
   PurchaseHistoryItemRow,
-  PurchaseHistoryRow,
-  PurchaseHistoryWithListName,
   RecentPurchasedItem,
 } from "@/domain/catalog/listManagementTypes";
 
@@ -24,7 +22,7 @@ type UseListManagementDataArgs = {
 };
 
 type BasicParGuideRow = Pick<ParGuideRow, "id" | "name">;
-type PurchaseHistoryLookupRow = Pick<PurchaseHistoryRow, "id" | "created_at" | "vendor_name">;
+type PurchaseHistoryLookupRow = { id: string; created_at: string; vendor_name: string | null };
 
 export function useListManagementData({ restaurantId }: UseListManagementDataArgs) {
   const [lists, setLists] = useState<InventoryListRow[]>([]);
@@ -37,8 +35,6 @@ export function useListManagementData({ restaurantId }: UseListManagementDataArg
   const [itemCategoryMaps, setItemCategoryMaps] = useState<ItemCategoryMap[]>([]);
   const [issues, setIssues] = useState(buildIssueItems([]));
   const [linkedParGuide, setLinkedParGuide] = useState<LinkedParGuide | null>(null);
-  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseHistoryWithListName[]>([]);
-  const [phItems, setPhItems] = useState<Record<string, PurchaseHistoryItemRow[]>>({});
   const [recentPurchasedItems, setRecentPurchasedItems] = useState<RecentPurchasedItem[]>([]);
 
   const refreshLists = useCallback(async () => {
@@ -135,34 +131,6 @@ export function useListManagementData({ restaurantId }: UseListManagementDataArg
         setLinkedParGuide(null);
       }
 
-      const { data: purchaseHistoryRows } = (await supabase
-        .from("purchase_history")
-        .select("*, inventory_lists(name)")
-        .eq("restaurant_id", restaurantId)
-        .eq("inventory_list_id", list.id)
-        .order("created_at", { ascending: false })
-        .limit(10)) as unknown as {
-        data: PurchaseHistoryWithListName[] | null;
-      };
-
-      if (purchaseHistoryRows) {
-        setPurchaseHistory(purchaseHistoryRows);
-        const nextPurchaseHistoryItems: Record<string, PurchaseHistoryItemRow[]> = {};
-        for (const purchase of purchaseHistoryRows) {
-          const { data: items } = (await supabase
-            .from("purchase_history_items")
-            .select("*")
-            .eq("purchase_history_id", purchase.id)) as unknown as {
-            data: PurchaseHistoryItemRow[] | null;
-          };
-          if (items) nextPurchaseHistoryItems[purchase.id] = items;
-        }
-        setPhItems(nextPurchaseHistoryItems);
-      } else {
-        setPurchaseHistory([]);
-        setPhItems({});
-      }
-
       const { data: recentPurchaseHistoryRows } = (await supabase
         .from("purchase_history")
         .select("id, created_at, vendor_name")
@@ -211,8 +179,6 @@ export function useListManagementData({ restaurantId }: UseListManagementDataArg
     itemCategoryMaps,
     issues,
     linkedParGuide,
-    purchaseHistory,
-    phItems,
     recentPurchasedItems,
     setCatalogItems,
     setListCategories,

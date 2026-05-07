@@ -6,17 +6,6 @@ import {
   FileDown, CalendarClock, Users, TrendingUp, Building2, Rocket, Award,
   MapPin, Eye
 } from "lucide-react";
-import { motion } from "framer-motion";
-
-/* ── animation helpers ── */
-const fadeUp = (delay = 0) => ({
-  initial: { opacity: 0, y: 24 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true, margin: "-60px" },
-  transition: { duration: 0.5, delay },
-});
-
-const stagger = (i: number) => fadeUp(0.08 * i);
 
 /* ── data ── */
 const trustBullets = [
@@ -84,9 +73,6 @@ const smartOrderPreview = [
 const riskColor = (r: string) =>
   r === "red" ? "bg-risk-red" : r === "yellow" ? "bg-risk-yellow" : "bg-risk-green";
 
-const riskText = (r: string) =>
-  r === "red" ? "text-risk-red" : r === "yellow" ? "text-risk-yellow" : "text-risk-green";
-
 /* ── COMPONENT ── */
 export default function LandingPage() {
   return (
@@ -118,7 +104,7 @@ export default function LandingPage() {
       {/* ═══ HERO ═══ */}
       <section className="landing-section overflow-hidden">
         <div className="container">
-          <motion.div {...fadeUp()} className="mx-auto max-w-3xl text-center">
+          <div className="mx-auto max-w-3xl text-center">
             <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.05] text-foreground">
               Turn inventory into{" "}
               <span className="text-gradient-orange">profit.</span>
@@ -146,13 +132,10 @@ export default function LandingPage() {
                 </span>
               ))}
             </div>
-          </motion.div>
+          </div>
 
           {/* Dashboard Mockup */}
-          <motion.div
-            {...fadeUp(0.2)}
-            className="mt-16 mx-auto max-w-5xl rounded-2xl border border-border/40 bg-white dashboard-mockup-shadow overflow-hidden"
-          >
+          <div className="mt-16 mx-auto max-w-5xl rounded-2xl border border-border/40 bg-white dashboard-mockup-shadow overflow-hidden">
             <div className="bg-foreground/[0.03] border-b border-border/30 px-5 py-3 flex items-center gap-2">
               <div className="flex gap-1.5">
                 <div className="h-3 w-3 rounded-full bg-risk-red/60" />
@@ -177,12 +160,8 @@ export default function LandingPage() {
                         <span className="font-semibold text-foreground">{r.count}</span>
                       </div>
                       <div className="h-2 rounded-full bg-muted/40 overflow-hidden">
-                        <motion.div
-                          className={`h-full rounded-full ${r.color}`}
-                          initial={{ width: 0 }}
-                          whileInView={{ width: r.w.replace("w-[", "").replace("]", "") }}
-                          viewport={{ once: true }}
-                          transition={{ duration: 0.8, delay: 0.3 }}
+                        <div
+                          className={`h-full rounded-full ${r.color} ${r.w}`}
                         />
                       </div>
                     </div>
@@ -194,17 +173,13 @@ export default function LandingPage() {
               <div className="rounded-xl border border-border/40 p-4 bg-white">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Location Comparison</p>
                 <div className="space-y-2">
-                  {locationBars.map((loc, i) => (
+                  {locationBars.map((loc) => (
                     <div key={loc.name} className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground w-16 truncate">{loc.name}</span>
                       <div className="flex-1 h-5 rounded bg-muted/30 overflow-hidden">
-                        <motion.div
+                        <div
                           className="h-full rounded"
-                          style={{ backgroundColor: loc.color }}
-                          initial={{ width: 0 }}
-                          whileInView={{ width: `${loc.value}%` }}
-                          viewport={{ once: true }}
-                          transition={{ duration: 0.6, delay: 0.3 + i * 0.08 }}
+                          style={{ backgroundColor: loc.color, width: `${loc.value}%` }}
                         />
                       </div>
                       <span className="text-xs font-semibold text-foreground w-8 text-right">{loc.value}%</span>
@@ -234,24 +209,23 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
         </div>
       </section>
 
       {/* ═══ SECTION 1 – BUILT FOR MODERN RESTAURANTS ═══ */}
       <section className="landing-section-alt">
         <div className="container">
-          <motion.div {...fadeUp()} className="text-center mb-14">
+          <div className="text-center mb-14">
             <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Built for modern restaurants</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
               From single store to 50+ locations — scale with confidence
             </h2>
-          </motion.div>
+          </div>
           <div className="grid gap-6 md:grid-cols-3 max-w-5xl mx-auto">
-            {coreFeatures.map((f, i) => (
-              <motion.div
+            {coreFeatures.map((f) => (
+              <div
                 key={f.title}
-                {...stagger(i)}
                 className="group rounded-2xl border border-border/50 bg-white p-7 hover:shadow-landing transition-all duration-300"
               >
                 <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-orange/10 group-hover:bg-gradient-orange group-hover:text-white transition-all duration-300">
@@ -259,7 +233,7 @@ export default function LandingPage() {
                 </div>
                 <h3 className="mb-2 text-lg font-bold text-foreground">{f.title}</h3>
                 <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -268,22 +242,22 @@ export default function LandingPage() {
       {/* ═══ SECTION 2 – HOW IT WORKS ═══ */}
       <section className="landing-section">
         <div className="container">
-          <motion.div {...fadeUp()} className="text-center mb-14">
+          <div className="text-center mb-14">
             <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">How it works</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
               Simple for managers. Powerful for owners.
             </h2>
-          </motion.div>
+          </div>
           <div className="grid gap-8 md:grid-cols-3 max-w-4xl mx-auto">
-            {steps.map((s, i) => (
-              <motion.div key={s.num} {...stagger(i)} className="text-center">
+            {steps.map((s) => (
+              <div key={s.num} className="text-center">
                 <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-orange shadow-orange text-white">
                   <s.icon className="h-7 w-7" />
                 </div>
                 <span className="text-xs font-bold text-gradient-orange uppercase tracking-widest">Step {s.num}</span>
                 <h3 className="mt-2 text-lg font-bold text-foreground">{s.title}</h3>
                 <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">{s.desc}</p>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -292,28 +266,27 @@ export default function LandingPage() {
       {/* ═══ SECTION 3 – MULTI-LOCATION DASHBOARD ═══ */}
       <section className="landing-navy py-20 lg:py-28">
         <div className="container">
-          <motion.div {...fadeUp()} className="text-center mb-14">
+          <div className="text-center mb-14">
             <p className="text-sm font-semibold text-[hsl(25,95%,53%)] uppercase tracking-wider mb-3">Multi-Location Intelligence</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
               See every store. In one place.
             </h2>
-          </motion.div>
+          </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 max-w-5xl mx-auto">
             {[
               { icon: BarChart3, title: "Inventory Value by Location", desc: "Compare stock value across every store." },
               { icon: AlertTriangle, title: "Risk Heatmap", desc: "Spot critical shortages across all locations instantly." },
               { icon: TrendingUp, title: "Store Rankings", desc: "See which locations are outperforming and which need attention." },
               { icon: Eye, title: "Waste Trends", desc: "Track waste patterns over time per location." },
-            ].map((card, i) => (
-              <motion.div
+            ].map((card) => (
+              <div
                 key={card.title}
-                {...stagger(i)}
                 className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:bg-white/10 transition-colors duration-300"
               >
                 <card.icon className="h-8 w-8 text-[hsl(25,95%,53%)] mb-4" />
                 <h3 className="font-bold text-white text-sm mb-1.5">{card.title}</h3>
                 <p className="text-xs text-white/60 leading-relaxed">{card.desc}</p>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -322,17 +295,16 @@ export default function LandingPage() {
       {/* ═══ SECTION 4 – FEATURES THAT DRIVE PROFIT ═══ */}
       <section className="landing-section">
         <div className="container">
-          <motion.div {...fadeUp()} className="text-center mb-14">
+          <div className="text-center mb-14">
             <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Features</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
               Features that drive profit
             </h2>
-          </motion.div>
+          </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
-            {featureGrid.map((f, i) => (
-              <motion.div
+            {featureGrid.map((f) => (
+              <div
                 key={f.title}
-                {...stagger(i)}
                 className="flex items-start gap-4 rounded-2xl border border-border/50 bg-white p-5 hover:shadow-landing transition-all duration-300"
               >
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-orange/10">
@@ -342,7 +314,7 @@ export default function LandingPage() {
                   <h3 className="font-bold text-foreground text-[15px]">{f.title}</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">{f.desc}</p>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -351,7 +323,7 @@ export default function LandingPage() {
       {/* ═══ SECTION 5 – BUILT FOR GROWTH ═══ */}
       <section className="landing-section-alt">
         <div className="container">
-          <motion.div {...fadeUp()} className="mx-auto max-w-2xl text-center">
+          <div className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Built for growth</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
               Designed for restaurants that are growing.
@@ -359,19 +331,18 @@ export default function LandingPage() {
             <p className="mt-5 text-base text-muted-foreground leading-relaxed">
               Whether you operate one store or manage a growing group, RestaurantIQ gives you the control, automation, and intelligence needed to scale efficiently.
             </p>
-          </motion.div>
+          </div>
           <div className="mt-12 flex flex-wrap justify-center gap-6">
-            {growthCallouts.map((c, i) => (
-              <motion.div
+            {growthCallouts.map((c) => (
+              <div
                 key={c.label}
-                {...stagger(i)}
                 className="flex items-center gap-3 rounded-2xl border border-border/50 bg-white px-6 py-4 shadow-landing"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-orange text-white">
                   <c.icon className="h-5 w-5" />
                 </div>
                 <span className="font-bold text-foreground">{c.label}</span>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -380,7 +351,7 @@ export default function LandingPage() {
       {/* ═══ FINAL CTA ═══ */}
       <section className="landing-navy py-20 lg:py-28">
         <div className="container">
-          <motion.div {...fadeUp()} className="mx-auto max-w-2xl text-center">
+          <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
               Ready to simplify your restaurant operations?
             </h2>
@@ -399,7 +370,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
             </div>
-          </motion.div>
+          </div>
         </div>
       </section>
 

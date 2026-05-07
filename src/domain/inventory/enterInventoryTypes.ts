@@ -2,8 +2,18 @@ import type { Database } from "@/integrations/supabase/types";
 
 export type InventoryListRow = Database["public"]["Tables"]["inventory_lists"]["Row"];
 export type InventorySessionRow = Database["public"]["Tables"]["inventory_sessions"]["Row"];
+export type InventorySessionItemZoneRow =
+  Database["public"]["Tables"]["inventory_session_item_zones"]["Row"];
+
 export type InventorySessionItemRow = Database["public"]["Tables"]["inventory_session_items"]["Row"] & {
   catalog_item_id?: string | null;
+  restaurant_id?: string | null;
+  display_order?: number | null;
+  product_number?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  /** Present when session items are loaded with an `inventory_session_item_zones` embed. */
+  inventory_session_item_zones?: InventorySessionItemZoneRow[] | null;
 };
 export type InventorySessionItemInsert =
   Database["public"]["Tables"]["inventory_session_items"]["Insert"];
@@ -58,6 +68,9 @@ export type SessionStats = Record<
     totalValue: number;
     counted: number;
     total: number;
+    itemsWithCost: number;
+    itemsWithoutCost: number;
+    totalItems: number;
   }
 >;
 

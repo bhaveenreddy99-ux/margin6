@@ -451,6 +451,32 @@ export async function duplicateInventorySession(args: {
   };
 }
 
+// Duplicate = same vendor_sku (non-empty). Same name with different item numbers is allowed.
+// Falls back to name dedup only when both rows have no vendor_sku.
+function findDuplicateItemNames(items: { item_name: string; vendor_sku: string | null }[]): string[] {
+  const seenSkus = new Set<string>();
+  const seenNames = new Set<string>();
+  const dupeNames: string[] = [];
+  for (const item of items) {
+    const sku = (item.vendor_sku ?? "").trim().toLowerCase();
+    const name = item.item_name.trim().toLowerCase();
+    if (sku) {
+      if (seenSkus.has(sku)) {
+        dupeNames.push(item.item_name);
+      } else {
+        seenSkus.add(sku);
+      }
+    } else {
+      if (seenNames.has(name)) {
+        dupeNames.push(item.item_name);
+      } else {
+        seenNames.add(name);
+      }
+    }
+  }
+  return dupeNames;
+}
+
 export async function approveInventorySession(args: {
   supabase: AppSupabase;
   sessionId: string;
@@ -495,10 +521,43 @@ export async function approveInventorySession(args: {
     };
   }
 
+  const { data: sessionItems, error: sessionItemsError } = (await args.supabase
+    .from("inventory_session_items")
+    .select("id, item_name, vendor_sku")
+    .eq("session_id", args.sessionId)) as unknown as {
+    data: Array<{ id: string; item_name: string; vendor_sku: string | null }> | null;
+    error: SessionError;
+  };
+
+  if (sessionItemsError) {
+    return {
+      ok: false as const,
+      errorMessage: sessionItemsError.message,
+      smartOrderRunId: null,
+      smartOrderErrorMessage: null,
+      catalogLinksStripped: false,
+    };
+  }
+
+  const duplicateNames = findDuplicateItemNames(sessionItems ?? []);
+  if (duplicateNames.length > 0) {
+    const count = duplicateNames.length;
+    const preview = duplicateNames.slice(0, 3).join(", ");
+    const suffix = duplicateNames.length > 3 ? ` and ${duplicateNames.length - 3} more` : "";
+    return {
+      ok: false as const,
+      errorMessage: `Cannot approve: ${count} item name${count === 1 ? "" : "s"} appear on multiple rows (${preview}${suffix}). Remove the duplicate lines before approving.`,
+      smartOrderRunId: null,
+      smartOrderErrorMessage: null,
+      catalogLinksStripped: false,
+    };
+  }
+
   const preparedSmartOrder = await prepareSmartOrderFromSession({
     supabase: args.supabase,
     sessionId: args.sessionId,
     restaurantId: args.restaurantId,
+    locationId: sessionResult.data.location_id ?? null,
     riskThresholds: args.riskThresholds,
   });
 

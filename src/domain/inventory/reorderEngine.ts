@@ -1,22 +1,33 @@
 /**
  * Pure reorder, stock risk, and waste math for inventory lines.
- * Reorder qty uses {@link computeOrderQty} (same as Smart Order). Risk uses {@link getRisk}
+ * Reorder qty uses {@link computeOrderQty} (same as Smart Order). Risk uses {@link computeRiskLevel}
  * with restaurant thresholds (same as Enter Inventory / Smart Order).
  */
 
 import {
-  computeOrderQty,
-  getRisk,
+  computeOrderQtyCases,
+  computeRiskLevel,
   type RiskLevel,
   type RiskThresholds,
 } from "@/lib/inventory-utils";
+import {
+  computeLineOverstockValue,
+  computeLineReorderValue,
+} from "@/domain/inventory/casePlanningEngine";
 
 export type InventoryItemInput = {
   current_stock: number | null;
   par_level: number | null;
   unit_cost: number | null;
+  /**
+   * @deprecated Not used by computeInventoryItem — quantities are in CASES (canonical model).
+   * Retained in the type so existing call-sites that spread session item rows don't break.
+   */
   unit?: string | null;
-  /** Session / catalog pack hint — must match Smart Order for identical suggested qty. */
+  /**
+   * @deprecated Not used by computeInventoryItem — quantities are in CASES (canonical model).
+   * Retained in the type so existing call-sites that spread session item rows don't break.
+   */
   pack_size?: string | null;
 };
 
@@ -50,31 +61,28 @@ export function computeStockRatio(item: InventoryItemInput): number {
 /**
  * Dollar value of stock above PAR (overage × unit cost).
  * If current ≤ par or `unit_cost` missing → 0.
+ * Delegates to computeLineOverstockValue for consistent rounding and null-cost handling.
  */
 export function computeWasteValue(item: InventoryItemInput): number {
-  const cur = finiteOrZero(item.current_stock);
-  const par = finiteOrZero(item.par_level);
-  const cost = finiteOrZero(item.unit_cost);
-  if (cur <= par) return 0;
-  return (cur - par) * cost;
+  return computeLineOverstockValue({
+    currentStockCases: item.current_stock,
+    parLevelCases: item.par_level,
+    unitCostPerCase: item.unit_cost,
+  }).dollars;
 }
 
 /**
- * Full computed row: suggested order matches Smart Order (`computeOrderQty`);
- * risk matches configurable thresholds via `getRisk`.
+ * Full computed row: suggested order uses computeOrderQtyCases (canonical case-based model);
+ * risk matches configurable thresholds via `computeRiskLevel`.
+ * Inputs (current_stock, par_level) must be in CASES.
  */
 export function computeInventoryItem(
   item: InventoryItemInput,
   thresholds?: RiskThresholds,
 ): InventoryItemComputed {
-  const suggestedOrder = computeOrderQty(
-    item.current_stock,
-    item.par_level,
-    item.unit,
-    item.pack_size ?? null,
-  );
+  const suggestedOrder = computeOrderQtyCases(item.current_stock, item.par_level);
   const ratio = computeStockRatio(item);
-  const riskLevel = getRisk(item.current_stock, item.par_level, thresholds).level;
+  const riskLevel = computeRiskLevel(item.current_stock, item.par_level, thresholds);
   return {
     suggestedOrder,
     ratio,
@@ -114,7 +122,12 @@ export function computeReorderSummary(
 
   for (const item of items) {
     const c = computeInventoryItem(item, thresholds);
-    totalReorderValue += c.suggestedOrder * finiteOrZero(item.unit_cost);
+    // Route all dollar math through the canonical engine for consistent rounding
+    totalReorderValue += computeLineReorderValue({
+      currentStockCases: item.current_stock,
+      parLevelCases: item.par_level,
+      unitCostPerCase: item.unit_cost,
+    }).dollars;
     totalSuggestedUnits += c.suggestedOrder;
     totalWasteValue += c.wasteValue;
     if (c.riskLevel === "RED") redCount += 1;

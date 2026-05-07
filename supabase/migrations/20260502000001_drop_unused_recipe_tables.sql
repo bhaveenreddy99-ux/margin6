@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS recipe_ingredients CASCADE;
+DROP TABLE IF EXISTS recipes CASCADE;

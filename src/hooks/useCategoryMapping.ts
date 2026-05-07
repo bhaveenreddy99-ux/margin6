@@ -14,11 +14,35 @@ export interface ItemCategoryEntry {
   item_sort_order: number;
 }
 
+export type CategoryMappingResult = {
+  byId: Record<string, ItemCategoryEntry>;
+  byName: Record<string, ItemCategoryEntry>;
+};
+
 interface UseCategoryMappingResult {
   categories: MappedCategory[];
-  itemCategoryMap: Record<string, ItemCategoryEntry>; // keyed by item_name
+  categoryMapping: CategoryMappingResult;
   hasMappings: boolean;
   loading: boolean;
+}
+
+/**
+ * Resolves list category row for a line: prefer catalog_item_id, then item_name.
+ */
+export function resolveItemCategoryEntry(
+  item: { catalog_item_id?: string | null; item_name: string | null | undefined },
+  categoryMapping: CategoryMappingResult,
+  hasMappings: boolean,
+): ItemCategoryEntry | null {
+  if (!hasMappings) return null;
+  const id = item.catalog_item_id != null && String(item.catalog_item_id).trim() !== "" ? String(item.catalog_item_id).trim() : null;
+  if (id && categoryMapping.byId[id]) {
+    return categoryMapping.byId[id];
+  }
+  if (item.item_name && categoryMapping.byName[item.item_name]) {
+    return categoryMapping.byName[item.item_name];
+  }
+  return null;
 }
 
 /** Align UI mode and DB `active_category_mode` values with list_category_sets.set_type */
@@ -36,14 +60,14 @@ function resolveSetType(mode: string | null | undefined): "user_manual" | "custo
  */
 export function useCategoryMapping(listId: string | null | undefined, modeOverride?: string | null): UseCategoryMappingResult {
   const [categories, setCategories] = useState<MappedCategory[]>([]);
-  const [itemCategoryMap, setItemCategoryMap] = useState<Record<string, ItemCategoryEntry>>({});
+  const [categoryMapping, setCategoryMapping] = useState<CategoryMappingResult>({ byId: {}, byName: {} });
   const [hasMappings, setHasMappings] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!listId) {
       setCategories([]);
-      setItemCategoryMap({});
+      setCategoryMapping({ byId: {}, byName: {} });
       setHasMappings(false);
       return;
     }
@@ -69,7 +93,7 @@ export function useCategoryMapping(listId: string | null | undefined, modeOverri
       const maps = allMapsForList || [];
       if (maps.length === 0) {
         setCategories([]);
-        setItemCategoryMap({});
+        setCategoryMapping({ byId: {}, byName: {} });
         setHasMappings(false);
         setLoading(false);
         return;
@@ -119,21 +143,27 @@ export function useCategoryMapping(listId: string | null | undefined, modeOverri
         return aPref - bPref;
       });
 
-      const nameMap: Record<string, ItemCategoryEntry> = {};
+      const byName: Record<string, ItemCategoryEntry> = {};
+      const byId: Record<string, ItemCategoryEntry> = {};
       sortedMaps.forEach((m) => {
         const itemName = catalogIdToName[m.catalog_item_id];
         if (itemName) {
-          nameMap[itemName] = {
+          const entry: ItemCategoryEntry = {
             catalog_item_id: m.catalog_item_id,
             category_id: m.category_id,
             category_name: m.category_id ? (catIdToName[m.category_id] || "Uncategorized") : "Uncategorized",
             item_sort_order: m.item_sort_order,
           };
+          byName[itemName] = entry;
+          const mapId = m.catalog_item_id != null && String(m.catalog_item_id).trim() !== "" ? String(m.catalog_item_id).trim() : null;
+          if (mapId) {
+            byId[mapId] = entry;
+          }
         }
       });
 
       setCategories(cats);
-      setItemCategoryMap(nameMap);
+      setCategoryMapping({ byId, byName });
       setHasMappings(true);
       setLoading(false);
     };
@@ -144,5 +174,5 @@ export function useCategoryMapping(listId: string | null | undefined, modeOverri
     };
   }, [listId, modeOverride]);
 
-  return { categories, itemCategoryMap, hasMappings, loading };
+  return { categories, categoryMapping, hasMappings, loading };
 }

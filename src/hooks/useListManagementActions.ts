@@ -28,6 +28,7 @@ import type {
   ImportTemplateRow,
   InventoryListRow,
   ItemCategoryMap,
+  ItemCategoryMapInsert,
   ItemEditDraft,
   ListCategory,
   ListCategoryInsert,
@@ -270,6 +271,8 @@ export function useListManagementActions({
         restaurant_id: restaurantId,
         name: `${list.name} (Copy)`,
         created_by: userId,
+        active_category_mode: list.active_category_mode,
+        location_id: list.location_id ?? null,
       })
       .select()
       .single()) as unknown as {
@@ -282,19 +285,125 @@ export function useListManagementActions({
       return;
     }
 
-    const { data: items } = (await supabase
+    const catalogIdMap: Record<string, string> = {};
+
+    const { data: sourceItems } = (await supabase
       .from("inventory_catalog_items")
       .select("*")
       .eq("inventory_list_id", list.id)) as unknown as {
       data: CatalogItem[] | null;
     };
 
-    if (items && items.length > 0) {
-      const copies = items.map(({ id: _id, created_at: _createdAt, updated_at: _updatedAt, ...rest }) => ({
+    const sortedSourceItems = [...(sourceItems ?? [])].sort((a, b) => {
+      const order = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      return order !== 0 ? order : (a.item_name || "").localeCompare(b.item_name || "");
+    });
+
+    if (sortedSourceItems.length > 0) {
+      const rows = sortedSourceItems.map(({ id: _id, created_at: _c, updated_at: _u, ...rest }) => ({
         ...rest,
         inventory_list_id: newList.id,
       }));
-      await supabase.from("inventory_catalog_items").insert(copies);
+      const { data: insertedCatalog, error: catalogError } = (await supabase
+        .from("inventory_catalog_items")
+        .insert(rows)
+        .select("id")) as unknown as {
+        data: Array<{ id: string }> | null;
+        error: { message?: string } | null;
+      };
+      if (catalogError || !insertedCatalog || insertedCatalog.length !== sortedSourceItems.length) {
+        toast.error(catalogError?.message ?? "Failed to duplicate catalog items");
+        return;
+      }
+      sortedSourceItems.forEach((old, idx) => {
+        catalogIdMap[old.id] = insertedCatalog[idx].id;
+      });
+    }
+
+    const setIdMap: Record<string, string> = {};
+    const { data: sourceSets } = (await supabase
+      .from("list_category_sets")
+      .select("*")
+      .eq("list_id", list.id)) as unknown as { data: CategorySet[] | null };
+
+    for (const s of sourceSets ?? []) {
+      const { data: newSet, error: setError } = (await supabase
+        .from("list_category_sets")
+        .insert({ list_id: newList.id, set_type: s.set_type })
+        .select("id")
+        .single()) as unknown as {
+        data: { id: string } | null;
+        error: { message?: string } | null;
+      };
+      if (setError || !newSet) {
+        toast.error(setError?.message ?? "Failed to duplicate category sets");
+        return;
+      }
+      setIdMap[s.id] = newSet.id;
+    }
+
+    const catIdMap: Record<string, string> = {};
+    const { data: sourceCats } = (await supabase
+      .from("list_categories")
+      .select("*")
+      .eq("list_id", list.id)
+      .order("sort_order", { ascending: true })) as unknown as { data: ListCategory[] | null };
+
+    for (const c of sourceCats ?? []) {
+      const newSetId = c.category_set_id ? setIdMap[c.category_set_id] ?? null : null;
+      const { data: newCat, error: catError } = (await supabase
+        .from("list_categories")
+        .insert({
+          list_id: newList.id,
+          name: c.name,
+          sort_order: c.sort_order,
+          category_set_id: newSetId,
+        })
+        .select("id")
+        .single()) as unknown as {
+        data: { id: string } | null;
+        error: { message?: string } | null;
+      };
+      if (catError || !newCat) {
+        toast.error(catError?.message ?? "Failed to duplicate shelves");
+        return;
+      }
+      catIdMap[c.id] = newCat.id;
+    }
+
+    const { data: sourceMaps } = (await supabase
+      .from("list_item_category_map")
+      .select("*")
+      .eq("list_id", list.id)) as unknown as { data: ItemCategoryMap[] | null };
+
+    const newMapRows: Array<{
+      list_id: string;
+      catalog_item_id: string;
+      category_set_id: string;
+      category_id: string | null;
+      item_sort_order: number;
+    }> = [];
+
+    for (const m of sourceMaps ?? []) {
+      const newCatalogId = catalogIdMap[m.catalog_item_id];
+      const newSetId = setIdMap[m.category_set_id];
+      if (!newCatalogId || !newSetId) continue;
+      const newCatId = m.category_id ? catIdMap[m.category_id] ?? null : null;
+      newMapRows.push({
+        list_id: newList.id,
+        catalog_item_id: newCatalogId,
+        category_set_id: newSetId,
+        category_id: newCatId,
+        item_sort_order: m.item_sort_order,
+      });
+    }
+
+    if (newMapRows.length > 0) {
+      const { error: mapError } = await supabase.from("list_item_category_map").insert(newMapRows);
+      if (mapError) {
+        toast.error(mapError.message);
+        return;
+      }
     }
 
     toast.success("List duplicated");
@@ -316,34 +425,84 @@ export function useListManagementActions({
     await refreshLists();
   };
 
-  const handleAddItemToList = async () => {
-    if (!selectedList || !restaurantId || !newItem.item_name.trim()) return;
+  const handleAddItemToList = async (mode: "close" | "add_another" = "close"): Promise<boolean> => {
+    if (!selectedList || !restaurantId || !newItem.item_name.trim()) return false;
+
+    const newSku = newItem.vendor_sku.trim().toLowerCase();
+    const isDuplicate = newSku
+      ? catalogItems.some((item) => (item.vendor_sku || "").trim().toLowerCase() === newSku)
+      : false;
+    if (isDuplicate) {
+      toast.error(`An item with item number "${newItem.vendor_sku.trim()}" already exists in this list`);
+      return false;
+    }
 
     const maxOrder =
       catalogItems.length > 0
         ? Math.max(...catalogItems.map((item) => item.sort_order || 0)) + 1
         : 0;
 
-    const { error } = await supabase.from("inventory_catalog_items").insert({
-      restaurant_id: restaurantId,
-      inventory_list_id: selectedList.id,
-      item_name: newItem.item_name.trim(),
-      category: newItem.category || null,
-      unit: newItem.unit || null,
-      pack_size: newItem.pack_size || null,
-      vendor_sku: newItem.vendor_sku || null,
-      vendor_name: newItem.vendor_name || null,
-      default_unit_cost: newItem.default_unit_cost || null,
-      sort_order: maxOrder,
-    });
+    const parParsed =
+      newItem.par_level.trim() !== "" ? Number(newItem.par_level) : null;
+    const defaultParLevel =
+      parParsed != null && !Number.isNaN(parParsed) ? parParsed : null;
 
-    if (error) {
-      toast.error(error.message);
-      return;
+    const { data: newRow, error } = await supabase
+      .from("inventory_catalog_items")
+      .insert({
+        restaurant_id: restaurantId,
+        inventory_list_id: selectedList.id,
+        item_name: newItem.item_name.trim(),
+        category: newItem.category || null,
+        unit: newItem.unit || null,
+        pack_size: newItem.pack_size || null,
+        vendor_sku: newItem.vendor_sku || null,
+        vendor_name: newItem.vendor_name || null,
+        default_unit_cost: newItem.default_unit_cost || null,
+        cost_unit: "case",
+        default_par_level: defaultParLevel,
+        sort_order: maxOrder,
+      })
+      .select("id")
+      .single();
+
+    if (error || !newRow) {
+      toast.error(error?.message ?? "Failed to add item");
+      return false;
     }
 
-    toast.success("Item added");
-    setNewItem({
+    if (newItem.category?.trim()) {
+      const { data: listCats } = await supabase
+        .from("list_categories")
+        .select("id, name, category_set_id")
+        .eq("list_id", selectedList.id);
+      const match = listCats?.find(
+        (c) => c.name.trim().toLowerCase() === newItem.category.trim().toLowerCase(),
+      );
+      if (match?.category_set_id) {
+        const { data: ordRows } = await supabase
+          .from("list_item_category_map")
+          .select("item_sort_order")
+          .eq("list_id", selectedList.id)
+          .eq("category_id", match.id);
+        const nextOrder =
+          ordRows && ordRows.length > 0
+            ? Math.max(...ordRows.map((r) => r.item_sort_order), 0) + 1
+            : 0;
+        const { error: mapErr } = await supabase.from("list_item_category_map").insert({
+          list_id: selectedList.id,
+          catalog_item_id: newRow.id,
+          category_set_id: match.category_set_id,
+          category_id: match.id,
+          item_sort_order: nextOrder,
+        });
+        if (mapErr) {
+          console.error(mapErr);
+        }
+      }
+    }
+
+    const emptyDraft: NewItemDraft = {
       item_name: "",
       category: "",
       unit: "",
@@ -351,16 +510,40 @@ export function useListManagementActions({
       vendor_sku: "",
       vendor_name: "",
       default_unit_cost: 0,
-    });
+      par_level: "",
+    };
+
+    if (mode === "add_another") {
+      setNewItem({ ...emptyDraft, category: newItem.category });
+      await loadListDetail(selectedList);
+      return true;
+    }
+
+    toast.success("Item added");
+    setNewItem(emptyDraft);
     setAddItemOpen(false);
     await loadListDetail(selectedList);
+    return true;
   };
 
   const handleSaveInlineEdit = async (itemId: string) => {
     setSaveStatus("saving");
+    if (editValues.vendor_sku !== undefined && editValues.vendor_sku) {
+      const newSku = (editValues.vendor_sku ?? "").trim().toLowerCase();
+      if (newSku) {
+        const conflict = catalogItems.some(
+          (item) => item.id !== itemId && (item.vendor_sku || "").trim().toLowerCase() === newSku,
+        );
+        if (conflict) {
+          toast.error(`An item with item number "${editValues.vendor_sku}" already exists in this list`);
+          setSaveStatus("idle");
+          return;
+        }
+      }
+    }
     const { error } = await supabase
       .from("inventory_catalog_items")
-      .update(editValues)
+      .update({ ...editValues, cost_unit: "case" })
       .eq("id", itemId);
 
     if (error) {
@@ -394,6 +577,7 @@ export function useListManagementActions({
       vendor_sku: item.vendor_sku,
       vendor_name: item.vendor_name,
       default_unit_cost: item.default_unit_cost,
+      cost_unit: "case",
       sort_order: maxOrder,
     });
 
@@ -420,6 +604,20 @@ export function useListManagementActions({
   const handleSaveEditSheet = async () => {
     if (!editSheetItem) return;
 
+    if (editSheetValues.vendor_sku) {
+      const newSku = editSheetValues.vendor_sku.trim().toLowerCase();
+      if (newSku) {
+        const conflict = catalogItems.some(
+          (item) =>
+            item.id !== editSheetItem.id && (item.vendor_sku || "").trim().toLowerCase() === newSku,
+        );
+        if (conflict) {
+          toast.error(`An item with item number "${editSheetValues.vendor_sku}" already exists in this list`);
+          return;
+        }
+      }
+    }
+
     setEditSheetSaving(true);
     const { error } = await supabase
       .from("inventory_catalog_items")
@@ -427,6 +625,7 @@ export function useListManagementActions({
         item_name: editSheetValues.item_name,
         vendor_sku: editSheetValues.vendor_sku || null,
         default_unit_cost: editSheetValues.default_unit_cost,
+        cost_unit: "case",
         unit: editSheetValues.unit || null,
         pack_size: editSheetValues.pack_size || null,
       })
@@ -775,53 +974,65 @@ export function useListManagementActions({
     if (refreshedMaps) setItemCategoryMaps(refreshedMaps);
   };
 
-  const handleSaveAICategories = async () => {
-    if (!selectedList) return;
+  const handleSaveAICategories = async (): Promise<boolean> => {
+    if (!selectedList) return false;
 
     setSaveStatus("saving");
-    const set = await getOrCreateCategorySet(selectedList.id, "custom_ai");
-    await supabase.from("list_item_category_map").delete().eq("category_set_id", set.id);
-    await supabase.from("list_categories").delete().eq("category_set_id", set.id);
+    try {
+      const set = await getOrCreateCategorySet(selectedList.id, "custom_ai");
+      await supabase.from("list_item_category_map").delete().eq("category_set_id", set.id);
+      await supabase.from("list_categories").delete().eq("category_set_id", set.id);
 
-    const aiGroups = new Set<string>();
-    catalogItems.forEach((item) => {
-      aiGroups.add(getAICategory(item.item_name));
-    });
+      const aiGroups = new Set<string>();
+      catalogItems.forEach((item) => {
+        aiGroups.add(getAICategory(item.item_name));
+      });
 
-    const categoryMap: Record<string, string> = {};
-    let sortIndex = 0;
-    for (const categoryName of aiGroups) {
-      const { data } = (await supabase
-        .from("list_categories")
-        .insert({
-          list_id: selectedList.id,
-          name: categoryName,
-          sort_order: sortIndex++,
-          category_set_id: set.id,
-        })
-        .select()
-        .single()) as unknown as {
-        data: ListCategory | null;
-      };
-      if (data) categoryMap[categoryName] = data.id;
+      const categoryMap: Record<string, string> = {};
+      let sortIndex = 0;
+      for (const categoryName of aiGroups) {
+        const { data } = (await supabase
+          .from("list_categories")
+          .insert({
+            list_id: selectedList.id,
+            name: categoryName,
+            sort_order: sortIndex++,
+            category_set_id: set.id,
+          })
+          .select()
+          .single()) as unknown as {
+          data: ListCategory | null;
+        };
+        if (data) categoryMap[categoryName] = data.id;
+      }
+
+      const mappings = catalogItems.map((item, index) => ({
+        list_id: selectedList.id,
+        category_set_id: set.id,
+        catalog_item_id: item.id,
+        category_id: categoryMap[getAICategory(item.item_name)] || null,
+        item_sort_order: index,
+      }));
+      if (mappings.length > 0) {
+        const { error: mapErr } = await supabase.from("list_item_category_map").insert(mappings);
+        if (mapErr) throw new Error(mapErr.message);
+      }
+
+      await persistListCategoryModeToDb("keyword-groups");
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+      toast.success(
+        catalogItems.length > 0
+          ? `Categories applied to ${catalogItems.length} item${catalogItems.length === 1 ? "" : "s"}`
+          : "No category changes needed",
+      );
+      await loadListDetail(selectedList);
+      return true;
+    } catch {
+      setSaveStatus("idle");
+      toast.error("Failed to apply categories. Please try again.");
+      return false;
     }
-
-    const mappings = catalogItems.map((item, index) => ({
-      list_id: selectedList.id,
-      category_set_id: set.id,
-      catalog_item_id: item.id,
-      category_id: categoryMap[getAICategory(item.item_name)] || null,
-      item_sort_order: index,
-    }));
-    if (mappings.length > 0) {
-      await supabase.from("list_item_category_map").insert(mappings);
-    }
-
-    await persistListCategoryModeToDb("keyword-groups");
-    setSaveStatus("saved");
-    setTimeout(() => setSaveStatus("idle"), 2000);
-    toast.success("AI categories saved to this list");
-    await loadListDetail(selectedList);
   };
 
   const handleImportFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -925,22 +1136,65 @@ export function useListManagementActions({
       vendor_sku: row.vendor_sku || null,
       product_number: row.vendor_sku || null,
       brand_name: row.brand_name || null,
+      vendor_name: row.vendor_name || null,
+      category: row.category?.trim() || null,
       default_unit_cost: row.default_unit_cost,
       sort_order: index,
     }));
 
+    const insertedIds: (string | null)[] = [];
     let inserted = 0;
     let failed = 0;
     for (const chunk of chunkArray(rowsPayload, 200)) {
-      const { error } = await supabase.from("inventory_catalog_items").insert(chunk);
-      if (!error) {
-        inserted += chunk.length;
+      const { data, error } = await supabase
+        .from("inventory_catalog_items")
+        .insert(chunk)
+        .select("id");
+      if (!error && data && data.length === chunk.length) {
+        for (const r of data) insertedIds.push(r.id);
+        inserted += data.length;
         continue;
       }
       for (const row of chunk) {
-        const { error: rowError } = await supabase.from("inventory_catalog_items").insert(row);
-        if (rowError) failed += 1;
-        else inserted += 1;
+        const { data: rowData, error: rowError } = await supabase
+          .from("inventory_catalog_items")
+          .insert(row)
+          .select("id")
+          .single();
+        if (rowError || !rowData) {
+          insertedIds.push(null);
+          failed += 1;
+        } else {
+          insertedIds.push(rowData.id);
+          inserted += 1;
+        }
+      }
+    }
+
+    if (inserted > 0) {
+      const { data: listCats } = await supabase
+        .from("list_categories")
+        .select("id, name, category_set_id")
+        .eq("list_id", targetListId);
+      const byName = new Map((listCats ?? []).map((c) => [c.name.trim().toLowerCase(), c]));
+      const mapInserts: ItemCategoryMapInsert[] = [];
+      for (let i = 0; i < importPreview.length; i++) {
+        const cid = insertedIds[i];
+        const previewRow = importPreview[i];
+        if (!cid || !previewRow.category?.trim()) continue;
+        const matched = byName.get(previewRow.category.trim().toLowerCase());
+        if (!matched?.category_set_id) continue;
+        mapInserts.push({
+          list_id: targetListId,
+          catalog_item_id: cid,
+          category_set_id: matched.category_set_id,
+          category_id: matched.id,
+          item_sort_order: i,
+        });
+      }
+      if (mapInserts.length > 0) {
+        const { error: mapErr } = await supabase.from("list_item_category_map").insert(mapInserts);
+        if (mapErr) console.error(mapErr);
       }
     }
 

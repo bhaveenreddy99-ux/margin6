@@ -35,8 +35,13 @@ export const IMPORT_AUTOMAP_FIELDS: ReadonlyArray<{
   { field: "vendor_sku", syns: ["sku", "itemnumber", "code"] },
   { field: "unit", syns: ["unit", "uom", "measure"] },
   { field: "item_name", syns: ["item", "product", "name", "description"] },
-  { field: "pack_size", syns: ["pack", "size", "case", "qty"] },
+  { field: "pack_size", syns: ["pack", "size", "case", "each", "pack_size", "packsize"] },
   { field: "brand_name", syns: ["brand", "manufacturer", "mfg"] },
+  {
+    field: "vendor_name",
+    syns: ["vendor", "supplier", "distributor", "vendorname", "suppliername"],
+  },
+  { field: "category", syns: ["category", "shelf", "department"] },
 ];
 
 const AI_CATEGORY_MAP: Record<string, string[]> = {
@@ -166,6 +171,8 @@ export function getImportFieldLabel(field: ImportField): string {
   if (field === "vendor_sku") return "Product Number";
   if (field === "default_unit_cost") return "Unit Cost";
   if (field === "brand_name") return "Brand";
+  if (field === "vendor_name") return "Vendor Name";
+  if (field === "category") return "Category";
   return field.replace(/_/g, " ");
 }
 
@@ -178,7 +185,7 @@ export function buildImportPreview(args: {
   let missingUnit = 0;
   let missingPackSize = 0;
   let emptyNameRows = 0;
-  const seenNames = new Set<string>();
+  const seenSkus = new Set<string>();
 
   const preview = importData
     .map((row, index) => {
@@ -190,15 +197,24 @@ export function buildImportPreview(args: {
         ? parseFloat(String(row[importMapping.default_unit_cost] || "")) || null
         : null;
       const brandName = importMapping.brand_name ? String(row[importMapping.brand_name] || "").trim() : "";
+      const vendorName = importMapping.vendor_name ? String(row[importMapping.vendor_name] || "").trim() : "";
+      const category = importMapping.category ? String(row[importMapping.category] || "").trim() : "";
+      const unitCostRaw = importMapping.default_unit_cost
+        ? String(row[importMapping.default_unit_cost] ?? "").trim()
+        : "";
 
       if (!itemName) {
         emptyNameRows += 1;
         return null;
       }
 
-      const normalizedName = itemName.toLowerCase();
-      if (seenNames.has(normalizedName)) duplicates += 1;
-      seenNames.add(normalizedName);
+      // Duplicate = same item number (vendor_sku). Same name with different item numbers is fine.
+      const normalizedSku = vendorSku.toLowerCase();
+      if (normalizedSku && seenSkus.has(normalizedSku)) {
+        duplicates += 1;
+        return null;
+      }
+      if (normalizedSku) seenSkus.add(normalizedSku);
       if (!unit) missingUnit += 1;
       if (!packSize) missingPackSize += 1;
 
@@ -210,6 +226,9 @@ export function buildImportPreview(args: {
         vendor_sku: vendorSku,
         default_unit_cost: defaultUnitCost,
         brand_name: brandName,
+        vendor_name: vendorName,
+        category,
+        unit_cost_raw: unitCostRaw,
       };
     })
     .filter((row): row is ImportPreviewRow => row !== null);
@@ -239,10 +258,15 @@ export function buildIssueItems(items: CatalogItem[]): IssueItem[] {
     const itemName = (item.item_name || "").trim();
     const unit = (item.unit || "").trim();
     const sku = (item.vendor_sku || "").trim().toLowerCase();
+    const packSize = (item.pack_size || "").trim();
+    const vendor = (item.vendor_name || "").trim();
 
     if (!itemName) reasons.push("Missing Item Name");
     if (!unit) reasons.push("Missing Unit");
-    if (sku && skuMap[sku] > 1) reasons.push("Duplicate Product Number");
+    if (!packSize) reasons.push("Missing Pack Size");
+    if (!vendor) reasons.push("Missing Vendor");
+    if (item.default_unit_cost == null) reasons.push("Missing Price");
+    if (sku && skuMap[sku] > 1) reasons.push("Duplicate Item Number");
 
     return reasons.length > 0 ? [{ ...item, reasons }] : [];
   });
@@ -254,6 +278,29 @@ export function getAICategory(itemName: string): string {
     if (keywords.some((keyword) => lowerName.includes(keyword))) return category;
   }
   return "Other";
+}
+
+export type CategorySuggestion = {
+  categoryName: string;
+  items: { id: string; item_name: string }[];
+};
+
+export function buildCategorySuggestions(
+  items: { id: string; item_name: string }[],
+): CategorySuggestion[] {
+  const grouped = new Map<string, { id: string; item_name: string }[]>();
+  for (const item of items) {
+    const cat = getAICategory(item.item_name);
+    const bucket = grouped.get(cat);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      grouped.set(cat, [item]);
+    }
+  }
+  return Array.from(grouped.entries())
+    .map(([categoryName, categoryItems]) => ({ categoryName, items: categoryItems }))
+    .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
 }
 
 export function itemDroppableId(categoryName: string, isFlatAllItems: boolean): string {
@@ -524,4 +571,119 @@ export function buildRecentPurchasedItems(items: RecentPurchasedItem[]): RecentP
 
 export function getCategorySetTypeForView(view: AdvancedListView): CategorySetType {
   return view === "keyword-groups" ? "custom_ai" : "user_manual";
+}
+
+// ─── List Validation ──────────────────────────────────────────────────────────
+
+export type ListValidationResult = {
+  totalItems: number;
+  healthPercent: number;
+  missingPrice: number;
+  missingPackSize: number;
+  missingSku: number;
+  missingVendor: number;
+  uncategorized: number;
+  duplicateNames: number;
+  badPackParse: number;
+};
+
+type ValidatableItem = {
+  id: string;
+  item_name: string;
+  default_unit_cost: number | null;
+  pack_size: string | null;
+  vendor_sku: string | null;
+  vendor_name: string | null;
+  brand_name: string | null;
+  pack_parse_success: boolean;
+};
+
+/**
+ * Validates catalog item quality. `categorizedItemIds` should contain item IDs
+ * that have an explicit non-null category assignment in the active set. If the
+ * set is empty (no category structure exists yet) uncategorized is reported as 0
+ * rather than penalizing every item.
+ */
+export function validateCatalogItems(
+  items: ValidatableItem[],
+  categorizedItemIds: ReadonlySet<string>,
+): ListValidationResult {
+  const total = items.length;
+  if (total === 0) {
+    return {
+      totalItems: 0,
+      healthPercent: 100,
+      missingPrice: 0,
+      missingPackSize: 0,
+      missingSku: 0,
+      missingVendor: 0,
+      uncategorized: 0,
+      duplicateNames: 0,
+      badPackParse: 0,
+    };
+  }
+
+  const skuCounts = new Map<string, number>();
+  for (const item of items) {
+    const sku = (item.vendor_sku ?? "").trim().toLowerCase();
+    if (!sku) continue;
+    skuCounts.set(sku, (skuCounts.get(sku) ?? 0) + 1);
+  }
+
+  const hasCategoryStructure = categorizedItemIds.size > 0;
+
+  let missingPrice = 0;
+  let missingPackSize = 0;
+  let missingSku = 0;
+  let missingVendor = 0;
+  let uncategorized = 0;
+  let duplicateNames = 0;
+  let badPackParse = 0;
+  let cleanItems = 0;
+
+  for (const item of items) {
+    const hasMissingPrice = item.default_unit_cost == null;
+    const hasMissingPack = item.pack_size == null || item.pack_size.trim() === "";
+    const hasMissingSku = item.vendor_sku == null || item.vendor_sku.trim() === "";
+    const hasMissingVendor =
+      (item.vendor_name == null || item.vendor_name.trim() === "") &&
+      (item.brand_name == null || item.brand_name.trim() === "");
+    const isUncategorized = hasCategoryStructure && !categorizedItemIds.has(item.id);
+    const itemSku = (item.vendor_sku ?? "").trim().toLowerCase();
+    const isDuplicate = !!itemSku && (skuCounts.get(itemSku) ?? 0) > 1;
+    const hasBadPack =
+      !item.pack_parse_success &&
+      item.pack_size != null &&
+      item.pack_size.trim() !== "";
+
+    if (hasMissingPrice) missingPrice++;
+    if (hasMissingPack) missingPackSize++;
+    if (hasMissingSku) missingSku++;
+    if (hasMissingVendor) missingVendor++;
+    if (isUncategorized) uncategorized++;
+    if (isDuplicate) duplicateNames++;
+    if (hasBadPack) badPackParse++;
+
+    const hasAnyIssue =
+      hasMissingPrice ||
+      hasMissingPack ||
+      hasMissingSku ||
+      hasMissingVendor ||
+      isUncategorized ||
+      isDuplicate ||
+      hasBadPack;
+    if (!hasAnyIssue) cleanItems++;
+  }
+
+  return {
+    totalItems: total,
+    healthPercent: Math.round((cleanItems / total) * 100),
+    missingPrice,
+    missingPackSize,
+    missingSku,
+    missingVendor,
+    uncategorized,
+    duplicateNames,
+    badPackParse,
+  };
 }

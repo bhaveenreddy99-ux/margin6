@@ -12,8 +12,10 @@ interface ExportItem {
   pack_size?: string;
   current_stock?: number;
   par_level?: number;
+  default_par_level?: number;
   lead_time_days?: number;
   unit_cost?: number;
+  default_unit_cost?: number;
   risk?: string;
   ratio?: number;
   suggestedOrder?: number;
@@ -29,6 +31,8 @@ const SMART_ORDER_COLUMNS = [
 ];
 
 function itemToRow(item: ExportItem) {
+  const unitCost = item.default_unit_cost ?? item.unit_cost;
+  const parLevel = item.default_par_level ?? item.par_level;
   return [
     item.item_name || "",
     item.brand_name || "",
@@ -37,9 +41,9 @@ function itemToRow(item: ExportItem) {
     item.unit || "",
     item.pack_size || "",
     item.current_stock ?? "",
-    item.par_level ?? "",
+    parLevel ?? "",
     item.lead_time_days ?? "",
-    item.unit_cost != null ? `$${item.unit_cost}` : "",
+    unitCost != null ? String(unitCost) : "",
   ];
 }
 
@@ -122,6 +126,24 @@ function downloadBlob(blob: Blob, name: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** CSV template for List Management → Import (headers match import mapping fields). */
+export function downloadInventoryListImportTemplateCsv() {
+  const headers = [
+    "item_name",
+    "unit",
+    "pack_size",
+    "vendor_name",
+    "product_number",
+    "default_unit_cost",
+    "category",
+  ];
+  const example = ["Sourdough Bread", "case", "6/count", "PFG", "12345", "24.99", "Dry Goods"];
+  const rows = [headers, example];
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, "inventory-list-import-template.csv");
 }
 
 export function parseFile(file: File): Promise<{ headers: string[]; rows: Record<string, any>[] }> {

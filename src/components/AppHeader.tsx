@@ -22,13 +22,14 @@ const routeNames: Record<string, string> = {
   "/app/dashboard": "Dashboard",
   "/app/inventory/lists": "Inventory Lists",
   "/app/inventory/enter": "Inventory Management",
-  "/app/inventory/review": "Review",
-  "/app/inventory/approved": "Approved",
+  "/app/inventory/review": "Session review",
+  "/app/inventory/approved": "Approved counts",
   "/app/smart-order": "Smart Order",
   "/app/purchase-history": "Purchase History",
   "/app/orders": "Orders",
   "/app/reports": "Reports",
-  "/app/staff": "Staff",
+  "/app/staff": "Users & Permissions",
+  "/app/locations": "Locations & Team",
   "/app/notifications": "Notifications",
 };
 
@@ -36,6 +37,7 @@ export function AppHeader() {
   const {
     restaurants, currentRestaurant, setCurrentRestaurant,
     isPortfolioMode, locations, currentLocation, setCurrentLocation,
+    locationAssignments,
   } = useRestaurant();
   const { unreadCount } = useNotifications();
   const location = useLocation();
@@ -58,6 +60,24 @@ export function AppHeader() {
 
   // Can user switch to "All Restaurants" — only OWNER or MANAGER
   const canPortfolio = restaurants.some(r => r.role === "OWNER" || r.role === "MANAGER");
+
+  const isOwnerAtCurrent = currentRestaurant?.role === "OWNER";
+
+  const staffScopedLocations = useMemo(() => {
+    if (!currentRestaurant || isOwnerAtCurrent) return locations;
+    const allowedIds = new Set(
+      locationAssignments
+        .filter((a) =>
+          locations.some(
+            (l) => l.id === a.location_id && l.restaurant_id === currentRestaurant.id,
+          ),
+        )
+        .map((a) => a.location_id),
+    );
+    return locations.filter((l) => allowedIds.has(l.id));
+  }, [locations, locationAssignments, currentRestaurant, isOwnerAtCurrent]);
+
+  const locationSwitcherLocations = isOwnerAtCurrent ? locations : staffScopedLocations;
 
   return (
     <header className="flex h-12 items-center gap-2 border-b border-border/60 px-4 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
@@ -145,38 +165,58 @@ export function AppHeader() {
         </DropdownMenu>
       )}
 
-      {/* Location Switcher */}
-      {!isPortfolioMode && locations.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs h-8 px-2.5">
-              <MapPin className="h-3.5 w-3.5 opacity-60" />
-              <span className="truncate max-w-[100px]">
-                {currentLocation?.name || "All Locations"}
-              </span>
-              <ChevronsUpDown className="h-3 w-3 opacity-40" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem
-              onClick={() => setCurrentLocation(null)}
-              className={!currentLocation ? "bg-accent" : ""}
-            >
-              All Locations
-              {!currentLocation && <Check className="h-3.5 w-3.5 ml-auto" />}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {locations.map((l) => (
-              <DropdownMenuItem
-                key={l.id}
-                onClick={() => setCurrentLocation(l)}
-                className={l.id === currentLocation?.id ? "bg-accent" : ""}
-              >
-                {l.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {/* Location Switcher — OWNER: all locations + "All Locations"; MANAGER/STAFF: assigned only, no aggregate option */}
+      {!isPortfolioMode && locationSwitcherLocations.length > 0 && (
+        isOwnerAtCurrent || locationSwitcherLocations.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="gap-1.5 text-xs h-8 px-2.5">
+                <MapPin className="h-3.5 w-3.5 opacity-60" />
+                <span className="truncate max-w-[100px]">
+                  {isOwnerAtCurrent
+                    ? (currentLocation?.name || "All Locations")
+                    : (currentLocation?.name ?? locationSwitcherLocations[0]?.name ?? "Location")}
+                </span>
+                <ChevronsUpDown className="h-3 w-3 opacity-40" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {isOwnerAtCurrent && (
+                <>
+                  <DropdownMenuItem
+                    onClick={() => setCurrentLocation(null)}
+                    className={!currentLocation ? "bg-accent" : ""}
+                  >
+                    All Locations
+                    {!currentLocation && <Check className="h-3.5 w-3.5 ml-auto" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {locationSwitcherLocations.map((l) => (
+                <DropdownMenuItem
+                  key={l.id}
+                  onClick={() => setCurrentLocation(l)}
+                  className={l.id === currentLocation?.id ? "bg-accent" : ""}
+                >
+                  {l.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-xs h-8 px-2.5 pointer-events-none opacity-90"
+            aria-current="location"
+          >
+            <MapPin className="h-3.5 w-3.5 opacity-60" />
+            <span className="truncate max-w-[100px]">
+              {locationSwitcherLocations[0]?.name ?? currentLocation?.name ?? "Location"}
+            </span>
+          </Button>
+        )
       )}
 
       {/* Demo Role Switcher */}

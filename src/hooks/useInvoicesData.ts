@@ -20,6 +20,7 @@ import type { LinkedSmartOrderLine } from "@/components/invoices/types";
 
 type UseInvoicesDataArgs = {
   currentRestaurantId: string | null | undefined;
+  currentLocationId?: string | null | undefined;
   dateRange: string;
   linkedSmartOrderId: string;
 };
@@ -36,6 +37,7 @@ type InvoiceItemsQueryResult = Promise<{
 
 export function useInvoicesData({
   currentRestaurantId,
+  currentLocationId,
   dateRange,
   linkedSmartOrderId,
 }: UseInvoicesDataArgs) {
@@ -59,6 +61,10 @@ export function useInvoicesData({
       .eq("restaurant_id", currentRestaurantId)
       .order("created_at", { ascending: false });
 
+    if (currentLocationId) {
+      query = query.eq("location_id", currentLocationId);
+    }
+
     if (dateRange !== "all") {
       const now = new Date();
       let start: Date;
@@ -73,7 +79,7 @@ export function useInvoicesData({
       setPurchases(flattenInvoiceListRows(data));
     }
     setLoading(false);
-  }, [currentRestaurantId, dateRange]);
+  }, [currentRestaurantId, currentLocationId, dateRange]);
 
   const loadInvoiceItems = useCallback(async (invoiceId: string) => {
     const result = (supabase

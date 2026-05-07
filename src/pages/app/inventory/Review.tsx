@@ -11,10 +11,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { CheckCircle, XCircle, Eye, ClipboardCheck, ArrowLeft, Search, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { getRisk, computeOrderQty, type RiskThresholds } from "@/lib/inventory-utils";
+import { getRisk, computeOrderQty, computeOrderQtyCases, computeRiskLevel, parseInputValue, type RiskThresholds } from "@/lib/inventory-utils";
 import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
@@ -22,6 +27,7 @@ import type {
   InventoryCatalogItemRow,
   InventorySessionListRow,
 } from "@/domain/inventory/enterInventoryTypes";
+import { resolvePlanningUnitMetaFromCatalogItem } from "@/domain/inventory/planningUnitMeta";
 import {
   loadSessionItemsWithApprovedPar,
   type SessionItemWithApprovedPar,
@@ -30,11 +36,12 @@ import {
   approveInventorySession,
   sendInventorySessionBackToInProgress,
 } from "@/domain/inventory/sessionWorkflow";
+import { writeLegacySessionItemStockAndClearZones } from "@/features/inventory-count/inventoryZoneWritePipeline";
 
 type FilterTab = "all" | "critical" | "low" | "ok" | "nopar";
 type ReviewCatalogItem = Pick<
   InventoryCatalogItemRow,
-  "id" | "item_name" | "product_number" | "vendor_sku"
+  "id" | "item_name" | "product_number" | "vendor_sku" | "pack_size" | "unit"
 >;
 
 export default function ReviewPage() {
@@ -55,23 +62,29 @@ export default function ReviewPage() {
   const [declineSessionId, setDeclineSessionId] = useState<string | null>(null);
   const [declineNote, setDeclineNote] = useState("");
   const [declining, setDeclining] = useState(false);
+  const [approveConfirmId, setApproveConfirmId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [isResolvingSessionParam, setIsResolvingSessionParam] = useState(() => !!sessionFromUrl);
   const [riskThresholds, setRiskThresholds] = useState<RiskThresholds>({
     redThresholdPercent: 50,
     yellowThresholdPercent: 100,
   });
+  const [reviewListCategoryNameById, setReviewListCategoryNameById] = useState<Record<string, string>>(
+    {},
+  );
 
   const fetchSessions = useCallback(async () => {
     if (!currentRestaurant?.id) return;
-    const { data } = await supabase
+    let query = supabase
       .from("inventory_sessions")
       .select("*, inventory_lists(name)")
       .eq("restaurant_id", currentRestaurant.id)
       .eq("status", "IN_REVIEW")
       .order("updated_at", { ascending: false });
+    if (currentLocation?.id) query = query.eq("location_id", currentLocation.id);
+    const { data } = await query;
     if (data) setSessions(data);
-  }, [currentRestaurant?.id]);
+  }, [currentRestaurant?.id, currentLocation?.id]);
 
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
 
@@ -87,9 +100,13 @@ export default function ReviewPage() {
 
   useEffect(() => {
     if (!currentRestaurant) return;
-    supabase.from("inventory_catalog_items").select("id, item_name, product_number, vendor_sku")
+    supabase
+      .from("inventory_catalog_items")
+      .select("id, item_name, product_number, vendor_sku, pack_size, unit")
       .eq("restaurant_id", currentRestaurant.id)
-      .then(({ data }) => { if (data) setCatalogItems(data); });
+      .then(({ data }) => {
+        if (data) setCatalogItems(data);
+      });
   }, [currentRestaurant]);
 
   const handleApprove = async (sessionId: string) => {
@@ -126,7 +143,12 @@ export default function ReviewPage() {
     if (result.catalogLinksStripped) {
       toast.info("Saved order lines; some catalog links were cleared due to invalid references.");
     }
-    if (viewSession?.id === sessionId) { setViewItems(null); setViewSession(null); setLocalItems({}); }
+    if (viewSession?.id === sessionId) {
+      setViewItems(null);
+      setViewSession(null);
+      setLocalItems({});
+      setReviewListCategoryNameById({});
+    }
     fetchSessions();
   };
 
@@ -140,14 +162,21 @@ export default function ReviewPage() {
     setDeclining(false);
     if (!result.ok) { toast.error(result.errorMessage); return; }
     toast.success(declineNote.trim() ? `Sent back: "${declineNote.trim()}"` : "Session sent back for recount");
-    if (viewSession?.id === declineSessionId) { setViewItems(null); setViewSession(null); }
+    if (viewSession?.id === declineSessionId) {
+      setViewItems(null);
+      setViewSession(null);
+      setReviewListCategoryNameById({});
+    }
     setDeclineSessionId(null); setDeclineNote("");
     fetchSessions();
   };
 
   const openSessionForReview = useCallback(async (session: InventorySessionListRow): Promise<boolean> => {
     if (!currentRestaurant?.id) return false;
-    setLocalItems({}); setActiveFilter("all"); setSearchQuery(""); setCollapsedCategories(new Set());
+    setLocalItems({});
+    setActiveFilter("all");
+    setSearchQuery("");
+    setCollapsedCategories(new Set());
     const { items, errorMessage } = await loadSessionItemsWithApprovedPar({
       supabase,
       restaurantId: currentRestaurant.id,
@@ -158,6 +187,14 @@ export default function ReviewPage() {
       toast.error("Could not load session");
       return false;
     }
+    const looseSb = supabase as unknown as SupabaseClient;
+    const { data: lcRows } = await looseSb
+      .from("list_categories")
+      .select("id, name")
+      .eq("inventory_list_id", session.inventory_list_id);
+    setReviewListCategoryNameById(
+      Object.fromEntries((lcRows ?? []).map((r) => [r.id, r.name])) as Record<string, string>,
+    );
     setViewItems(items);
     setViewSession(session);
     return true;
@@ -271,6 +308,12 @@ export default function ReviewPage() {
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredItems]);
 
+  const reviewCatalogById = useMemo(() => {
+    const m: Record<string, ReviewCatalogItem> = {};
+    for (const c of catalogItems) m[c.id] = c;
+    return m;
+  }, [catalogItems]);
+
   const showDeepLinkLoader =
     !!sessionFromUrl && viewItems === null && (isResolvingSessionParam || !currentRestaurant);
 
@@ -285,7 +328,10 @@ export default function ReviewPage() {
             <div className="flex items-center gap-3 min-w-0">
               <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-lg"
                 onClick={() => {
-                  setViewItems(null); setViewSession(null); setLocalItems({});
+                  setViewItems(null);
+                  setViewSession(null);
+                  setLocalItems({});
+                  setReviewListCategoryNameById({});
                   navigate("/app/inventory/enter");
                 }}>
                 <ArrowLeft className="h-4 w-4" />
@@ -307,7 +353,7 @@ export default function ReviewPage() {
                   <XCircle className="h-3.5 w-3.5" /> Decline
                 </Button>
                 <Button size="sm" disabled={approving} className="gap-1.5 h-9 text-xs bg-success hover:bg-success/90 text-success-foreground"
-                  onClick={() => handleApprove(viewSession.id)}>
+                  onClick={() => setApproveConfirmId(viewSession.id)}>
                   <CheckCircle className="h-3.5 w-3.5" /> {approving ? "Approving…" : "Approve"}
                 </Button>
               </div>
@@ -355,8 +401,12 @@ export default function ReviewPage() {
             <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">No items match this filter.</div>
           ) : groupedByCategory.map(([category, items]) => {
             const isCollapsed = collapsedCategories.has(category);
-            const catCritical = items.filter(i => getRisk(Number(i.current_stock), i.approved_par, riskThresholds).level === "RED").length;
-            const catLow = items.filter(i => getRisk(Number(i.current_stock), i.approved_par, riskThresholds).level === "YELLOW").length;
+            const catCritical = items.filter(
+              (i) => computeRiskLevel(Number(i.current_stock), i.approved_par, riskThresholds) === "RED",
+            ).length;
+            const catLow = items.filter(
+              (i) => computeRiskLevel(Number(i.current_stock), i.approved_par, riskThresholds) === "YELLOW",
+            ).length;
             return (
               <Collapsible key={category} open={!isCollapsed} onOpenChange={() => {
                 setCollapsedCategories(prev => { const n = new Set(prev); if (n.has(category)) n.delete(category); else n.add(category); return n; });
@@ -377,7 +427,12 @@ export default function ReviewPage() {
                         <TableHead className="pl-6 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2">Item</TableHead>
                         <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-28">Product #</TableHead>
                         <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-28">Pack Size</TableHead>
-                        <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-32 text-center">On Hand</TableHead>
+                        <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-40 text-center">
+                          On hand
+                          <span className="block font-normal normal-case text-[9px] text-muted-foreground/40">
+                            Planning unit total
+                          </span>
+                        </TableHead>
                         <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-24 text-right">PAR</TableHead>
                         <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-24 text-right">Price</TableHead>
                         <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 py-2 w-20 text-right">Need</TableHead>
@@ -388,7 +443,17 @@ export default function ReviewPage() {
                       {items.map(item => {
                         const stock = localItems[item.id] !== undefined ? localItems[item.id] : Number(item.current_stock ?? 0);
                         const risk = getRisk(stock, item.approved_par, riskThresholds);
-                        const need = computeOrderQty(stock, item.approved_par, item.unit, item.pack_size);
+                        // stock and approved_par are both in CASES — use canonical order engine
+                        const need = computeOrderQtyCases(stock, item.approved_par);
+                        const zones = item.inventory_session_item_zones ?? [];
+                        const hasZones = zones.length > 0;
+                        const catalogRow = item.catalog_item_id ? reviewCatalogById[item.catalog_item_id] : undefined;
+                        const planningMeta =
+                          catalogRow != null
+                            ? resolvePlanningUnitMetaFromCatalogItem(catalogRow as InventoryCatalogItemRow, item)
+                            : null;
+                        const planningUnitLabel =
+                          planningMeta?.planning_unit ?? (hasZones ? "case" : (item.unit?.trim() || ""));
                         const lastOrdered = (() => {
                           const ci = catalogItems.find(c => c.item_name === item.item_name);
                           const d = ci ? lastOrderDates[ci.id] : null;
@@ -407,20 +472,64 @@ export default function ReviewPage() {
                             </TableCell>
                             <TableCell className="py-3 text-[11px] text-muted-foreground/55 font-mono">{item.vendor_sku || "—"}</TableCell>
                             <TableCell className="py-3 text-[11px] text-muted-foreground/55">{item.pack_size || "—"}</TableCell>
-                            <TableCell className="text-center py-3">
-                              {isManagerOrOwner ? (
-                                <Input type="number" inputMode="decimal" min={0} step={0.1}
-                                  className={"w-20 h-8 text-sm font-mono text-center mx-auto block [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none rounded-lg border-2 " + (stock > 0 ? "border-success/50 bg-success/8 text-success font-semibold" : "border-border/50")}
-                                  value={localItems[item.id] !== undefined ? localItems[item.id] : (item.current_stock ?? "")}
-                                  onFocus={e => e.target.select()}
-                                  onChange={e => setLocalItems(prev => ({ ...prev, [item.id]: parseFloat(e.target.value) || 0 }))}
-                                  onBlur={e => supabase.from("inventory_session_items").update({ current_stock: parseFloat(e.target.value) || 0 }).eq("id", item.id)}
-                                />
-                              ) : (
-                                <span className={"mx-auto block h-8 w-20 text-center text-sm font-mono tabular-nums leading-8 " + (stock > 0 ? "font-semibold text-success" : "text-foreground")}>
-                                  {localItems[item.id] !== undefined ? localItems[item.id] : (item.current_stock ?? "")}
-                                </span>
-                              )}
+                            <TableCell className="text-center py-3 align-top">
+                              <div className="flex flex-col items-center gap-1">
+                                {isManagerOrOwner ? (
+                                  <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min={0}
+                                    step={0.1}
+                                    className={
+                                      "w-20 h-8 text-sm font-mono text-center mx-auto block [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none rounded-lg border-2 " +
+                                      (stock > 0
+                                        ? "border-success/50 bg-success/8 text-success font-semibold"
+                                        : "border-border/50")
+                                    }
+                                    value={localItems[item.id] !== undefined ? localItems[item.id] : (item.current_stock ?? "")}
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => {
+                                      const parsed = parseInputValue(e.target.value);
+                                      if (parsed !== null) {
+                                        setLocalItems((prev) => ({ ...prev, [item.id]: parsed }));
+                                      }
+                                    }}
+                                    onBlur={async (e) => {
+                                      // Parse as cases — Review.tsx always shows current_stock in its
+                                      // planning unit (cases). parseInputValue returns null for
+                                      // empty/invalid input so we never silently write 0 for cases.
+                                      const parsed = parseInputValue(e.target.value);
+                                      if (parsed === null) return;
+                                      // Round to case precision (2 dp) before saving
+                                      const v = Math.round(parsed * 100) / 100;
+                                      const stockResult = await writeLegacySessionItemStockAndClearZones(item.id, v);
+                                      if (stockResult.ok !== true) toast.error(stockResult.error);
+                                    }}
+                                  />
+                                ) : (
+                                  <span
+                                    className={
+                                      "mx-auto block min-h-8 text-center text-sm font-mono tabular-nums leading-8 " +
+                                      (stock > 0 ? "font-semibold text-success" : "text-foreground")
+                                    }
+                                  >
+                                    {localItems[item.id] !== undefined ? localItems[item.id] : (item.current_stock ?? "")}
+                                  </span>
+                                )}
+                                {planningUnitLabel ? (
+                                  <span className="text-[10px] text-muted-foreground/55">{planningUnitLabel}</span>
+                                ) : null}
+                                {hasZones ? (
+                                  <ul className="mt-0.5 w-full max-w-[12rem] space-y-0.5 text-left text-[10px] text-muted-foreground/70">
+                                    {zones.map((z) => (
+                                      <li key={z.id}>
+                                        {reviewListCategoryNameById[z.list_category_id] ?? "Zone"}:{" "}
+                                        {z.entered_qty} {z.entered_unit}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="text-right py-3">
                               <div className="flex flex-col items-end gap-0.5">
@@ -473,6 +582,36 @@ export default function ReviewPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Approve confirmation */}
+        <AlertDialog
+          open={!!approveConfirmId}
+          onOpenChange={(open) => { if (!open) setApproveConfirmId(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Approve this count?</AlertDialogTitle>
+              <AlertDialogDescription>
+                <span className="font-semibold text-foreground">{viewSession?.name || "This session"}</span>
+                {viewSession?.inventory_lists?.name ? ` (${viewSession.inventory_lists.name})` : ""}
+                {" "}will become the official inventory snapshot. Stock quantities, smart orders, and usage reports will use these numbers. This cannot be undone from the review page.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-success text-success-foreground hover:bg-success/90"
+                onClick={() => {
+                  const id = approveConfirmId;
+                  setApproveConfirmId(null);
+                  if (id) void handleApprove(id);
+                }}
+              >
+                Approve Count
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

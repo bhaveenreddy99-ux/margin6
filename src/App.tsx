@@ -8,6 +8,7 @@ import { RestaurantProvider } from "@/contexts/RestaurantContext";
 import { DemoRoleProvider } from "@/components/DemoRoleSwitcher";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { OwnerRoute } from "@/components/OwnerRoute";
+import { StaffRestrictedRoute } from "@/components/StaffRestrictedRoute";
 import LandingPage from "@/pages/Landing";
 import LoginPage from "@/pages/Login";
 import SignupPage from "@/pages/Signup";
@@ -15,6 +16,7 @@ import DemoPage from "@/pages/Demo";
 import CreateRestaurantPage from "@/pages/onboarding/CreateRestaurant";
 import AppLayout from "@/layouts/AppLayout";
 import DashboardPage from "@/pages/app/Dashboard";
+import AllLocationsDashboard from "@/pages/app/AllLocationsDashboard";
 import ListManagementPage from "@/pages/app/ListManagement";
 import EnterInventoryPage from "@/pages/app/inventory/EnterInventory";
 import ReviewPage from "@/pages/app/inventory/Review";
@@ -24,12 +26,10 @@ import SmartOrderPage from "@/pages/app/SmartOrder";
 import ParHubPage from "@/pages/app/ParHub";
 import PARManagementPage from "@/pages/app/PARManagement";
 import PARSuggestionsPage from "@/pages/app/PARSuggestions";
-import RecipesPage from "@/pages/app/Recipes";
-
 import InvoicesPage from "@/pages/app/Invoices";
 import InvoiceReviewPage from "@/pages/app/InvoiceReview";
 import ReportsPage from "@/pages/app/Reports";
-import StaffPage from "@/pages/app/Staff";
+import CompareReport from "@/pages/app/CompareReport";
 import PurchaseHistoryPage from "@/pages/app/PurchaseHistory";
 import WasteLogPage from "@/pages/app/WasteLog";
 import SettingsPage from "@/pages/app/Settings";
@@ -62,24 +62,27 @@ const App = () => (
               <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="inventory/lists" element={<ListManagementPage />} />
+                <Route path="dashboard/all" element={<OwnerRoute><AllLocationsDashboard /></OwnerRoute>} />
+                <Route path="inventory/lists" element={<StaffRestrictedRoute><ListManagementPage /></StaffRestrictedRoute>} />
                 <Route path="inventory/enter" element={<EnterInventoryPage />} />
-                <Route path="inventory/review" element={<ReviewPage />} />
-                <Route path="inventory/approved" element={<ApprovedPage />} />
-                <Route path="inventory/import/:listId" element={<ImportPage />} />
-                <Route path="smart-order" element={<SmartOrderPage />} />
-                <Route path="par" element={<ParHubPage />}>
+                <Route path="inventory/review" element={<StaffRestrictedRoute><ReviewPage /></StaffRestrictedRoute>} />
+                <Route path="inventory/approved" element={<StaffRestrictedRoute><ApprovedPage /></StaffRestrictedRoute>} />
+                <Route path="inventory/import/:listId" element={<StaffRestrictedRoute><ImportPage /></StaffRestrictedRoute>} />
+                <Route path="smart-order" element={<StaffRestrictedRoute><SmartOrderPage /></StaffRestrictedRoute>} />
+                <Route path="par" element={<StaffRestrictedRoute><ParHubPage /></StaffRestrictedRoute>}>
                   <Route index element={<PARManagementPage />} />
                   <Route path="suggestions" element={<PARSuggestionsPage />} />
                 </Route>
                 
-                <Route path="recipes" element={<RecipesPage />} />
-                <Route path="invoices" element={<InvoicesPage />} />
-                <Route path="invoices/:id/review" element={<InvoiceReviewPage />} />
+                <Route path="invoices" element={<StaffRestrictedRoute><InvoicesPage /></StaffRestrictedRoute>} />
+                <Route path="invoices/:id/review" element={<StaffRestrictedRoute><InvoiceReviewPage /></StaffRestrictedRoute>} />
                 <Route path="orders" element={<Navigate to="/app/invoices" replace />} />
-                <Route path="reports" element={<ReportsPage />} />
-                <Route path="staff" element={<OwnerRoute><StaffPage /></OwnerRoute>} />
-                <Route path="purchase-history" element={<PurchaseHistoryPage />} />
+                <Route path="reports" element={<StaffRestrictedRoute><ReportsPage /></StaffRestrictedRoute>} />
+                <Route path="reports/compare" element={<OwnerRoute><CompareReport /></OwnerRoute>} />
+                <Route path="staff" element={<Navigate to="/app/settings" replace />} />
+                <Route path="locations" element={<Navigate to="/app/settings" replace />} />
+                <Route path="settings/locations" element={<Navigate to="/app/settings" replace />} />
+                <Route path="purchase-history" element={<StaffRestrictedRoute><PurchaseHistoryPage /></StaffRestrictedRoute>} />
                 <Route path="waste-log" element={<WasteLogPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="settings" element={<OwnerRoute><SettingsPage /></OwnerRoute>} />

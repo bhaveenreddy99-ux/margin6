@@ -61,11 +61,15 @@ export default function ApprovedPage() {
 
   useEffect(() => {
     if (!currentRestaurant) return;
-    supabase
+    let sessionQuery = supabase
       .from("inventory_sessions")
       .select("*, inventory_lists(name)")
       .eq("restaurant_id", currentRestaurant.id)
-      .eq("status", "APPROVED")
+      .eq("status", "APPROVED");
+    if (currentLocation?.id) {
+      sessionQuery = sessionQuery.eq("location_id", currentLocation.id);
+    }
+    sessionQuery
       .order("approved_at", { ascending: false })
       .then(({ data }) => { if (data) setSessions(data); });
     supabase
@@ -74,7 +78,7 @@ export default function ApprovedPage() {
       .eq("restaurant_id", currentRestaurant.id)
       .maybeSingle()
       .then(({ data }) => { setRiskThresholds(riskThresholdsFromSettings(data)); });
-  }, [currentRestaurant]);
+  }, [currentRestaurant, currentLocation]);
 
   const loadSessionItems = async (session: InventorySessionListRow) => {
     // Toggle collapse if already loaded

@@ -8,6 +8,7 @@ import {
   buildParGuideLevelMaps,
   resolveParLevelFromGuideMaps,
 } from "@/domain/inventory/parGuideLevels";
+import { loadSessionItemsWithZones } from "@/domain/inventory/loadSessionItemsWithZones";
 
 type AppSupabase = SupabaseClient<Database>;
 
@@ -26,7 +27,7 @@ export function buildSessionItemsWithApprovedPar(
       { catalog_item_id: item.catalog_item_id, item_name: item.item_name },
       maps,
       Number(item.par_level) || 0,
-    ),
+    ).parLevel,
   }));
 }
 
@@ -36,13 +37,10 @@ export async function loadSessionItemsWithApprovedPar(args: {
   inventoryListId: string;
   sessionId: string;
 }) {
-  const { data: items, error } = (await args.supabase
-    .from("inventory_session_items")
-    .select("*")
-    .eq("session_id", args.sessionId)) as unknown as {
-    data: InventorySessionItemRow[] | null;
-    error: { message: string } | null;
-  };
+  const { data: items, error } = await loadSessionItemsWithZones(
+    args.supabase,
+    args.sessionId,
+  );
 
   if (error) {
     return {

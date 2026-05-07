@@ -71,17 +71,50 @@ export function summarizeInvoiceReview(
   };
 }
 
+export function countMissingReceivedQty(comparisons: InvoiceReviewComparison[]): number {
+  return comparisons.filter((c) => {
+    const invoicedQty = Number(c.invoiced_qty);
+    return c.received_qty == null && Number.isFinite(invoicedQty) && invoicedQty > 0;
+  }).length;
+}
+
+/**
+ * Rows where received_qty was auto-filled from invoiced_qty and has not yet been
+ * explicitly confirmed by a manager. These block receipt confirmation (Phase 4).
+ */
+export function countUnconfirmedReceivedQty(comparisons: InvoiceReviewComparison[]): number {
+  return comparisons.filter((c) => {
+    const invoicedQty = Number(c.invoiced_qty);
+    if (!Number.isFinite(invoicedQty) || invoicedQty <= 0) return false;
+    if (c.status === "missing_from_invoice") return false;
+    return c.received_qty_confirmed === false || c.received_qty_confirmed == null;
+  }).length;
+}
+
+export function findFirstIncompleteComparisonId(
+  comparisons: InvoiceReviewComparison[],
+): string | null {
+  return (
+    comparisons.find((c) => {
+      const invoicedQty = Number(c.invoiced_qty);
+      return c.received_qty == null && Number.isFinite(invoicedQty) && invoicedQty > 0;
+    })?.id ?? null
+  );
+}
+
+/**
+ * Groups `confirm_invoice_receipt` RPC line items by status.
+ * RPC stock-movement path emits: confirmed | already_confirmed | unit_conversion_failed | no_catalog_match.
+ */
 export function groupConfirmResultItems(confirmResult: ConfirmInvoiceReceiptResult | null) {
   const items = confirmResult?.items ?? [];
 
   return {
-    updatedReceiptItems: items.filter(
-      (item): item is ConfirmInvoiceReceiptItem =>
-        item.status === "updated",
+    postedStockItems: items.filter(
+      (item): item is ConfirmInvoiceReceiptItem => item.status === "confirmed",
     ),
-    skippedReceiptItems: items.filter(
-      (item): item is ConfirmInvoiceReceiptItem =>
-        item.status === "not_in_session" || item.status === "no_session",
+    conversionFailedItems: items.filter(
+      (item): item is ConfirmInvoiceReceiptItem => item.status === "unit_conversion_failed",
     ),
   };
 }

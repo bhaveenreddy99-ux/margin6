@@ -3,6 +3,7 @@
  * Formula: usage = beginning_stock + purchases_between - ending_stock
  */
 import { supabase } from "@/integrations/supabase/client";
+import { catalogIdFromSessionItem } from "@/domain/inventory/sessionItemCatalogLink";
 import { buildCatalogIdentityKey, normalizeItemName } from "@/lib/catalog-identity";
 import { isPurchaseHistoryInBusinessWindow } from "@/lib/purchase-history-source";
 import { fetchInvoiceDocumentIdsForRestaurant } from "@/lib/procurement-dedupe";
@@ -280,6 +281,29 @@ function resolveLeadTimeDays(value: number | null | undefined): number {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 2;
 }
 
+function inventoryListIdFromInvoiceEmbed(inv: {
+  purchase_orders?:
+    | null
+    | {
+        smart_order_runs?:
+          | null
+          | { inventory_list_id: string | null }
+          | { inventory_list_id: string | null }[];
+      }
+    | Array<{
+        smart_order_runs?:
+          | null
+          | { inventory_list_id: string | null }
+          | { inventory_list_id: string | null }[];
+      }>;
+}): string | null {
+  const rawPo = inv.purchase_orders;
+  const po = Array.isArray(rawPo) ? rawPo[0] : rawPo;
+  const rawRun = po?.smart_order_runs;
+  const run = Array.isArray(rawRun) ? rawRun[0] : rawRun;
+  return run?.inventory_list_id ?? null;
+}
+
 async function loadApprovedSessions(
   restaurantId: string,
   options: UsageAnalyticsOptions = {},
@@ -303,7 +327,14 @@ async function loadApprovedSessions(
   }
 
   const { data } = await sessionsQuery;
-  return (data ?? []).filter((session): session is ApprovedSession => Boolean(session.approved_at));
+  return (data ?? [])
+    .filter((row): row is typeof row & { approved_at: string } => Boolean(row.approved_at))
+    .map((row) => ({
+      id: row.id,
+      approved_at: row.approved_at as string,
+      inventory_list_id: row.inventory_list_id,
+      location_id: row.location_id,
+    }));
 }
 
 async function computeUsageBetweenSessions(
@@ -315,11 +346,11 @@ async function computeUsageBetweenSessions(
   const [{ data: latestItems }, { data: previousItems }] = await Promise.all([
     supabase
       .from("inventory_session_items")
-      .select("item_name, current_stock, catalog_item_id, unit")
+      .select("item_name, current_stock, unit, metadata")
       .eq("session_id", latestSession.id),
     supabase
       .from("inventory_session_items")
-      .select("item_name, current_stock, catalog_item_id, unit")
+      .select("item_name, current_stock, unit, metadata")
       .eq("session_id", previousSession.id),
   ]);
 
@@ -327,7 +358,7 @@ async function computeUsageBetweenSessions(
 
   const stockUnitByKey: Record<string, string | null> = {};
   for (const item of [...previousItems, ...latestItems]) {
-    const key = buildCatalogIdentityKey(item.catalog_item_id, item.item_name);
+    const key = buildCatalogIdentityKey(catalogIdFromSessionItem(item), item.item_name);
     if (!key) continue;
     if (stockUnitByKey[key] == null && item.unit) {
       stockUnitByKey[key] = item.unit;
@@ -343,7 +374,9 @@ async function computeUsageBetweenSessions(
   // New model: confirmed invoices (aligned with stock receive) in the session window
   let invoiceQuery = supabase
     .from("invoices")
-    .select("id, created_at, invoice_date, purchase_orders(inventory_list_id)")
+    .select(
+      "id, created_at, invoice_date, purchase_orders(smart_order_runs(inventory_list_id))",
+    )
     .eq("restaurant_id", restaurantId)
     .eq("status", "confirmed");
 
@@ -353,13 +386,7 @@ async function computeUsageBetweenSessions(
 
   const { data: invoiceRows } = await invoiceQuery;
   const invoicesInWindow = (invoiceRows ?? []).filter((inv) => {
-    const rawPo = inv.purchase_orders as
-      | { inventory_list_id: string | null }
-      | { inventory_list_id: string | null }[]
-      | null
-      | undefined;
-    const po = Array.isArray(rawPo) ? rawPo[0] : rawPo;
-    const listId = po?.inventory_list_id ?? null;
+    const listId = inventoryListIdFromInvoiceEmbed(inv);
     if (options.inventoryListId && listId !== options.inventoryListId) {
       return false;
     }
@@ -370,14 +397,14 @@ async function computeUsageBetweenSessions(
   if (invoiceIdsInWindow.length > 0) {
     const { data: invoiceLineItems } = await supabase
       .from("invoice_items")
-      .select("item_name, quantity, catalog_item_id, pack_size")
+      .select("item_name, quantity_invoiced, catalog_item_id, pack_size")
       .in("invoice_id", invoiceIdsInWindow);
 
     for (const item of invoiceLineItems ?? []) {
       const key = buildCatalogIdentityKey(item.catalog_item_id, item.item_name);
       if (!key) continue;
       const convertedQuantity = convertPurchaseQuantityToStockUnits(
-        item.quantity,
+        item.quantity_invoiced,
         stockUnitByKey[key],
         item.pack_size,
       );
@@ -426,7 +453,7 @@ async function computeUsageBetweenSessions(
 
   const endingMap: Record<string, number> = {};
   for (const item of latestItems) {
-    const key = buildCatalogIdentityKey(item.catalog_item_id, item.item_name);
+    const key = buildCatalogIdentityKey(catalogIdFromSessionItem(item), item.item_name);
     if (!key) continue;
     endingMap[key] = Number(item.current_stock ?? 0);
   }
@@ -438,7 +465,7 @@ async function computeUsageBetweenSessions(
 
   const results: ComputedUsageItem[] = [];
   for (const item of previousItems) {
-    const key = buildCatalogIdentityKey(item.catalog_item_id, item.item_name);
+    const key = buildCatalogIdentityKey(catalogIdFromSessionItem(item), item.item_name);
     if (!key) continue;
 
     const beginningStock = Number(item.current_stock ?? 0);
@@ -448,7 +475,7 @@ async function computeUsageBetweenSessions(
     const weeklyUsage = (usageRaw / daysBetween) * 7;
 
     results.push({
-      catalog_item_id: item.catalog_item_id ?? null,
+      catalog_item_id: catalogIdFromSessionItem(item) ?? null,
       item_name: item.item_name,
       beginning_stock: beginningStock,
       ending_stock: endingStock,
@@ -533,7 +560,7 @@ export async function computeDetailedPARRecommendations(
   const sessionIds = sessions.map(session => session.id);
   const { data: allItems } = await supabase
     .from("inventory_session_items")
-    .select("session_id, item_name, current_stock, par_level, catalog_item_id, category, unit")
+    .select("session_id, item_name, current_stock, par_level, category, unit, metadata")
     .in("session_id", sessionIds);
 
   if (!allItems || allItems.length === 0) return [];
@@ -554,12 +581,13 @@ export async function computeDetailedPARRecommendations(
   }> = {};
 
   for (const item of allItems) {
-    const key = buildCatalogIdentityKey(item.catalog_item_id, item.item_name);
+    const cid = catalogIdFromSessionItem(item);
+    const key = buildCatalogIdentityKey(cid, item.item_name);
     if (!key) continue;
 
     if (!itemData[key]) {
       itemData[key] = {
-        catalog_item_id: item.catalog_item_id ?? null,
+        catalog_item_id: cid ?? null,
         normalized_name: normalizeItemName(item.item_name),
         display_name: item.item_name,
         category: item.category ?? null,
@@ -567,8 +595,8 @@ export async function computeDetailedPARRecommendations(
         stocks: new Array(orderedSessions.length).fill(null),
         pars: [],
       };
-    } else if (!itemData[key].catalog_item_id && item.catalog_item_id) {
-      itemData[key].catalog_item_id = item.catalog_item_id;
+    } else if (!itemData[key].catalog_item_id && cid) {
+      itemData[key].catalog_item_id = cid;
     }
 
     const sessionIndex = sessionIndexMap[item.session_id];

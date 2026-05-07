@@ -20,6 +20,8 @@ import { toast } from "sonner";
 import { Plus, Trash2, TrendingDown, CalendarDays, Users, Star } from "lucide-react";
 import { format, startOfDay, subDays, startOfMonth } from "date-fns";
 import { formatCurrency } from "@/lib/inventory-utils";
+import { getPackFromCatalogItem, convertInputToCasesSafe } from "@/lib/inventory-conversions";
+import { computeLineInventoryValue } from "@/domain/inventory/casePlanningEngine";
 
 // ─── Constants ───────────────────────────────────────────
 const REASONS = [
@@ -38,9 +40,17 @@ type CatalogWasteItem = {
   id: string;
   item_name: string;
   default_unit_cost: number | null;
+  /** Catalog unit (CS, LB, EA, etc.) — determines how entered quantity is interpreted for cost. */
   unit: string | null;
   brand_name: string | null;
   vendor_name: string | null;
+  // Pack fields — required to convert entered quantity to cases before computing cost
+  units_per_case: number | null;
+  unit_size: number | null;
+  unit_type: string | null;
+  total_per_case: number | null;
+  pack_size: string | null;
+  pack_parse_success: boolean | null;
 };
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -61,7 +71,7 @@ function normalizeItemName(value: string) {
 }
 
 export default function WasteLogPage() {
-  const { currentRestaurant } = useRestaurant();
+  const { currentRestaurant, currentLocation } = useRestaurant();
   const { user } = useAuth();
 
   const isManagerOrOwner =
@@ -85,6 +95,8 @@ export default function WasteLogPage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedCatalogItemId, setSelectedCatalogItemId] = useState<string | null>(null);
   const [quantity, setQuantity]         = useState("");
+  /** Unit the staff member is entering quantity in. Saved to waste_log.quantity_unit. */
+  const [quantityUnit, setQuantityUnit] = useState<"case" | "lb" | "each">("case");
   const [selectedReason, setSelectedReason] = useState<ReasonValue | "">("");
   const [notes, setNotes]               = useState("");
   const [saving, setSaving]             = useState(false);
@@ -98,12 +110,15 @@ export default function WasteLogPage() {
   const fetchEntries = async () => {
     if (!currentRestaurant) return;
     setLoading(true);
-    const { data } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = supabase
       .from("waste_log")
       .select("*, profiles(full_name, email)")
       .eq("restaurant_id", currentRestaurant.id)
       .order("logged_at", { ascending: false })
       .limit(200);
+    if (currentLocation?.id) query = query.eq("location_id", currentLocation.id);
+    const { data } = await query;
     if (data) setEntries(data);
     setLoading(false);
   };
@@ -130,7 +145,7 @@ export default function WasteLogPage() {
     if (!currentRestaurant) return;
     const { data } = await supabase
       .from("inventory_catalog_items")
-      .select("id, item_name, default_unit_cost, unit, brand_name, vendor_name")
+      .select("id, item_name, default_unit_cost, unit, brand_name, vendor_name, units_per_case, unit_size, unit_type, total_per_case, pack_size, pack_parse_success")
       .eq("restaurant_id", currentRestaurant.id)
       .order("item_name");
     if (data) setCatalogItems(data as CatalogWasteItem[]);
@@ -141,7 +156,7 @@ export default function WasteLogPage() {
     fetchEntries();
     fetchCatalog();
     if (isManagerOrOwner) fetchEmployees();
-  }, [currentRestaurant]);
+  }, [currentRestaurant, currentLocation?.id]);
 
   // ─── Close suggestions on outside click ──────────────
   useEffect(() => {
@@ -234,9 +249,33 @@ export default function WasteLogPage() {
   const resolvedUnitCost = resolvedCatalogItem?.default_unit_cost != null
     ? Number(resolvedCatalogItem.default_unit_cost)
     : null;
-  const estimatedWasteCost = Number.isFinite(parsedQuantity) && parsedQuantity > 0 && resolvedUnitCost != null
-    ? parsedQuantity * resolvedUnitCost
-    : null;
+
+  // Convert the explicitly-selected unit to CASES before computing cost.
+  // unit_cost is always per-case; we must NOT multiply raw qty without conversion.
+  const resolvedPack = resolvedCatalogItem ? getPackFromCatalogItem(resolvedCatalogItem) : null;
+
+  const qtyConversion = useMemo(() => {
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return null;
+    if (quantityUnit === "case") {
+      // Direct entry in cases — no pack needed
+      return { cases: Math.round(parsedQuantity * 100) / 100, ok: true as const };
+    }
+    // lb or each — requires pack structure from a matched catalog item
+    if (!resolvedPack) {
+      return { cases: 0, ok: false as const, reason: "Select a catalog item to convert lb/each to cases" };
+    }
+    const catalogUnitForConversion = quantityUnit === "lb" ? "LB" : "EA";
+    return convertInputToCasesSafe(parsedQuantity, catalogUnitForConversion, resolvedPack);
+  }, [parsedQuantity, quantityUnit, resolvedPack]);
+
+  const estimatedWasteCost =
+    qtyConversion?.ok && resolvedUnitCost != null
+      ? computeLineInventoryValue({
+          currentStockCases: qtyConversion.cases,
+          parLevelCases: 0,
+          unitCostPerCase: resolvedUnitCost,
+        }).dollars
+      : null;
 
   // ─── Save waste entry ─────────────────────────────────
   const handleSave = async () => {
@@ -248,9 +287,11 @@ export default function WasteLogPage() {
     setSaving(true);
     const { error } = await supabase.from("waste_log").insert({
       restaurant_id: currentRestaurant.id,
+      location_id:   currentLocation?.id ?? null,
       catalog_item_id: resolvedCatalogItem?.id ?? null,
       item_name:     normalizedItemName,
       quantity:      quantityValue,
+      quantity_unit: quantityUnit,
       reason:        selectedReason,
       notes:         notes.trim() || null,
       unit_cost:     resolvedUnitCost,
@@ -270,6 +311,7 @@ export default function WasteLogPage() {
       setItemSearch("");
       setSelectedCatalogItemId(null);
       setQuantity("");
+      setQuantityUnit("case");
       setSelectedReason("");
       setNotes("");
       fetchEntries();
@@ -292,6 +334,8 @@ export default function WasteLogPage() {
   const employeeName = (entry: any) =>
     entry.profiles?.full_name || entry.profiles?.email || "Unknown";
 
+  const blockWasteWithoutLocation = !!currentRestaurant && !currentLocation;
+
   const canSave = !!itemName.trim() && !!quantity && parsedQuantity > 0 && !!selectedReason;
 
   // ─── Loading skeleton ─────────────────────────────────
@@ -313,6 +357,11 @@ export default function WasteLogPage() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {blockWasteWithoutLocation ? (
+        <p className="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-3 py-2">
+          Select a specific location to log waste.
+        </p>
+      ) : null}
       {/* ═══ HEADER ═══ */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -321,6 +370,7 @@ export default function WasteLogPage() {
         </div>
         <Button
           className="bg-gradient-amber shadow-amber gap-2"
+          disabled={blockWasteWithoutLocation}
           onClick={() => setSheetOpen(true)}
         >
           <Plus className="h-4 w-4" /> Log Waste
@@ -550,20 +600,35 @@ export default function WasteLogPage() {
               </div>
             </div>
 
-            {/* 2. Quantity */}
+            {/* 2. Quantity + Unit */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 How much was wasted? *
               </label>
-              <Input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={quantity}
-                onChange={e => setQuantity(e.target.value)}
-                placeholder="e.g. 2 or 0.5"
-                className="h-10 font-mono"
-              />
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={quantity}
+                  onChange={e => setQuantity(e.target.value)}
+                  placeholder="e.g. 2 or 0.5"
+                  className="h-10 font-mono flex-1"
+                />
+                <Select value={quantityUnit} onValueChange={v => setQuantityUnit(v as "case" | "lb" | "each")}>
+                  <SelectTrigger className="h-10 w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="case">Cases</SelectItem>
+                    <SelectItem value="lb">Lbs</SelectItem>
+                    <SelectItem value="each">Each</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Select the unit you counted in. Cost is always calculated per case.
+              </p>
             </div>
 
             {/* 3. Cost snapshot */}
@@ -572,11 +637,16 @@ export default function WasteLogPage() {
               <p className="text-sm font-medium">
                 {estimatedWasteCost != null ? formatCurrency(estimatedWasteCost) : "Unavailable"}
               </p>
+              {qtyConversion && !qtyConversion.ok && parsedQuantity > 0 && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  ⚠ {qtyConversion.reason ?? "Cannot convert to cases — cost not calculated."}
+                </p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 {resolvedCatalogItem
                   ? resolvedUnitCost != null
-                    ? `${formatCurrency(resolvedUnitCost)} per ${resolvedCatalogItem.unit || "unit"} from the matched catalog item`
-                    : "Matched catalog item has no default unit cost yet."
+                    ? `${formatCurrency(resolvedUnitCost)} per case from the matched catalog item`
+                    : "Matched catalog item has no default cost per case yet."
                   : "Select a catalog item or type an exact unique catalog item name to capture cost."}
               </p>
             </div>
@@ -637,7 +707,7 @@ export default function WasteLogPage() {
             </Button>
             <Button
               className="flex-1 bg-gradient-amber shadow-amber"
-              disabled={!canSave || saving}
+              disabled={!canSave || saving || blockWasteWithoutLocation}
               onClick={handleSave}
             >
               {saving ? "Saving…" : "Log Waste Entry"}
