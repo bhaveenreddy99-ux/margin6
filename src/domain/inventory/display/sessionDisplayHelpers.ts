@@ -19,30 +19,28 @@ export const DESKTOP_CATEGORY_LIST_MAX_HEIGHT = 560;
 export const MOBILE_COUNT_CARD_HEIGHT = 268;
 
 /**
- * Laptop / wide desktop: ITEM | COUNT | PRICE | PAR? | NEED | STATUS | actions
- * Vendor and pack are shown as sub-text in the ITEM cell.
- * COUNT is the widest column — it holds the unit-type toggle + numeric input.
+ * SHARED desktop inventory count grid template — single source of truth.
+ *
+ * Used by EVERY row type on the desktop count table:
+ *   - the column header
+ *   - the category divider (spans 1 / -1)
+ *   - the normal item rows (InventorySessionDesktopItemRows)
+ *   - the virtualized item rows (VirtualizedDesktopCategoryBody)
+ *
+ * Columns:  ITEM | PACK / SIZE | PAR | COUNT | PRICE | STATUS | ACTIONS
  */
-export function getLaptopInventoryGridTemplate(parColumnVisible: boolean): string {
-  if (parColumnVisible) {
-    return [
-      "minmax(150px,1.8fr)", // item ~22%
-      "minmax(220px,3fr)",   // count ~37%
-      "minmax(72px,0.8fr)",  // price ~10%
-      "minmax(56px,0.7fr)",  // par ~8%
-      "minmax(56px,0.7fr)",  // need ~8%
-      "minmax(72px,0.8fr)",  // status ~10%
-      "40px",                // kebab
-    ].join(" ");
-  }
-  return [
-    "minmax(150px,2fr)",    // item ~24%
-    "minmax(220px,3.2fr)",  // count ~40%
-    "minmax(72px,0.85fr)",  // price ~10%
-    "minmax(56px,0.75fr)",  // need ~9%
-    "minmax(72px,0.85fr)",  // status ~10%
-    "40px",
-  ].join(" ");
+export const INVENTORY_COUNT_GRID_TEMPLATE =
+  "minmax(300px, 3fr) minmax(120px, 1fr) 80px minmax(260px, 1.8fr) minmax(100px, 0.8fr) minmax(120px, 0.8fr) 48px";
+
+/** Sum of column minimums — applied as min-width on the row container so narrow viewports scroll horizontally instead of squashing cells. */
+export const INVENTORY_COUNT_MIN_WIDTH = 1028;
+
+/**
+ * @deprecated Kept only to avoid touching legacy callers in one shot —
+ * always returns INVENTORY_COUNT_GRID_TEMPLATE.
+ */
+export function getLaptopInventoryGridTemplate(_parColumnVisible: boolean): string {
+  return INVENTORY_COUNT_GRID_TEMPLATE;
 }
 
 export function formatSessionRowDate(iso: string | null | undefined): string {

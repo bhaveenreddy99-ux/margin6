@@ -1,8 +1,11 @@
 import { Fragment, useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InventorySessionCategoryCardList } from "@/features/inventory-count/components/InventorySessionCategoryCardList";
-import { InventorySessionDesktopItemRows } from "@/features/inventory-count/components/InventorySessionDesktopItemRows";
+import {
+  InventoryCountCategoryDivider,
+  InventoryCountTableHeader,
+  InventorySessionDesktopItemRows,
+} from "@/features/inventory-count/components/InventorySessionDesktopItemRows";
+import { INVENTORY_COUNT_MIN_WIDTH } from "@/domain/inventory/display/sessionDisplayHelpers";
 import type { InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
 import type { InventorySessionDesktopCategoryListProps } from "@/features/inventory-count/types/inventorySessionDesktopCategoryListTypes";
 
@@ -15,7 +18,7 @@ export type InventorySessionUnitedDesktopTableProps = Omit<
 };
 
 export function InventorySessionUnitedDesktopTable(props: InventorySessionUnitedDesktopTableProps) {
-  const { sortedCategoryKeys, groupedItems, parColumnVisible, globalIndexByItemId, getApprovedPar } = props;
+  const { sortedCategoryKeys, groupedItems, globalIndexByItemId } = props;
   const canEditPar = props.canEditPar ?? true;
 
   const allItems = useMemo(
@@ -23,42 +26,36 @@ export function InventorySessionUnitedDesktopTable(props: InventorySessionUnited
     [sortedCategoryKeys, groupedItems],
   );
 
-  const showParColumn = parColumnVisible && allItems.some((i) => getApprovedPar(i) > 0);
-  const colSpan = showParColumn ? 8 : 7;
-
   if (allItems.length === 0) {
-    return (
-      <div className="py-8 text-center text-sm text-muted-foreground">No items in this list.</div>
-    );
+    return <div className="py-16 text-center text-sm text-muted-foreground">No items in this list.</div>;
   }
 
   return (
-    <div className="w-full min-w-0 max-w-full">
-      <div className="lg:hidden max-w-full overflow-x-hidden">
-        {sortedCategoryKeys.map((categoryLabel) => {
-          const catItems = groupedItems[categoryLabel] ?? [];
-          if (catItems.length === 0) return null;
-          const countedInCategory = catItems.filter(
-            (i) => i.current_stock != null && Number(i.current_stock) > 0,
-          ).length;
+    <div className="w-full">
+      {/* ═══ PHONE only (<md) — unchanged compact card list per category ═══ */}
+      <div className="md:hidden">
+        {sortedCategoryKeys.map((catLabel) => {
+          const catItems = groupedItems[catLabel] ?? [];
+          if (!catItems.length) return null;
+          const counted = catItems.filter(i => i.current_stock != null && Number(i.current_stock) > 0).length;
+          const pct = catItems.length > 0 ? Math.round((counted / catItems.length) * 100) : 0;
           return (
-            <Fragment key={categoryLabel}>
-              <div className="mb-2 flex w-full flex-col gap-2 border-b border-border/30 bg-gray-50 px-1 py-2 dark:bg-muted/30 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <h3 className="truncate text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-foreground">
-                    {categoryLabel}
-                  </h3>
-                  <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
-                    {catItems.length}
-                  </Badge>
+            <Fragment key={catLabel}>
+              <div className="sticky top-[var(--header-offset,96px)] z-10 flex items-center justify-between bg-[hsl(222,28%,9%)] px-4 py-2.5 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-white/70">{catLabel}</span>
+                  <span className="rounded-full bg-white/10 px-1.5 py-0.5 font-mono text-[10px] text-white/50">{catItems.length}</span>
                 </div>
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-gray-600 dark:text-muted-foreground">
-                  {countedInCategory}/{catItems.length} counted
-                </span>
+                <div className="flex items-center gap-2">
+                  <div className="h-1 w-12 overflow-hidden rounded-full bg-white/15">
+                    <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="font-mono text-[10px] text-white/40 tabular-nums">{counted}/{catItems.length}</span>
+                </div>
               </div>
               <InventorySessionCategoryCardList
-                showParColumn={showParColumn}
-                categoryLabel={categoryLabel}
+                showParColumn={false}
+                categoryLabel={catLabel}
                 catItems={catItems}
                 globalIndexByItemId={globalIndexByItemId}
                 riskThresholds={props.riskThresholds}
@@ -79,7 +76,7 @@ export function InventorySessionUnitedDesktopTable(props: InventorySessionUnited
                 savingId={props.savingId}
                 savedId={props.savedId}
                 lastEditedId={props.lastEditedId}
-                getApprovedPar={getApprovedPar}
+                getApprovedPar={props.getApprovedPar}
                 zoneStripEnabled={props.zoneStripEnabled}
                 getZoneStripConfig={props.getZoneStripConfig}
                 getZoneStripDraftResetNonce={props.getZoneStripDraftResetNonce}
@@ -91,94 +88,51 @@ export function InventorySessionUnitedDesktopTable(props: InventorySessionUnited
         })}
       </div>
 
-      <div className="hidden lg:block w-full min-w-0 overflow-x-auto [-webkit-overflow-scrolling:touch]">
-        <Table className="w-full min-w-[720px] table-fixed [table-layout:fixed]">
-          <TableHeader>
-            <TableRow className="border-b border-border/40 bg-muted/20 hover:bg-muted/20">
-              <TableHead className="w-[24%] min-w-[150px] py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Item
-              </TableHead>
-              <TableHead className="w-[40%] min-w-[220px] py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Count
-              </TableHead>
-              <TableHead className="w-[10%] min-w-[72px] py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Price
-              </TableHead>
-              {showParColumn && (
-                <TableHead className="w-[8%] min-w-[56px] py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Par
-                </TableHead>
-              )}
-              <TableHead className="w-[9%] min-w-[56px] py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Need
-              </TableHead>
-              <TableHead className="w-[10%] min-w-[72px] py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Status
-              </TableHead>
-              <TableHead className="w-10 min-w-[40px] p-1" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedCategoryKeys.map((categoryLabel) => {
-              const catItems = groupedItems[categoryLabel] ?? [];
-              if (catItems.length === 0) return null;
-              const countedInCategory = catItems.filter(
-                (i) => i.current_stock != null && Number(i.current_stock) > 0,
-              ).length;
-              return (
-                <Fragment key={categoryLabel}>
-                  <TableRow className="border-b border-border/40 bg-gray-50 dark:bg-muted/30 hover:bg-gray-50 dark:hover:bg-muted/30">
-                    <TableCell colSpan={colSpan} className="px-3 py-2.5">
-                      <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <h3 className="truncate text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-foreground">
-                            {categoryLabel}
-                          </h3>
-                          <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
-                            {catItems.length}
-                          </Badge>
-                        </div>
-                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-gray-600 dark:text-muted-foreground">
-                          {countedInCategory}/{catItems.length} counted
-                        </span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  <InventorySessionDesktopItemRows
-                    categoryLabel={categoryLabel}
-                    catItems={catItems}
-                    globalIndexByItemId={globalIndexByItemId}
-                    riskThresholds={props.riskThresholds}
-                    showParColumn={showParColumn}
-                    colSpan={colSpan}
-                    simplifyCountingRow={props.simplifyCountingRow}
-                    isCountingEditable={props.isCountingEditable}
-                    onUpdateStock={props.onUpdateStock}
-                    onSaveStock={props.onSaveStock}
-                    onSaveStockWithConversion={props.onSaveStockWithConversion}
-                    sessionUserId={props.sessionUserId}
-                    catalogById={props.catalogById}
-                    onKeyDown={props.onKeyDown}
-                    inputRefs={props.inputRefs}
-                    formatParColumnCell={props.formatParColumnCell}
-                    getProductNumber={props.getProductNumber}
-                    getLastOrderDate={props.getLastOrderDate}
-                    renderRowActionsMenu={props.renderRowActionsMenu}
-                    savingId={props.savingId}
-                    savedId={props.savedId}
-                    lastEditedId={props.lastEditedId}
-                    getApprovedPar={getApprovedPar}
-                    zoneStripEnabled={props.zoneStripEnabled}
-                    getZoneStripConfig={props.getZoneStripConfig}
-                    getZoneStripDraftResetNonce={props.getZoneStripDraftResetNonce}
-                    onCommitZoneCount={props.onCommitZoneCount}
-                    canEditPar={canEditPar}
-                  />
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
+      {/* ═══ TABLET + DESKTOP (≥md) — pure CSS grid, single shared column template ═══ */}
+      <div className="hidden md:block w-full overflow-x-auto">
+        <div style={{ minWidth: INVENTORY_COUNT_MIN_WIDTH }}>
+          <InventoryCountTableHeader />
+          {sortedCategoryKeys.map((catLabel) => {
+            const catItems = groupedItems[catLabel] ?? [];
+            if (!catItems.length) return null;
+            const counted = catItems.filter(i => i.current_stock != null && Number(i.current_stock) > 0).length;
+            return (
+              <Fragment key={catLabel}>
+                <InventoryCountCategoryDivider label={catLabel} total={catItems.length} counted={counted} />
+                <InventorySessionDesktopItemRows
+                  categoryLabel={catLabel}
+                  catItems={catItems}
+                  globalIndexByItemId={globalIndexByItemId}
+                  riskThresholds={props.riskThresholds}
+                  showParColumn={false}
+                  colSpan={6}
+                  simplifyCountingRow={props.simplifyCountingRow}
+                  isCountingEditable={props.isCountingEditable}
+                  onUpdateStock={props.onUpdateStock}
+                  onSaveStock={props.onSaveStock}
+                  onSaveStockWithConversion={props.onSaveStockWithConversion}
+                  sessionUserId={props.sessionUserId}
+                  catalogById={props.catalogById}
+                  onKeyDown={props.onKeyDown}
+                  inputRefs={props.inputRefs}
+                  formatParColumnCell={props.formatParColumnCell}
+                  getProductNumber={props.getProductNumber}
+                  getLastOrderDate={props.getLastOrderDate}
+                  renderRowActionsMenu={props.renderRowActionsMenu}
+                  savingId={props.savingId}
+                  savedId={props.savedId}
+                  lastEditedId={props.lastEditedId}
+                  getApprovedPar={props.getApprovedPar}
+                  zoneStripEnabled={props.zoneStripEnabled}
+                  getZoneStripConfig={props.getZoneStripConfig}
+                  getZoneStripDraftResetNonce={props.getZoneStripDraftResetNonce}
+                  onCommitZoneCount={props.onCommitZoneCount}
+                  canEditPar={canEditPar}
+                />
+              </Fragment>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

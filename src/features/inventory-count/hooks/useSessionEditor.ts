@@ -189,11 +189,12 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
   }, []);
 
   // Local row clear (called from the page only after a successful handleClearEntries DB write).
+  // current_stock is NOT NULL in the schema, so we mirror the DB by writing 0 (counted predicate is `> 0`).
   const clearAllItemEntries = useCallback(() => {
     setItemById((prev) => {
       const next = { ...prev };
       for (const id of Object.keys(next)) {
-        next[id] = { ...next[id], current_stock: null, inventory_session_item_zones: [] };
+        next[id] = { ...next[id], current_stock: 0, inventory_session_item_zones: [] };
       }
       return next;
     });

@@ -1,31 +1,37 @@
 import { useCallback, type KeyboardEvent, type MutableRefObject, type ReactNode, type Ref } from "react";
 import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
-import { Badge } from "@/components/ui/badge";
-import { SessionItemZoneCountStrip } from "@/features/inventory-count/components/SessionItemZoneCountStrip";
 import { CountSheetItemStockField } from "@/features/inventory-count/components/CountSheetItemStockField";
+import {
+  StatusPill,
+  COUNT_CELL_ITEM,
+  COUNT_CELL_PACK,
+  COUNT_CELL_PAR,
+  COUNT_CELL_COUNT,
+  COUNT_CELL_PRICE,
+  COUNT_CELL_STATUS,
+  COUNT_CELL_ACTIONS,
+  formatParCell,
+} from "@/features/inventory-count/components/InventorySessionDesktopItemRows";
 import type {
   InventorySessionDesktopCategoryListProps,
   ZoneStripConfig,
 } from "@/features/inventory-count/types/inventorySessionDesktopCategoryListTypes";
-import { formatLastOrdered as formatLastOrderedHelper } from "@/domain/inventory/enterInventoryHelpers";
 import { resolveSessionItemUnitPrice } from "@/domain/inventory/display/itemUnitPrice";
 import {
   DESKTOP_CATEGORY_LIST_MAX_HEIGHT,
+  INVENTORY_COUNT_GRID_TEMPLATE,
   desktopSessionRowHeight,
-  getLaptopInventoryGridTemplate,
 } from "@/domain/inventory/display/sessionDisplayHelpers";
 import type { InventoryCatalogItemRow, InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
 import type { SaveStockWithConversionPayload } from "@/features/inventory-count/hooks/useItemCommands";
 import {
   computeOrderQty,
   formatCurrency,
-  formatNum,
   getRisk,
   getRowBgClass,
   type RiskThresholds,
 } from "@/lib/inventory-utils";
 import { cn } from "@/lib/utils";
-import { Lock } from "lucide-react";
 
 type RowContext = {
   catItems: InventorySessionItemRow[];
@@ -59,17 +65,8 @@ type RowContext = {
   ) => void | Promise<void>;
   categoryLabel: string;
   showParColumn: boolean;
-  gridTemplate: string;
-  colSpan: number;
   canEditPar: boolean;
 };
-
-function statusLabelForRow(risk: ReturnType<typeof getRisk>): string {
-  if (risk.level === "NO_PAR") return "No PAR";
-  if (risk.level === "RED") return "Critical";
-  if (risk.level === "YELLOW") return "Low";
-  return "OK";
-}
 
 function VirtualRow({
   index,
@@ -85,9 +82,7 @@ function VirtualRow({
   catalogById,
   onKeyDown,
   inputRefs,
-  formatParColumnCell,
   getProductNumber,
-  getLastOrderDate,
   renderRowActionsMenu,
   savingId,
   savedId,
@@ -95,14 +90,8 @@ function VirtualRow({
   getApprovedPar,
   zoneStripEnabled,
   getZoneStripConfig,
-  getZoneStripDraftResetNonce,
-  onCommitZoneCount,
   categoryLabel,
-  showParColumn,
-  gridTemplate,
-  colSpan,
   simplifyCountingRow,
-  canEditPar,
 }: RowComponentProps<RowContext>) {
   const item = catItems[index];
   if (!item) return null;
@@ -114,43 +103,54 @@ function VirtualRow({
   const rowBg = getRowBgClass(item.current_stock);
   const isRecentlyEdited = lastEditedId === item.id;
   const strip = zoneStripEnabled ? getZoneStripConfig(item) : null;
-  const zoneLine =
-    strip && item.inventory_session_item_zones?.find((z) => z.list_category_id === strip.listCategoryId);
   const sku = item.vendor_sku?.trim() || getProductNumber(item);
   const cat = item.catalog_item_id ? (catalogById[item.catalog_item_id] ?? null) : null;
   const unitPrice = resolveSessionItemUnitPrice(item, cat);
 
   return (
-    <div
-      style={{ ...style, overflow: "hidden" }}
-      className="box-border border-b border-border/40"
-      role="row"
-    >
+    <div style={{ ...style, overflow: "hidden" }} className="box-border" role="row">
       <div
         className={cn(
-          "grid min-h-0 w-full min-w-0 items-center gap-x-1 gap-y-0 border-b border-border/40 px-1 py-1 sm:px-1.5",
+          "grid items-center border-b border-border/30 transition-colors hover:bg-muted/[0.18]",
           rowBg,
           isRecentlyEdited && "bg-blue-50/90 dark:bg-blue-950/25",
         )}
-        style={{ gridTemplateColumns: gridTemplate }}
-        role="grid"
+        style={{ gridTemplateColumns: INVENTORY_COUNT_GRID_TEMPLATE, height: "100%" }}
       >
-        <div className="min-w-0 py-0.5">
+        {/* ITEM */}
+        <div role="cell" className={COUNT_CELL_ITEM}>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="truncate text-sm font-semibold leading-snug text-foreground">
+            <span className="truncate text-[13px] font-semibold leading-snug text-foreground">
               {item.item_name}
-              {sku ? (
-                <span className="font-normal text-muted-foreground"> · #{sku}</span>
-              ) : null}
             </span>
-            <span className="truncate text-[10px] text-muted-foreground/70">
-              {[item.brand_name, item.vendor_name?.trim(), item.pack_size?.trim()]
-                .filter(Boolean)
-                .join(" · ") || " "}
+            <span className="truncate text-[10px] text-muted-foreground/65 leading-none">
+              {[item.vendor_name?.trim(), sku ? `#${sku}` : null].filter(Boolean).join(" · ")}
             </span>
           </div>
         </div>
-        <div className="flex min-w-0 justify-center py-0.5">
+
+        {/* PACK / SIZE */}
+        <div role="cell" className={COUNT_CELL_PACK}>
+          <span className="block truncate font-mono text-[11px] text-muted-foreground/75 whitespace-nowrap">
+            {item.pack_size?.trim() || "—"}
+          </span>
+        </div>
+
+        {/* PAR — canonical value from getApprovedPar; "—" when 0/missing */}
+        <div role="cell" className={COUNT_CELL_PAR}>
+          <span
+            className={
+              rowPar > 0
+                ? "font-mono text-xs font-semibold tabular-nums text-foreground/80"
+                : "font-mono text-xs tabular-nums text-muted-foreground/60"
+            }
+          >
+            {formatParCell(rowPar)}
+          </span>
+        </div>
+
+        {/* COUNT */}
+        <div role="cell" className={COUNT_CELL_COUNT}>
           <CountSheetItemStockField
             item={item}
             variant="desktop"
@@ -175,50 +175,21 @@ function VirtualRow({
             rowPar={rowPar}
           />
         </div>
-        <div className="text-right font-mono text-xs tabular-nums text-gray-700 dark:text-foreground/90">
-          {unitPrice != null ? formatCurrency(unitPrice) : "—"}
+
+        {/* PRICE */}
+        <div role="cell" className={COUNT_CELL_PRICE}>
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {unitPrice != null ? formatCurrency(unitPrice) : "—"}
+          </span>
         </div>
-        {showParColumn && (
-          <div className="text-right font-mono text-sm font-semibold tabular-nums">
-            <span className="inline-flex items-center justify-end gap-1">
-              <span>{formatParColumnCell(item)}</span>
-              {!canEditPar ? (
-                <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="PAR locked by owner" />
-              ) : null}
-            </span>
-          </div>
-        )}
-        <div className="text-right">
-          {needQty !== null ? (
-            <span
-              className={cn(
-                "font-mono text-sm font-semibold tabular-nums",
-                needQty > 0 ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {formatNum(needQty)}
-            </span>
-          ) : (
-            <span className="text-sm text-muted-foreground/35">—</span>
-          )}
+
+        {/* STATUS */}
+        <div role="cell" className={COUNT_CELL_STATUS}>
+          <StatusPill risk={risk} needQty={needQty} />
         </div>
-        <div className="text-center">
-          {risk.level === "NO_PAR" ? (
-            <Badge
-              variant="outline"
-              className="border-amber-500/40 bg-amber-500/[0.06] text-[10px] font-medium text-amber-950 dark:text-amber-100"
-            >
-              {statusLabelForRow(risk)}
-            </Badge>
-          ) : (
-            <Badge
-              className={cn("border-0 text-[10px] font-medium tabular-nums", risk.bgClass, risk.textClass)}
-            >
-              {statusLabelForRow(risk)}
-            </Badge>
-          )}
-        </div>
-        <div className="flex justify-end p-0.5" onClick={(e) => e.stopPropagation()}>
+
+        {/* ACTIONS */}
+        <div role="cell" className={COUNT_CELL_ACTIONS} onClick={(e) => e.stopPropagation()}>
           {renderRowActionsMenu(item)}
         </div>
       </div>
@@ -255,16 +226,12 @@ export function VirtualizedDesktopCategoryBody(props: VirtualizedDesktopCategory
     },
     [catItems, zoneStripEnabled, getZoneStripConfig],
   );
-  const gridTemplate = getLaptopInventoryGridTemplate(showParColumn);
-  const colSpan = showParColumn ? 10 : 9;
 
   const rowProps: RowContext = {
     ...rest,
     getZoneStripConfig,
     catItems,
     showParColumn,
-    gridTemplate,
-    colSpan,
     simplifyCountingRow,
     zoneStripEnabled,
     categoryLabel: props.categoryLabel,

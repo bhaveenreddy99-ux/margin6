@@ -43,6 +43,8 @@ export function PARImportDialog({ open, onOpenChange, onImportComplete, existing
   const {
     step, setStep,
     headers,
+    rows,
+    vendor,
     fieldMappings,
     mapping,
     showMappingEditor, setShowMappingEditor,

@@ -252,7 +252,11 @@ export default function InventoryCountPage() {
     [items, categoryMode, hasMappings, mappedCategories, categoryMapping, countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName, riskThresholds],
   );
 
-  const countedItems = items.filter((i) => i.current_stock !== null).length;
+  // Counted = current_stock entered AND > 0. Matches per-category header logic so
+  // the top-level progress and category headers always agree. (Seeded items default to 0.)
+  const countedItems = items.filter(
+    (i) => i.current_stock != null && Number(i.current_stock) > 0,
+  ).length;
   const totalItems = items.length;
   const progressPct = totalItems > 0 ? Math.round((countedItems / totalItems) * 100) : 0;
 

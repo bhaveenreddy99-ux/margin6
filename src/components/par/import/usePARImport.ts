@@ -247,6 +247,8 @@ export function usePARImport({ open, existingGuideId, preselectedListId }: UsePA
   return {
     step, setStep,
     headers,
+    rows,
+    vendor,
     fieldMappings,
     mapping,
     showMappingEditor, setShowMappingEditor,

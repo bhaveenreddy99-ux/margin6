@@ -153,7 +153,18 @@ export function UniversalCountInput({
   const [countMode, setCountMode] = useState<CountMode>("cases");
   const [rawInput, setRawInput] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Tracks the case-equivalent value this component last pushed to the parent.
+   * Used to distinguish "the parent's `current_stock` change came from us
+   * (typing/save round-trip)" from "the parent reset us externally (Clear All
+   * Counts, server reload, optimistic rollback)". On external resets the local
+   * `rawInput` is rebuilt from `item.current_stock`; on round-trips it isn't
+   * (otherwise typing in `weight` or `units` mode would be clobbered when the
+   * parent updates the case-equivalent stock).
+   */
+  const lastPushedCasesRef = useRef<number | null>(null);
 
+  // Initial sync when the row identity changes (mount, or row swap).
   useEffect(() => {
     const d = getDisplayValue({
       current_stock: item.current_stock,
@@ -162,7 +173,30 @@ export function UniversalCountInput({
     });
     setCountMode(parseUnitFromDisplay(d.unit));
     setRawInput(d.value === 0 ? "" : String(d.value));
+    lastPushedCasesRef.current =
+      item.current_stock == null || Number(item.current_stock) === 0
+        ? null
+        : Number(item.current_stock);
   }, [item.id]);
+
+  // External-change sync: detect when `item.current_stock` differs from what we
+  // last pushed and resync local state. This catches Clear All Counts and
+  // server reloads without breaking active typing.
+  useEffect(() => {
+    const incoming =
+      item.current_stock == null || Number(item.current_stock) === 0
+        ? null
+        : Number(item.current_stock);
+    if (incoming === lastPushedCasesRef.current) return;
+    const d = getDisplayValue({
+      current_stock: item.current_stock,
+      counted_as: item.counted_as,
+      counted_value: item.counted_value,
+    });
+    setCountMode(parseUnitFromDisplay(d.unit));
+    setRawInput(d.value === 0 ? "" : String(d.value));
+    lastPushedCasesRef.current = incoming;
+  }, [item.current_stock, item.counted_as, item.counted_value]);
 
   const parsedValue = useMemo(() => parseInputValue(rawInput), [rawInput]);
   const inputInvalid = useMemo(() => {
@@ -202,11 +236,13 @@ export function UniversalCountInput({
     (nextRaw: string, mode: CountMode) => {
       const p = parseInputValue(nextRaw);
       if (nextRaw.trim() === "") {
+        lastPushedCasesRef.current = null;
         onUpdateStock(item.id, "");
         return;
       }
       if (p === null) return;
       const c = convertToCases({ value: p, unit: mode }, pack);
+      lastPushedCasesRef.current = c.casesValue === 0 ? null : c.casesValue;
       onUpdateStock(item.id, String(c.casesValue));
     },
     [item.id, onUpdateStock, pack],
@@ -357,6 +393,7 @@ export function UniversalCountInput({
       e.preventDefault();
       e.stopPropagation();
       setRawInput("");
+      lastPushedCasesRef.current = null;
       onUpdateStock(item.id, "");
       void onSaveStockWithConversion(item.id, {
         cases: null,

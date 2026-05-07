@@ -35,6 +35,7 @@ import {
   BarChart3,
   BookOpen,
   Check,
+  ChevronRight,
   ClipboardList,
   DollarSign,
   Eraser,
@@ -347,14 +348,15 @@ export function InventorySessionEditor({
     activeSession.status !== "IN_REVIEW" && activeSession.status !== "APPROVED";
   const canCloudActions = isCountingEditable && networkOnline;
   const showAdvancedListControls = isManagerOrOwner || !isCountingEditable;
+  const remainingItems = Math.max(0, totalItems - countedItems);
 
   const sessionModeBadge =
     activeSession.status === "IN_PROGRESS"
-      ? { label: "Counting", className: "border-blue-500/40 bg-blue-500/10 text-blue-950 dark:text-blue-100" }
+      ? { label: "Counting", className: "border-primary/40 bg-primary/10 text-primary dark:text-orange-200" }
       : activeSession.status === "IN_REVIEW"
-      ? { label: "In review", className: "border-sky-500/35 bg-sky-500/10 text-sky-950 dark:text-sky-100" }
+      ? { label: "In review", className: "border-sky-500/35 bg-sky-500/10 text-sky-700 dark:text-sky-200" }
       : activeSession.status === "APPROVED"
-      ? { label: "Approved", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100" }
+      ? { label: "Approved", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200" }
       : { label: activeSession.status, className: "border-border bg-muted/50 text-muted-foreground" };
 
   const resolveCountingParDisplay = (item: InventorySessionItemRow): number | null =>
@@ -590,8 +592,8 @@ export function InventorySessionEditor({
     <div className="space-y-0 animate-fade-in pb-28 lg:pb-4">
       {/* ═══ STICKY TOP CONTROL BAR ═══ */}
       <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm -mx-4 px-4 lg:-mx-0 lg:px-0 border-b border-border/40">
-        {/* Row 1: Identity + Location + Submit */}
-        <div className="flex items-center gap-3 py-3">
+        {/* Row 1: Breadcrumb + Status Badge */}
+        <div className="flex items-center gap-2 py-3">
           <Button
             variant="ghost"
             size="icon"
@@ -601,42 +603,38 @@ export function InventorySessionEditor({
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+              <button
+                type="button"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                onClick={handlers.onLeave}
+              >
+                Inventory Count
+              </button>
+              <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+              <h1 className="text-sm font-semibold truncate min-w-0">{activeSession.name}</h1>
               <Badge
                 variant="outline"
-                className={`shrink-0 mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${sessionModeBadge.className}`}
+                className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${sessionModeBadge.className}`}
               >
                 {sessionModeBadge.label}
               </Badge>
-              <h1 className="text-base lg:text-lg font-bold tracking-tight truncate min-w-0 flex-1">
-                {activeSession.name}
-              </h1>
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <span className="text-xs text-muted-foreground truncate">
-                {selectedListName ? `List: ${selectedListName}` : ""}
-              </span>
-              <button
-                type="button"
-                className="text-xs font-medium text-primary hover:underline shrink-0"
-                onClick={handlers.onLeave}
-              >
-                Back to hub
-              </button>
+              {selectedListName && (
+                <span className="text-xs text-muted-foreground">List: {selectedListName}</span>
+              )}
               {locations.length > 1 && currentLocation && (
                 <Badge variant="outline" className="text-[10px] gap-1 shrink-0 font-normal">
                   <MapPin className="h-2.5 w-2.5" />
                   {currentLocation.name}
                 </Badge>
               )}
+              {editor.parColumnVisible && countingParGuideName ? (
+                <span className="text-[11px] text-muted-foreground">PAR: {countingParGuideName}</span>
+              ) : null}
             </div>
-            {editor.parColumnVisible && countingParGuideName ? (
-              <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                PAR: {countingParGuideName}
-              </p>
-            ) : null}
           </div>
-
           <div className="shrink-0 min-w-[50px] text-right hidden lg:block">
             {savingId && <span className="text-xs text-muted-foreground animate-pulse">Saving…</span>}
             {!savingId && savedId && (
@@ -645,14 +643,6 @@ export function InventorySessionEditor({
               </span>
             )}
           </div>
-
-          <Button
-            onClick={() => editor.setSubmitConfirmOpen(true)}
-            className="bg-blue-600 text-white shadow-md shadow-blue-600/20 hover:bg-blue-700 gap-2 h-9 px-5 text-sm shrink-0 hidden lg:flex"
-            disabled={!canCloudActions || items.length === 0}
-          >
-            <Send className="h-3.5 w-3.5" /> Submit for review
-          </Button>
         </div>
 
         {/* Row 2: Search + Category pills + Filters */}
@@ -758,17 +748,6 @@ export function InventorySessionEditor({
                 </SelectContent>
               </Select>
             )}
-            {isManagerOrOwner && isCountingEditable && (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 text-xs"
-                disabled={!canCloudActions}
-                onClick={() => canCloudActions && editor.setClearEntriesSessionId(activeSession.id)}
-              >
-                Clear all counts
-              </Button>
-            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" className="h-9 w-9">
@@ -831,11 +810,60 @@ export function InventorySessionEditor({
       {/* ═══ MOBILE PROGRESS BAR ═══ */}
       {isCompact && totalItems > 0 && (
         <div className="pt-2 pb-1 px-1">
-          <div className="h-1.5 rounded-full bg-muted/60 overflow-hidden">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-medium text-muted-foreground">{countedItems} of {totalItems} counted</span>
+            <span className="text-[10px] font-semibold text-primary">{Math.round(progressPct)}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-muted/60 overflow-hidden">
             <div
-              className="h-full rounded-full bg-blue-600 transition-all duration-500"
+              className="h-full rounded-full bg-gradient-orange transition-all duration-500"
               style={{ width: `${progressPct}%` }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* ═══ DESKTOP STATS PANEL — single Overall Progress card ═══ */}
+      {!useCompactLayout && totalItems > 0 && (
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-x-6 gap-y-4 rounded-xl border border-border/40 bg-card px-6 py-4 mt-4 shadow-sm">
+          <div className="flex-1 min-w-[260px]">
+            <p className="text-xs font-medium text-muted-foreground mb-1">Overall Progress</p>
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className="text-2xl font-bold tabular-nums text-foreground">{countedItems}</span>
+              <span className="text-sm text-muted-foreground font-medium">/ {totalItems} counted</span>
+              <span className="text-sm text-muted-foreground">·</span>
+              <span className="text-sm font-medium tabular-nums text-foreground">{remainingItems} remaining</span>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <div className="h-2 flex-1 rounded-full bg-muted/60 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-orange transition-all duration-500"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <span className="text-xs font-bold text-primary tabular-nums shrink-0">{progressPct}%</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 lg:ml-auto shrink-0 flex-wrap">
+            {isManagerOrOwner && isCountingEditable && (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 text-sm"
+                disabled={!canCloudActions}
+                onClick={() => canCloudActions && editor.setClearEntriesSessionId(activeSession.id)}
+              >
+                Clear All Counts
+              </Button>
+            )}
+            <Button
+              onClick={() => editor.setSubmitConfirmOpen(true)}
+              className="bg-gradient-orange text-white shadow-orange hover:opacity-90 transition-opacity gap-2 h-9 px-5 text-sm font-semibold"
+              disabled={!canCloudActions || items.length === 0 || submittingForReview}
+            >
+              <Send className="h-3.5 w-3.5" /> Submit for Review
+            </Button>
           </div>
         </div>
       )}
@@ -1197,7 +1225,7 @@ export function InventorySessionEditor({
               <div className="flex items-center gap-2">
                 <div className="h-1.5 flex-1 rounded-full bg-muted/60 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-blue-600 transition-all"
+                    className="h-full rounded-full bg-gradient-orange transition-all"
                     style={{ width: `${progressPct}%` }}
                   />
                 </div>
@@ -1215,7 +1243,7 @@ export function InventorySessionEditor({
               Uncounted
             </Button>
             <Button
-              className="bg-blue-600 text-white shadow-md shadow-blue-600/20 hover:bg-blue-700 h-11 px-5 text-sm font-medium shrink-0"
+              className="bg-gradient-orange text-white shadow-orange hover:opacity-90 transition-opacity h-11 px-5 text-sm font-semibold shrink-0"
               onClick={() => editor.setSubmitConfirmOpen(true)}
               disabled={!canCloudActions || items.length === 0 || submittingForReview}
             >
@@ -1283,7 +1311,7 @@ export function InventorySessionEditor({
                 editor.setSubmitConfirmOpen(false);
                 void handlers.onSubmitForReview();
               }}
-              className="bg-blue-600 text-white hover:bg-blue-700"
+              className="bg-gradient-orange text-white hover:opacity-90 transition-opacity"
             >
               {submittingForReview ? "Submitting…" : "Confirm Submit"}
             </AlertDialogAction>
@@ -1339,9 +1367,9 @@ export function InventorySessionEditor({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear all entries?</AlertDialogTitle>
+            <AlertDialogTitle>Clear all counts for this session?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will reset all current stock values to 0 for this session. Item rows are kept so you can recount.
+              This will remove entered counts and zone counts, but keep the session open.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1350,7 +1378,7 @@ export function InventorySessionEditor({
               onClick={() => void handlers.onClearEntries()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Clear Entries
+              Clear all counts
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1425,7 +1453,7 @@ export function InventorySessionEditor({
             </p>
             <Button
               onClick={() => void handlers.onAddItem()}
-              className="w-full bg-blue-600 text-white hover:bg-blue-700"
+              className="w-full bg-gradient-orange text-white hover:opacity-90 transition-opacity"
               disabled={!isCountingEditable}
             >
               Add
@@ -1519,31 +1547,6 @@ export function InventorySessionEditor({
         </DialogContent>
       </Dialog>
 
-      {/* Clear Entries Confirm */}
-      <AlertDialog
-        open={!!editor.clearEntriesSessionId}
-        onOpenChange={(o) => !o && editor.setClearEntriesSessionId(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Clear all counts?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will reset all current stock values to 0 for this session. The item rows will be
-              kept so you can recount.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void handlers.onClearEntries()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Clear all counts
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <AlertDialog open={reloadFromServerOpen} onOpenChange={setReloadFromServerOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1613,7 +1616,7 @@ export function InventorySessionEditor({
           </div>
           <SheetFooter className="flex flex-col gap-2 pt-2">
             <Button
-              className="w-full bg-blue-600 text-white hover:bg-blue-700"
+              className="w-full bg-gradient-orange text-white hover:opacity-90 transition-opacity"
               disabled={editItemDetailsSaving || !isCountingEditable}
               onClick={() => void handlers.onSaveEditItemDetails()}
             >
@@ -1678,7 +1681,7 @@ export function InventorySessionEditor({
           </div>
           <SheetFooter className="flex flex-col gap-2 pt-2">
             <Button
-              className="w-full bg-blue-600 text-white hover:bg-blue-700"
+              className="w-full bg-gradient-orange text-white hover:opacity-90 transition-opacity"
               disabled={staffParSending}
               onClick={() => void handlers.onStaffParChangeRequestSubmit()}
             >
@@ -1748,7 +1751,7 @@ export function InventorySessionEditor({
           </div>
           <SheetFooter className="flex flex-col gap-2 pt-2">
             <Button
-              className="w-full bg-blue-600 text-white hover:bg-blue-700"
+              className="w-full bg-gradient-orange text-white hover:opacity-90 transition-opacity"
               disabled={staffPriceSending}
               onClick={() => void handlers.onStaffPriceChangeRequestSubmit()}
             >
@@ -1831,7 +1834,7 @@ export function InventorySessionEditor({
           </div>
           <SheetFooter className="flex flex-col gap-2 pt-2">
             <Button
-              className="w-full bg-blue-600 text-white hover:bg-blue-700"
+              className="w-full bg-gradient-orange text-white hover:opacity-90 transition-opacity"
               disabled={managerParSaving || !isCountingEditable || !canEditPar}
               onClick={() => void handlers.onManagerParLevelSave()}
             >
@@ -1886,7 +1889,7 @@ export function InventorySessionEditor({
           </div>
           <SheetFooter className="flex flex-col gap-2 pt-2">
             <Button
-              className="w-full bg-blue-600 text-white hover:bg-blue-700"
+              className="w-full bg-gradient-orange text-white hover:opacity-90 transition-opacity"
               disabled={managerPriceSaving || !isCountingEditable}
               onClick={() => void handlers.onManagerPriceSave()}
             >

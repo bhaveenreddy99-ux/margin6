@@ -100,7 +100,7 @@ export function useItemCommands(deps: ItemCommandDeps) {
 
     if (stockVal == null) {
       deps.onItemUpdated(id, {
-        current_stock: null,
+        current_stock: 0,
         inventory_session_item_zones: [],
         counted_as: null,
         counted_value: null,
@@ -172,7 +172,7 @@ export function useItemCommands(deps: ItemCommandDeps) {
     if (sessionLocked(deps.activeSession?.status)) return;
     if (clientOffline()) return;
     const prev = deps.getSessionItem(id);
-    deps.onItemUpdated(id, { current_stock: null, inventory_session_item_zones: [] });
+    deps.onItemUpdated(id, { current_stock: 0, inventory_session_item_zones: [] });
     setSavingId(id);
     const result = await writeLegacySessionItemStockAndClearZones(id, null);
     setSavingId(null);
@@ -212,15 +212,16 @@ export function useItemCommands(deps: ItemCommandDeps) {
         return false;
       }
     }
+    // current_stock is NOT NULL — write 0 to "clear" (counted predicate is `> 0`).
     const { error } = await supabase
       .from("inventory_session_items")
-      .update({ current_stock: null })
+      .update({ current_stock: 0 })
       .eq("session_id", sessionId);
     if (error) {
       toast.error(error.message);
       return false;
     }
-    toast.success("Entries cleared — ready for recount");
+    toast.success("All counts cleared.");
     return true;
   }
 

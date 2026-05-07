@@ -28,9 +28,17 @@ export function parseInputValue(raw: string): number | null {
   return Math.max(0, val);
 }
 
-/** Normalize display value for controlled input: null → "", number → string */
+/**
+ * Normalize display value for the controlled count input.
+ *
+ * Both `null` AND `0` render as empty string because in this app's data model
+ * "uncounted" === `current_stock` not > 0 (see counted-items predicate on the
+ * Inventory Count page). Showing literal "0" in the input would make freshly
+ * seeded rows and just-cleared rows look like they already have a count.
+ */
 export function inputDisplayValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return "";
+  if (Number(value) === 0) return "";
   return String(value);
 }
 

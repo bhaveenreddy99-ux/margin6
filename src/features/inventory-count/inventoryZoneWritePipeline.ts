@@ -87,7 +87,9 @@ export async function writeLegacySessionItemStockAndClearZones(
 
   if (deleteError) return { ok: false, error: deleteError.message };
 
-  const patch: Record<string, number | string | null> = { current_stock: stockVal };
+  // current_stock is NOT NULL in the schema — clearing a count means writing 0,
+  // not null. The "counted" predicate (current_stock > 0) treats 0 as uncounted.
+  const patch: Record<string, number | string | null> = { current_stock: stockVal ?? 0 };
   if (meta !== undefined && meta !== null) {
     patch.counted_as = meta.counted_as;
     patch.counted_value = meta.counted_value;

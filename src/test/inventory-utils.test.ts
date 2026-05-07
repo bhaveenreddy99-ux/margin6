@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { getRisk, computeOrderQty, computeRiskLevel } from "@/lib/inventory-utils";
+import {
+  getRisk,
+  computeOrderQty,
+  computeRiskLevel,
+  inputDisplayValue,
+} from "@/lib/inventory-utils";
 
 describe("inventory-utils", () => {
   describe("getRisk", () => {
@@ -59,6 +64,26 @@ describe("inventory-utils", () => {
 
     it("defaults to ceiling when unit unknown", () => {
       expect(computeOrderQty(2, 10, null, null)).toBe(8);
+    });
+  });
+
+  describe("inputDisplayValue (Clear All Counts visual reset)", () => {
+    it("renders null and undefined as empty string", () => {
+      expect(inputDisplayValue(null)).toBe("");
+      expect(inputDisplayValue(undefined)).toBe("");
+    });
+
+    it("renders 0 as empty string — 0 is the 'uncounted' state in this app", () => {
+      // Clear All Counts writes 0 to current_stock (NOT NULL column).
+      // The count input MUST render that as blank, not literal "0",
+      // otherwise rows still appear to have a count.
+      expect(inputDisplayValue(0)).toBe("");
+    });
+
+    it("renders positive numbers as their string form", () => {
+      expect(inputDisplayValue(5)).toBe("5");
+      expect(inputDisplayValue(0.5)).toBe("0.5");
+      expect(inputDisplayValue(12.34)).toBe("12.34");
     });
   });
 });
