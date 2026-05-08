@@ -81,7 +81,10 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
   const isPortfolioMode = currentRestaurant === null && restaurants.length > 0 && !loading;
 
   const activeRestaurantIds = useMemo(
-    () => (restaurants.some((r) => r.role === "OWNER") ? restaurants.map((r) => r.id) : []),
+    () =>
+      restaurants
+        .filter((r) => r.role === "OWNER" || r.role === "MANAGER")
+        .map((r) => r.id),
     [restaurants],
   );
 
