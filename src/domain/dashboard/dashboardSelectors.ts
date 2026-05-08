@@ -4,6 +4,7 @@ import type { ReorderSummary } from "@/domain/inventory/reorderEngine";
 import type { RiskThresholds } from "@/lib/inventory-utils";
 import { computeLineInventoryValue } from "@/domain/inventory/casePlanningEngine";
 import { catalogIdFromSessionItem } from "@/domain/inventory/sessionItemCatalogLink";
+import { catalogItemIdsWithDuplicateParentRows } from "@/domain/inventory/zoneReconcile";
 import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
 import type {
   DashboardInvoiceStatusRow,
@@ -151,10 +152,51 @@ export function formatInventoryQty(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
-export function buildLatestInventorySnapshot(
+/**
+ * Deduplicates inventory_session_items by catalog_item_id.
+ * When the same catalog item appears on multiple rows (zone counting),
+ * merges their current_stock by summing. All other fields taken from
+ * the first occurrence (par_level, unit_cost, unit, pack_size are
+ * catalog-level and should be identical across duplicate rows).
+ * Items with no catalog_item_id are always kept as-is.
+ */
+function deduplicateSessionItems(
   items: InventorySessionItemRow[],
+): InventorySessionItemRow[] {
+  const dupIds = new Set(catalogItemIdsWithDuplicateParentRows(items));
+  if (dupIds.size === 0) return items; // fast path — no duplicates
+
+  const merged = new Map<string, InventorySessionItemRow>();
+  const standalone: InventorySessionItemRow[] = [];
+
+  for (const item of items) {
+    const cid = catalogIdFromSessionItem(item);
+    if (!cid || !dupIds.has(cid)) {
+      standalone.push(item);
+      continue;
+    }
+    const existing = merged.get(cid);
+    if (!existing) {
+      // First occurrence — clone and store
+      merged.set(cid, { ...item });
+    } else {
+      // Subsequent occurrence — sum the stock only
+      const prevStock = Number(existing.current_stock) || 0;
+      const addStock = Number(item.current_stock) || 0;
+      existing.current_stock = prevStock + addStock;
+    }
+  }
+
+  return [...standalone, ...merged.values()];
+}
+
+export function buildLatestInventorySnapshot(
+  rawItems: InventorySessionItemRow[],
   riskThresholds?: RiskThresholds,
 ): LatestInventorySnapshot {
+  // Deduplicate zone-split rows before any calculation so dashboard
+  // totals match Smart Order engine which reads one row per catalog item.
+  const items = deduplicateSessionItems(rawItems);
   const latestSessionUnitCostByCatalogId: Record<string, number> = {};
   for (const item of items) {
     const cid = catalogIdFromSessionItem(item);
@@ -220,9 +262,10 @@ export function buildLatestInventorySnapshot(
  * limited to rows with truthy `unit_cost` (matches legacy Reports “top items” filter).
  */
 export function buildTopSessionItemsByValue(
-  items: InventorySessionItemRow[],
+  rawItems: InventorySessionItemRow[],
   limit = 8,
 ): TopSessionItemByValue[] {
+  const items = deduplicateSessionItems(rawItems);
   return items
     .filter((i) => Boolean(i.unit_cost))
     .map((i) => ({
