@@ -128,6 +128,60 @@ function downloadBlob(blob: Blob, name: string) {
   URL.revokeObjectURL(url);
 }
 
+export function exportToVendorEmail(
+  items: ExportItem[],
+  meta?: {
+    listName?: string;
+    sessionName?: string;
+    date?: string;
+    vendorName?: string;
+    restaurantName?: string;
+    totalEstCost?: number;
+  }
+) {
+  const orderLines = items
+    .filter(i => (i.suggestedOrder ?? 0) > 0)
+    .map(i => {
+      const sku = i.product_number || i.vendor_sku || "";
+      const pack = i.pack_size ? ` (${i.pack_size})` : "";
+      const skuPart = sku ? ` — SKU: ${sku}` : "";
+      return `  • ${i.item_name}${pack}${skuPart} — Qty: ${i.suggestedOrder}`;
+    })
+    .join("\n");
+
+  const vendorName = meta?.vendorName || "Vendor";
+  const restaurantName = meta?.restaurantName || "Our Restaurant";
+  const date = meta?.date || new Date().toLocaleDateString();
+  const total = meta?.totalEstCost
+    ? `\nEstimated Order Total: $${meta.totalEstCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+    : "";
+
+  const subject = encodeURIComponent(
+    `Purchase Order — ${restaurantName} — ${date}`
+  );
+
+  const body = encodeURIComponent(
+`Hi ${vendorName} team,
+
+Please process the following order for ${restaurantName}:
+
+ORDER DATE: ${date}
+${meta?.listName ? `LIST: ${meta.listName}` : ""}
+${meta?.sessionName ? `COUNT SESSION: ${meta.sessionName}` : ""}
+
+ITEMS TO ORDER:
+${orderLines}
+${total}
+
+Please confirm receipt of this order and expected delivery date.
+
+Thank you,
+${restaurantName}`
+  );
+
+  window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
+}
+
 /** CSV template for List Management → Import (headers match import mapping fields). */
 export function downloadInventoryListImportTemplateCsv() {
   const headers = [

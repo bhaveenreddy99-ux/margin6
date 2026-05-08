@@ -1,16 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Download } from "lucide-react";
-import { exportToCSV, exportToExcel, exportToPDF } from "@/lib/export-utils";
+import { exportToCSV, exportToExcel, exportToPDF, exportToVendorEmail } from "@/lib/export-utils";
 
 interface ExportButtonsProps {
   items: any[];
   filename: string;
   type?: "inventory" | "smartorder";
   meta?: { listName?: string; sessionName?: string; date?: string };
+  vendorName?: string;
+  restaurantName?: string;
+  totalEstCost?: number;
 }
 
-export function ExportButtons({ items, filename, type = "inventory", meta }: ExportButtonsProps) {
+export function ExportButtons({ items, filename, type = "inventory", meta, vendorName, restaurantName, totalEstCost }: ExportButtonsProps) {
   if (items.length === 0) return null;
 
   return (
@@ -21,6 +24,15 @@ export function ExportButtons({ items, filename, type = "inventory", meta }: Exp
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
+        {type === "smartorder" && (
+          <DropdownMenuItem
+            onClick={() =>
+              exportToVendorEmail(items, { ...meta, vendorName, restaurantName, totalEstCost })
+            }
+          >
+            📧 Email Order to Vendor
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => exportToCSV(items, filename, type)}>
           Export CSV
         </DropdownMenuItem>

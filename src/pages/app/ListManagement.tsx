@@ -75,6 +75,7 @@ import type {
   ListCategory,
   NewItemDraft,
 } from "@/domain/catalog/listManagementTypes";
+import { toast } from "sonner";
 import { useListManagementData } from "@/hooks/useListManagementData";
 import { useListManagementActions } from "@/hooks/useListManagementActions";
 import { downloadInventoryListImportTemplateCsv } from "@/lib/export-utils";
@@ -1289,6 +1290,34 @@ export default function ListManagementPage() {
                   id="sheet-pack"
                   value={editSheetValues.pack_size}
                   onChange={e => setEditSheetValues(v => ({ ...v, pack_size: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="sheet-vendor-email" className="text-muted-foreground">Vendor Rep Email</Label>
+                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Coming soon</span>
+                </div>
+                <Input
+                  id="sheet-vendor-email"
+                  type="email"
+                  placeholder="rep@sysco.com"
+                  disabled
+                  className="cursor-not-allowed opacity-50"
+                  onFocus={() => toast.info("Vendor contact sync coming soon — export your order to email your rep directly.")}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="sheet-vendor-phone" className="text-muted-foreground">Vendor Rep Phone</Label>
+                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Coming soon</span>
+                </div>
+                <Input
+                  id="sheet-vendor-phone"
+                  type="tel"
+                  placeholder="(555) 000-0000"
+                  disabled
+                  className="cursor-not-allowed opacity-50"
+                  onFocus={() => toast.info("Vendor contact sync coming soon — export your order to email your rep directly.")}
                 />
               </div>
             </div>

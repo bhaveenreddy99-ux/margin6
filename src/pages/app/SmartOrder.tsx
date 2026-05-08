@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useRestaurant } from "@/contexts/RestaurantContext";
@@ -119,6 +119,7 @@ export default function SmartOrderPage() {
   const { currentRestaurant, currentLocation, locations } = useRestaurant();
   const perms = useLocationPermissions();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [runs, setRuns] = useState<SmartOrderRunWithEmbed[]>([]);
@@ -579,6 +580,17 @@ export default function SmartOrderPage() {
               items={displayItems.map(i => ({ ...i, suggestedOrder: i.suggested_order, pack_size: i.pack_size }))}
               filename="smart-order"
               type="smartorder"
+              vendorName={(() => {
+                const first = runItems.find(i => i.catalog_item_id ? catalogById[i.catalog_item_id]?.vendor_name : null);
+                return (first?.catalog_item_id ? catalogById[first.catalog_item_id]?.vendor_name : null) ?? undefined;
+              })()}
+              restaurantName={currentRestaurant?.name ?? undefined}
+              totalEstCost={smartOrderDetailMetrics.totalEstCost}
+              meta={{
+                listName: selectedRun.inventory_lists?.name ?? undefined,
+                sessionName: selectedRun.inventory_sessions?.name ?? undefined,
+                date: new Date().toLocaleDateString(),
+              }}
             />
             <Button
               size="sm"
@@ -595,9 +607,7 @@ export default function SmartOrderPage() {
               <ShoppingCart className="h-3.5 w-3.5" />
               {submitting ? 'Submitting…' : selectedRun.status === 'submitted' ? 'Update PO' : 'Submit Order'}
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 min-h-10" onClick={() => {
-              window.location.href = "/app/purchase-history";
-            }}>
+            <Button variant="outline" size="sm" className="gap-1.5 min-h-10" onClick={() => navigate("/app/purchase-history")}>
               <ExternalLink className="h-3.5 w-3.5" /> View orders & receipts
             </Button>
           </div>
