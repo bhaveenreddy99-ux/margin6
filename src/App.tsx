@@ -77,8 +77,8 @@ const App = () => (
                 <Route path="invoices" element={<StaffRestrictedRoute><InvoicesPage /></StaffRestrictedRoute>} />
                 <Route path="invoices/:id/review" element={<StaffRestrictedRoute><InvoiceReviewPage /></StaffRestrictedRoute>} />
                 <Route path="orders" element={<Navigate to="/app/invoices" replace />} />
-                <Route path="reports" element={<StaffRestrictedRoute><ReportsPage /></StaffRestrictedRoute>} />
-                <Route path="reports/compare" element={<OwnerRoute><CompareReport /></OwnerRoute>} />
+                <Route path="reports" element={<Navigate to="/app/dashboard" replace />} />
+                <Route path="reports/compare" element={<Navigate to="/app/dashboard" replace />} />
                 <Route path="staff" element={<Navigate to="/app/settings" replace />} />
                 <Route path="locations" element={<Navigate to="/app/settings" replace />} />
                 <Route path="settings/locations" element={<Navigate to="/app/settings" replace />} />

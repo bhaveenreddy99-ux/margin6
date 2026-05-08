@@ -1,23 +1,31 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Package, AlertTriangle, TrendingUp, TrendingDown, ShoppingCart,
   Building2, Bell, DollarSign, BarChart3, Sparkles,
   ClipboardCheck, Clock, CheckCircle2, Zap, ArrowRight,
-  CalendarDays, Activity, Receipt, Trash2, Truck,
+  CalendarDays, Activity, Receipt, Trash2, Truck, ChevronDown,
+  ArrowDownRight, ArrowUpRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useNavigate, Navigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useAllLocationsSummary, getFoodCostStatus, type DateRange, type LocationSummary } from "@/hooks/useAllLocationsSummary";
+import { useLocationAlerts, type LocationAlert } from "@/hooks/useLocationAlerts";
+import { loadInventoryMetrics } from "@/domain/dashboard/loadInventoryMetrics";
 import {
   format,
   differenceInDays,
+  formatDistanceToNow,
 } from "date-fns";
 import type { ComputedUsageItem, PARRecommendation } from "@/lib/usage-analytics";
 import {
@@ -1196,6 +1204,542 @@ function ProfitLossIntelligence({
   );
 }
 
+// ─── Shared currency formatter ───
+function fmtCurrencyLoc(n: number) {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+}
+
+function EstMark() {
+  return <span className="text-[10px] text-muted-foreground align-super ml-0.5">Est.</span>;
+}
+
+function statusBadgeLabel(s: LocationSummary["food_cost_status"]) {
+  switch (s) {
+    case "good": return "Good";
+    case "warning": return "Warning";
+    default: return "Critical";
+  }
+}
+function statusBadgeClass(s: LocationSummary["food_cost_status"]) {
+  switch (s) {
+    case "good": return "border-green-300 text-green-700 bg-green-50 dark:bg-green-950/30";
+    case "warning": return "border-amber-300 text-amber-800 bg-amber-50 dark:bg-amber-950/30";
+    default: return "border-red-300 text-red-700 bg-red-50 dark:bg-red-950/30";
+  }
+}
+function vsTargetClass(diff: number | null): string {
+  if (diff == null) return "text-muted-foreground";
+  if (diff < 0) return "text-green-600 dark:text-green-400";
+  if (diff < 3) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+function complianceBarClass(ratio: number): string {
+  if (ratio >= 1) return "bg-green-500/90";
+  if (ratio >= 0.5) return "bg-amber-500/90";
+  return "bg-red-500/90";
+}
+function alertCardClass(sev: LocationAlert["severity"]) {
+  switch (sev) {
+    case "critical": return "border-red-200 bg-red-50/80 hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/25";
+    case "warning": return "border-amber-200 bg-amber-50/80 hover:bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/25";
+    default: return "border-blue-200 bg-blue-50/80 hover:bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/25";
+  }
+}
+function severityDotClass(sev: LocationAlert["severity"]) {
+  switch (sev) {
+    case "critical": return "bg-red-600";
+    case "warning": return "bg-amber-600";
+    default: return "bg-blue-600";
+  }
+}
+
+// ─── Reports Tab (inlined from SingleReport) ───
+function DashboardReportsTab({
+  restaurantId,
+  locationId,
+  canSeeFoodCostPct = true,
+  canSeeInventoryValue = true,
+  highUsage = [],
+  parentTrendData = [],
+  recommendations = [],
+}: {
+  restaurantId: string;
+  locationId?: string | null;
+  canSeeFoodCostPct?: boolean;
+  canSeeInventoryValue?: boolean;
+  highUsage?: ComputedUsageItem[];
+  parentTrendData?: { label: string; value: number }[];
+  recommendations?: PARRecommendation[];
+}) {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [kpis, setKpis] = useState({ value: 0, red: 0, yellow: 0, green: 0, sessions: 0 });
+  const [trend, setTrend] = useState<{ week: string; value: number }[]>([]);
+  const [topItems, setTopItems] = useState<{ item_name: string; total_value: number; current_stock: number; unit: string }[]>([]);
+  const [parMetrics, setParMetrics] = useState<{ total: number; major: number; top5: string[] } | null>(null);
+  const [lastApprovedAt, setLastApprovedAt] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setFetchError(false);
+    try {
+      const metrics = await loadInventoryMetrics(restaurantId, locationId ?? undefined);
+      setLastApprovedAt(metrics.lastSessionApprovedAtIso);
+      setKpis({
+        value: metrics.inventoryValue,
+        red: metrics.stockStatus.red,
+        yellow: metrics.stockStatus.yellow,
+        green: metrics.stockStatus.green,
+        sessions: metrics.lastSessionDate ? 1 : 0,
+      });
+      setTrend(metrics.trendData.map((p) => ({ week: p.label, value: p.value })));
+      setTopItems(metrics.topItemsByValue);
+      setParMetrics({
+        total: metrics.recommendations.length,
+        major: metrics.recommendations.filter((r) => Math.abs(r.change_pct) >= 20).length,
+        top5: metrics.recommendations.slice(0, 5).map((r) => r.item_name),
+      });
+    } catch {
+      setFetchError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [restaurantId, locationId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  if (loading) return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-4">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>
+      <Skeleton className="h-56 rounded-xl" />
+    </div>
+  );
+
+  if (fetchError) return (
+    <Card><CardContent className="flex flex-col items-center py-14 text-center gap-4">
+      <AlertTriangle className="h-8 w-8 text-destructive/40" />
+      <div>
+        <p className="text-sm font-semibold">Couldn't load this report</p>
+        <p className="text-xs text-muted-foreground mt-0.5">Check your connection and try again.</p>
+      </div>
+      <Button variant="outline" size="sm" onClick={loadData}>Retry</Button>
+    </CardContent></Card>
+  );
+
+  if (kpis.sessions === 0) return (
+    <Card><CardContent className="empty-state py-16">
+      <BarChart3 className="empty-state-icon" />
+      <p className="empty-state-title">No approved inventory yet</p>
+      <p className="empty-state-description">Approve an inventory session to see reports.</p>
+    </CardContent></Card>
+  );
+
+  return (
+    <div className="space-y-5">
+      {lastApprovedAt && (
+        <p className="text-[11px] text-muted-foreground leading-snug px-0.5">{STOCK_TRUTH_MESSAGE}</p>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-primary/15 bg-card hover:shadow-md transition-all duration-200 p-5">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/8">
+              <DollarSign className="h-5 w-5 text-primary" />
+            </div>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground">Inventory Value</p>
+          <p className="text-3xl font-bold tracking-tight tabular-nums mt-1">{canSeeInventoryValue ? fmtCurrencyLoc(kpis.value) : "—"}</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">From last approved count</p>
+        </div>
+        <div className="rounded-xl border border-destructive/15 bg-card hover:shadow-md transition-all duration-200 p-5">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/8">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+            </div>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground">Critical Items</p>
+          <p className="text-3xl font-bold tracking-tight tabular-nums text-destructive mt-1">{kpis.red}</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">Below 50% of PAR level</p>
+        </div>
+        <div className="rounded-xl border border-warning/15 bg-card hover:shadow-md transition-all duration-200 p-5">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning/8">
+              <Package className="h-5 w-5 text-warning" />
+            </div>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground">Low Stock</p>
+          <p className="text-3xl font-bold tracking-tight tabular-nums text-warning mt-1">{kpis.yellow}</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">Between 50–100% of PAR</p>
+        </div>
+        <div className="rounded-xl border border-success/15 bg-card hover:shadow-md transition-all duration-200 p-5">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/8">
+              <CheckCircle2 className="h-5 w-5 text-success" />
+            </div>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground">Stocked OK</p>
+          <p className="text-3xl font-bold tracking-tight tabular-nums text-success mt-1">{kpis.green}</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">At or above PAR level</p>
+        </div>
+      </div>
+
+      {parMetrics && parMetrics.total > 0 && (
+        <Card className="border-primary/20 bg-primary/3">
+          <CardContent className="flex items-center justify-between p-4 gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                <TrendingUp className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">
+                  {parMetrics.total} PAR change{parMetrics.total !== 1 ? "s" : ""} suggested from recent approved counts
+                  {canSeeFoodCostPct && parMetrics.major > 0 && (
+                    <span className="ml-2 text-[11px] font-normal text-destructive font-medium">• {parMetrics.major} major (≥20%)</span>
+                  )}
+                </p>
+                {parMetrics.top5.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Top items: {parMetrics.top5.join(", ")}</p>
+                )}
+              </div>
+            </div>
+            <Button size="sm" variant="outline" className="gap-1.5 shrink-0 text-xs h-8"
+              onClick={() => navigate("/app/par/suggestions")}>
+              Review Suggestions <ArrowRight className="h-3 w-3" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className={trend.length > 1 ? "grid gap-5 lg:grid-cols-2" : "grid gap-5 grid-cols-1"}>
+        {trend.length > 1 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />Inventory Value Trend</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {canSeeFoodCostPct && canSeeInventoryValue ? (
+                <ResponsiveContainer width="100%" height={180}>
+                  <LineChart data={trend}>
+                    <XAxis dataKey="week" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip formatter={(v: number) => [fmtCurrencyLoc(v), "Value"]} labelStyle={{ fontSize: 11 }} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+                    <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 3, fill: "hsl(var(--primary))" }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground py-10 text-center">Food cost trend hidden</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {topItems.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="h-4 w-4 text-primary" />Top Items by Value</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {topItems.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm py-1">
+                    <span className="text-muted-foreground truncate flex-1 mr-2">{item.item_name}</span>
+                    <span className="font-mono font-semibold text-xs">{canSeeInventoryValue ? fmtCurrencyLoc(item.total_value) : "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      <AnalyticsSection highUsage={highUsage} trendData={parentTrendData} />
+      <RecommendationsPanel recommendations={recommendations} />
+    </div>
+  );
+}
+
+// ─── Locations Tab (inlined from CompareReport) ───
+function DashboardLocationsTab() {
+  const navigate = useNavigate();
+  const { activeRestaurantIds } = useRestaurant();
+  const [dateRange, setDateRange] = useState<DateRange>("30d");
+
+  const summary = useAllLocationsSummary("all_brands", dateRange);
+  const { alerts, loading: alertsExtraLoading } = useLocationAlerts(activeRestaurantIds, summary.locations);
+  const alertsFeedLoading = summary.loading || alertsExtraLoading;
+
+  const sortedRank = useMemo(() => {
+    const copy = [...summary.locations];
+    copy.sort((a, b) => {
+      const fa = a.food_cost_pct;
+      const fb = b.food_cost_pct;
+      if (fa == null && fb == null) return a.location_name.localeCompare(b.location_name);
+      if (fa == null) return 1;
+      if (fb == null) return -1;
+      return fa - fb;
+    });
+    return copy;
+  }, [summary.locations]);
+
+  const complianceSorted = useMemo(() => {
+    const copy = [...summary.locations];
+    copy.sort((a, b) => {
+      if (a.count_overdue !== b.count_overdue) return a.count_overdue ? -1 : 1;
+      const ra = a.counts_expected_this_period > 0 ? a.counts_this_period / a.counts_expected_this_period : 0;
+      const rb = b.counts_expected_this_period > 0 ? b.counts_this_period / b.counts_expected_this_period : 0;
+      return ra - rb;
+    });
+    return copy;
+  }, [summary.locations]);
+
+  const wasteSorted = useMemo(() => {
+    const copy = [...summary.locations];
+    copy.sort((a, b) => b.waste_in_period - a.waste_in_period);
+    return copy;
+  }, [summary.locations]);
+
+  const maxWaste = useMemo(() => wasteSorted.reduce((m, l) => Math.max(m, l.waste_in_period), 0), [wasteSorted]);
+
+  const avgTarget =
+    summary.locations.length > 0
+      ? summary.locations.reduce((s, l) => s + l.food_cost_target_pct, 0) / summary.locations.length
+      : 30;
+
+  const latestCountAny = summary.locations.reduce<string | null>((acc, l) => {
+    if (!l.last_count_date) return acc;
+    if (!acc || new Date(l.last_count_date) > new Date(acc)) return l.last_count_date;
+    return acc;
+  }, null);
+
+  const summaryAvgStatus = getFoodCostStatus(summary.avg_food_cost_pct, avgTarget, latestCountAny);
+
+  if (summary.loading && summary.locations.length === 0) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <Skeleton className="h-10 w-full max-w-lg rounded-lg" />
+        <Skeleton className="h-40 rounded-xl" />
+        <Skeleton className="h-64 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (summary.error) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-destructive">{summary.error}</p>
+        <Button variant="outline" size="sm" onClick={() => summary.refetch()}>Retry</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight font-display">Cross-location comparison</h1>
+          <p className="text-sm text-muted-foreground mt-1">Food cost, counts, waste, and alerts across your portfolio.</p>
+        </div>
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/60 border border-border/50 w-fit shrink-0">
+          {(["7d", "30d", "90d"] as DateRange[]).map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setDateRange(r)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                dateRange === r ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {r === "7d" ? "7 days" : r === "30d" ? "30 days" : "90 days"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Alerts feed</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal">Critical and warning alerts across all locations.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {alertsFeedLoading ? (
+            <Skeleton className="h-24 rounded-lg" />
+          ) : alerts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+              <CheckCircle2 className="h-10 w-10 text-green-500/80" />
+              <p className="text-sm font-medium text-green-700 dark:text-green-400">No alerts — all locations on track</p>
+            </div>
+          ) : (
+            alerts.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => navigate(a.action_url)}
+                className={`w-full text-left rounded-xl border px-4 py-3 flex gap-3 items-start transition-colors cursor-pointer ${alertCardClass(a.severity)}`}
+              >
+                <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${severityDotClass(a.severity)}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold leading-snug">{a.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{a.description}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    {a.restaurant_name ? `${a.restaurant_name} · ` : ""}
+                    {a.location_name}
+                  </p>
+                </div>
+                <div className="text-right shrink-0 pt-0.5">
+                  <p className="text-[11px] text-muted-foreground whitespace-nowrap">
+                    {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })}
+                  </p>
+                  <p className="text-xs font-medium text-primary mt-1 flex items-center justify-end gap-0.5">
+                    View <ArrowRight className="h-3 w-3" />
+                  </p>
+                </div>
+              </button>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Food cost ranking</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <p className="text-[11px] text-muted-foreground text-center mb-3">
+            * Food cost % is estimated. Add sales data per location for accurate tracking.
+          </p>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/20">
+                <TableHead className="text-xs w-10">Rank</TableHead>
+                <TableHead className="text-xs">Location</TableHead>
+                <TableHead className="text-xs">Brand</TableHead>
+                <TableHead className="text-xs text-right">Est. food cost %</TableHead>
+                <TableHead className="text-xs text-right">vs Target</TableHead>
+                <TableHead className="text-xs text-right">Trend</TableHead>
+                <TableHead className="text-xs">Last count</TableHead>
+                <TableHead className="text-xs">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedRank.map((loc, i) => {
+                const diff = loc.food_cost_pct != null ? loc.food_cost_pct - loc.food_cost_target_pct : null;
+                const locTrend = loc.food_cost_trend;
+                const vsDisp = diff != null ? `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%` : "—";
+                return (
+                  <TableRow key={loc.location_id}>
+                    <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
+                    <TableCell className="text-sm">
+                      <span className="block text-[10px] text-muted-foreground">{loc.restaurant_name}</span>
+                      <span className="font-medium">{loc.location_name}</span>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{loc.brand ?? "—"}</TableCell>
+                    <TableCell className="text-sm text-right font-mono font-semibold">
+                      {loc.food_cost_pct != null ? (
+                        <>{`${loc.food_cost_pct.toFixed(1)}%`}<EstMark /></>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell className={`text-xs text-right font-mono ${vsTargetClass(diff)}`}>{vsDisp}</TableCell>
+                    <TableCell className="text-xs text-right font-mono">
+                      {locTrend == null ? "—" : (
+                        <span className={locTrend > 0
+                          ? "text-red-600 dark:text-red-400 inline-flex items-center justify-end gap-0.5"
+                          : "text-green-600 dark:text-green-400 inline-flex items-center justify-end gap-0.5"}>
+                          {locTrend > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                          {`${locTrend >= 0 ? "+" : ""}${locTrend.toFixed(1)}% WoW`}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {loc.last_count_date ? new Date(loc.last_count_date).toLocaleDateString() : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      <Badge variant="outline" className={`text-[10px] ${statusBadgeClass(loc.food_cost_status)}`}>
+                        {statusBadgeLabel(loc.food_cost_status)}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Count compliance</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal">Which locations are on schedule for this period.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {complianceSorted.map((loc) => {
+            const exp = Math.max(1, loc.counts_expected_this_period);
+            const ratio = loc.counts_this_period / exp;
+            return (
+              <div key={loc.location_id} className="rounded-lg border border-border/60 p-4 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">{loc.location_name}</p>
+                    <p className="text-[11px] text-muted-foreground">{loc.brand ?? "—"}</p>
+                  </div>
+                  {loc.count_overdue ? (
+                    <Badge variant="outline" className="text-[10px] border-red-300 text-red-700 bg-red-50">Overdue</Badge>
+                  ) : null}
+                </div>
+                <div className="h-2 rounded-full bg-muted/60 overflow-hidden">
+                  <div className={`h-full rounded-full ${complianceBarClass(ratio)}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{loc.counts_this_period} of {loc.counts_expected_this_period} counts completed</span>
+                  <span>{loc.last_count_date ? new Date(loc.last_count_date).toLocaleDateString() : "—"}</span>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Waste comparison</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal">Waste by location this period.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {wasteSorted.map((loc, idx) => {
+            const w = loc.waste_in_period;
+            const widthPct = maxWaste > 0 ? (w / maxWaste) * 100 : 0;
+            const n = wasteSorted.length;
+            let barColor = "bg-amber-500/85";
+            if (w <= 0) barColor = "bg-green-500/85";
+            else if (n === 1) barColor = "bg-amber-500/85";
+            else if (idx === 0) barColor = "bg-red-500/85";
+            else if (idx === n - 1) barColor = "bg-green-500/85";
+            return (
+              <div key={loc.location_id} className="space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">{loc.location_name}</span>
+                  <span className="font-mono text-xs">{fmtCurrencyLoc(w)}</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted/60 overflow-hidden">
+                  <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.max(4, widthPct)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-center">
+        <p className="text-xs text-muted-foreground">
+          Portfolio avg est. food cost{" "}
+          <span className={`font-semibold ${summaryAvgStatus === "good" ? "text-green-600" : summaryAvgStatus === "warning" ? "text-amber-600" : "text-red-600"}`}>
+            {summary.avg_food_cost_pct != null ? `${summary.avg_food_cost_pct.toFixed(1)}%` : "—"}
+          </span>
+          {summary.avg_food_cost_pct != null ? <EstMark /> : null}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Single Restaurant Dashboard ───
 function SingleDashboard() {
   const { currentRestaurant, currentLocation, locations } = useRestaurant();
@@ -1268,15 +1812,9 @@ function SingleDashboard() {
     return (
       <div className="space-y-6 animate-fade-in">
         <Skeleton className="h-16 rounded-xl" />
-        <Skeleton className="h-5 w-40 rounded-md" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           {[1, 2, 3, 4].map((i) => (
             <Skeleton key={i} className="h-32 rounded-xl" />
-          ))}
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28 rounded-xl" />
           ))}
         </div>
         <div className="grid gap-5 lg:grid-cols-2">
@@ -1284,12 +1822,7 @@ function SingleDashboard() {
             <Skeleton key={i} className="h-72 rounded-xl" />
           ))}
         </div>
-        <Skeleton className="h-5 w-32 rounded-md" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28 rounded-xl" />
-          ))}
-        </div>
+        <Skeleton className="h-12 rounded-lg" />
       </div>
     );
   }
@@ -1311,6 +1844,7 @@ function SingleDashboard() {
     currentRestaurant?.role === "OWNER"
       ? locations.filter((l) => l.restaurant_id === currentRestaurant.id && l.is_active).length
       : 0;
+  const isOwner = currentRestaurant?.role === "OWNER";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1321,15 +1855,10 @@ function SingleDashboard() {
             {currentRestaurant?.name}
             {currentLocation ? ` · ${currentLocation.name}` : ""}
           </p>
-          {lastSessionDate && (
-            <p className="text-xs text-muted-foreground/90 mt-1.5 max-w-2xl leading-snug">
-              {STOCK_TRUTH_MESSAGE}
-            </p>
-          )}
         </div>
       </div>
 
-      {currentRestaurant?.role === "OWNER" && ownerActiveLocationCount > 1 && currentLocation ? (
+      {isOwner && ownerActiveLocationCount > 1 && currentLocation ? (
         <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3 text-sm">
           <span className="text-muted-foreground">Viewing </span>
           <span className="font-medium text-foreground">{currentLocation.name}</span>
@@ -1344,251 +1873,153 @@ function SingleDashboard() {
         </div>
       ) : null}
 
-      {/* Today's Briefing */}
-      <TodaysBriefing
-        timeFilter={timeFilter}
-        setTimeFilter={setTimeFilter}
-        onStartInventory={() => navigate("/app/inventory/enter")}
-        stockStatus={stockStatus}
-        pendingInvoices={pendingInvoices}
-        daysSinceLastCount={daysSinceLastCount}
-      />
+      <Tabs defaultValue="today">
+        <TabsList className="sticky top-0 z-10 bg-background border-b border-border/40 rounded-none w-full justify-start px-0 mb-6">
+          <TabsTrigger value="today" className="text-sm font-medium">Today</TabsTrigger>
+          <TabsTrigger value="reports" className="text-sm font-medium">Reports</TabsTrigger>
+          {isOwner && ownerActiveLocationCount > 1 && (
+            <TabsTrigger value="locations" className="text-sm font-medium">Locations</TabsTrigger>
+          )}
+        </TabsList>
 
-      {missingCostCount > 0 ? (
-        <Alert className="border-amber-200/80 bg-amber-50/80 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/25 dark:text-amber-100/95 [&>svg]:text-amber-700 dark:[&>svg]:text-amber-400">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            {missingCostCount} item{missingCostCount === 1 ? "" : "s"} missing cost. Inventory and reorder values may be understated.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+        <TabsContent value="today">
+          <div className="space-y-6">
+            <TodaysBriefing
+              timeFilter={timeFilter}
+              setTimeFilter={setTimeFilter}
+              onStartInventory={() => navigate("/app/inventory/enter")}
+              stockStatus={stockStatus}
+              pendingInvoices={pendingInvoices}
+              daysSinceLastCount={daysSinceLastCount}
+            />
 
-      {/* Section 1 — Today's situation */}
-      <section className="space-y-4" aria-labelledby="dash-today-heading">
-        <h2 id="dash-today-heading" className="text-sm font-semibold tracking-tight text-foreground">
-          Today&apos;s situation
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            icon={ShoppingCart}
-            label="Reorder needed today"
-            value={
-              reorderValue > 0
-                ? `$${reorderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
-            }
-            accent="success"
-            changeLabel={
-              reorderSummary?.missingCostCount
-                ? `excl. ${reorderSummary.missingCostCount} items — no cost data`
-                : "Estimated to reach PAR levels"
-            }
-          />
-          <KpiCard
-            icon={AlertTriangle}
-            label="Critical low stock items"
-            value={String(criticalLowCount)}
-            accent="destructive"
-            changeLabel="May stock out soon"
-          />
-          <KpiCard
-            icon={Package}
-            label="Overstock at risk"
-            value={
-              overstockValue > 0
-                ? `$${overstockValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
-            }
-            accent="warning"
-            changeLabel={
-              reorderSummary?.missingCostCount
-                ? `excl. ${reorderSummary.missingCostCount} items — no cost data`
-                : "Inventory above PAR"
-            }
-          />
-          <KpiCard
-            icon={Receipt}
-            label={dashboardSpendPeriodLabel(timeFilter)}
-            value={
-              periodSpend > 0
-                ? `$${periodSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
-            }
-            accent="primary"
-            changeLabel={spendPeriodSubtitle(timeFilter)}
-          />
-        </div>
+            {missingCostCount > 0 ? (
+              <Alert className="border-amber-200/80 bg-amber-50/80 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/25 dark:text-amber-100/95 [&>svg]:text-amber-700 dark:[&>svg]:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  {missingCostCount} item{missingCostCount === 1 ? "" : "s"} missing cost. Inventory and reorder values may be understated.
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <KpiCard
-            icon={DollarSign}
-            label="Inventory value"
-            value={
-              !perms.can_see_inventory_value
-                ? "—"
-                : inventoryValue > 0
-                  ? `$${inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                  : "$0"
-            }
-            accent="primary"
-            changeLabel={inventoryValueLabel}
-          />
-          <KpiCard
-            icon={ClipboardCheck}
-            label="Units to reorder"
-            value={unitsToReorder > 0 ? formatInventoryQty(unitsToReorder) : "0"}
-            accent="primary"
-            changeLabel={`${stockStatus.yellow} low-stock items (not critical)`}
-          />
-          <KpiCard
-            icon={CalendarDays}
-            label="Last count"
-            value={lastCountLabel}
-            accent={lastCountAccent}
-            changeLabel={lastCountDescription}
-          />
-        </div>
+            <section className="space-y-4" aria-labelledby="dash-today-heading">
+              <h2 id="dash-today-heading" className="text-sm font-semibold tracking-tight text-foreground">
+                Today at a glance
+              </h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <KpiCard
+                  icon={AlertTriangle}
+                  label="Critical low stock items"
+                  value={String(criticalLowCount)}
+                  accent="destructive"
+                  changeLabel="May stock out soon"
+                />
+                <KpiCard
+                  icon={ShoppingCart}
+                  label="Reorder needed today"
+                  value={
+                    reorderValue > 0
+                      ? `$${reorderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                      : "$0"
+                  }
+                  accent="success"
+                  changeLabel={
+                    reorderSummary?.missingCostCount
+                      ? `excl. ${reorderSummary.missingCostCount} items — no cost data`
+                      : "Estimated to reach PAR levels"
+                  }
+                />
+                <KpiCard
+                  icon={DollarSign}
+                  label="Inventory value"
+                  value={
+                    !perms.can_see_inventory_value
+                      ? "—"
+                      : inventoryValue > 0
+                        ? `$${inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                        : "$0"
+                  }
+                  accent="primary"
+                  changeLabel={inventoryValueLabel}
+                />
+                <KpiCard
+                  icon={CalendarDays}
+                  label="Last count"
+                  value={lastCountLabel}
+                  accent={lastCountAccent}
+                  changeLabel={lastCountDescription}
+                />
+              </div>
+            </section>
 
-        <div className="grid gap-5 lg:grid-cols-2">
-          <ActionCenter
-            criticalCount={stockStatus.red}
-            pendingApprovals={pendingInvoices}
-            daysSinceLastCount={daysSinceLastCount}
-            recommendationsCount={recommendations.length}
-            todayWasteCount={todayWasteEntries.length}
-            deliveryIssueCount={deliveryIssuesCount}
-            profitIntelligenceActions={profitIntelligenceActions}
-            navigate={navigate}
-          />
-          <SmartOrderPreview
-            topReorder={topReorder}
-            redCount={stockStatus.red}
-            yellowCount={stockStatus.yellow}
-            reorderValue={reorderValue}
-            navigate={navigate}
-            lastApprovedAt={lastSessionDate}
-          />
-        </div>
-      </section>
+            <section className="space-y-4" aria-labelledby="dash-attention-heading">
+              <h2 id="dash-attention-heading" className="text-sm font-semibold tracking-tight text-foreground">
+                What needs attention
+              </h2>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <ActionCenter
+                  criticalCount={stockStatus.red}
+                  pendingApprovals={pendingInvoices}
+                  daysSinceLastCount={daysSinceLastCount}
+                  recommendationsCount={recommendations.length}
+                  todayWasteCount={todayWasteEntries.length}
+                  deliveryIssueCount={deliveryIssuesCount}
+                  profitIntelligenceActions={profitIntelligenceActions}
+                  navigate={navigate}
+                />
+                <SmartOrderPreview
+                  topReorder={topReorder}
+                  redCount={stockStatus.red}
+                  yellowCount={stockStatus.yellow}
+                  reorderValue={reorderValue}
+                  navigate={navigate}
+                  lastApprovedAt={lastSessionDate}
+                />
+              </div>
+            </section>
 
-      {/* Section 2 — This period */}
-      <section className="mt-8 space-y-4" aria-labelledby="dash-period-heading">
-        <h2 id="dash-period-heading" className="text-sm font-semibold tracking-tight text-foreground">
-          This period
-        </h2>
-        <p className="text-xs text-muted-foreground -mt-2">
-          Same window as the spend card: {spendPeriodPlainName(timeFilter)}.
-        </p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <KpiCard
-            icon={Receipt}
-            label={dashboardSpendPeriodLabel(timeFilter)}
-            value={
-              periodSpend > 0
-                ? `$${periodSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
-            }
-            accent="success"
-            changeLabel={spendPeriodSubtitle(timeFilter)}
-          />
-          <KpiCard
-            icon={Truck}
-            label="Delivery issues"
-            value={String(deliveryIssuesCount)}
-            accent={deliveryIssuesCount > 0 ? "destructive" : "primary"}
-            changeLabel="Invoice discrepancies caught this period"
-          />
-          <KpiCard
-            icon={TrendingUp}
-            label="Price increase impact"
-            value={
-              priceIncreaseImpact > 0
-                ? `$${priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
-            }
-            accent="warning"
-            changeLabel="vs. PO prices — flagged automatically"
-          />
-        </div>
-      </section>
+            <ProfitLossIntelligence
+              overstockValue={overstockValue}
+              recordedWasteValue={recordedWasteValue}
+              recordedWasteCount={recordedWasteCount}
+              priceIncreaseImpact={priceIncreaseImpact}
+              deliveryIssuesCount={deliveryIssuesCount}
+              missingParCount={missingParCount}
+              topReorder={topReorder}
+              todayWasteEntries={todayWasteEntries}
+              navigate={navigate}
+            />
 
-      {/* Section 3 — Loss & waste */}
-      <section className="mt-8 space-y-4" aria-labelledby="dash-loss-heading">
-        <h2 id="dash-loss-heading" className="text-sm font-semibold tracking-tight text-foreground">
-          Loss &amp; waste
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <KpiCard
-            icon={Trash2}
-            label="Recorded waste"
-            value={
-              recordedWasteValue > 0
-                ? `$${recordedWasteValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : recordedWasteCount > 0
-                  ? `${recordedWasteCount} entr${recordedWasteCount !== 1 ? "ies" : "y"}`
-                  : "$0"
-            }
-            accent="warning"
-            changeLabel={
-              recordedWasteCount === 0
-                ? "No waste logged in this period"
-                : wasteItemsMissingCost > 0
-                  ? `excl. ${wasteItemsMissingCost} entr${wasteItemsMissingCost !== 1 ? "ies" : "y"} — no cost data`
-                  : recordedWasteValue > 0
-                    ? "From logged costs when available"
-                    : "Add catalog links on waste entries to estimate dollars"
-            }
-          />
-          <KpiCard
-            icon={AlertTriangle}
-            label="Items missing PAR"
-            value={String(missingParCount)}
-            accent={missingParCount > 0 ? "destructive" : "primary"}
-            changeLabel={STOCK_TRUTH_MESSAGE}
-          />
-          <KpiCard
-            icon={Package}
-            label="Overstock at risk"
-            value={
-              overstockValue > 0
-                ? `$${overstockValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                : "$0"
-            }
-            accent="warning"
-            changeLabel="Same as above — dollars tied up above PAR"
-          />
-        </div>
-      </section>
+            {currentRestaurant && (
+              <WasteSnapshot entries={todayWasteEntries} navigate={navigate} />
+            )}
 
-      <ProfitLossIntelligence
-        overstockValue={overstockValue}
-        recordedWasteValue={recordedWasteValue}
-        recordedWasteCount={recordedWasteCount}
-        priceIncreaseImpact={priceIncreaseImpact}
-        deliveryIssuesCount={deliveryIssuesCount}
-        missingParCount={missingParCount}
-        topReorder={topReorder}
-        todayWasteEntries={todayWasteEntries}
-        navigate={navigate}
-      />
+            {currentRestaurant && (
+              <SpendOverview navigate={navigate} timeFilter={timeFilter} spendData={spendOverviewData} />
+            )}
+          </div>
+        </TabsContent>
 
-      <div className="mt-10 space-y-8 border-t border-border/60 pt-10">
-        {/* Today's Waste Snapshot */}
-        {currentRestaurant && (
-          <WasteSnapshot entries={todayWasteEntries} navigate={navigate} />
+        <TabsContent value="reports">
+          {currentRestaurant && (
+            <DashboardReportsTab
+              restaurantId={currentRestaurant.id}
+              locationId={currentLocation?.id}
+              canSeeFoodCostPct={perms.can_see_food_cost_pct}
+              canSeeInventoryValue={perms.can_see_inventory_value}
+              highUsage={highUsage}
+              parentTrendData={trendData}
+              recommendations={recommendations}
+            />
+          )}
+        </TabsContent>
+
+        {isOwner && ownerActiveLocationCount > 1 && (
+          <TabsContent value="locations">
+            <DashboardLocationsTab />
+          </TabsContent>
         )}
-
-        {/* Spend Overview */}
-        {currentRestaurant && (
-          <SpendOverview navigate={navigate} timeFilter={timeFilter} spendData={spendOverviewData} />
-        )}
-
-        {/* Usage & Trends */}
-        <AnalyticsSection highUsage={highUsage} trendData={trendData} />
-
-        {/* AI Insights */}
-        <RecommendationsPanel recommendations={recommendations} />
-      </div>
+      </Tabs>
     </div>
   );
 }

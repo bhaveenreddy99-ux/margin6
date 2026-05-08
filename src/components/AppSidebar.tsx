@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2, ArrowLeftRight } from "lucide-react";
+import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -26,15 +26,9 @@ const operationsNav = [
 ];
 
 const insightsNav = [
-  { title: "Reports", url: "/app/reports", icon: BarChart3 },
+  { title: "Overview", url: "/app/dashboard", icon: BarChart3 },
   { title: "Notifications", url: "/app/notifications", icon: Bell },
 ] as const;
-
-const locationCompareNavItem = {
-  title: "Location Compare",
-  url: "/app/reports/compare",
-  icon: ArrowLeftRight,
-} as const;
 
 const ownerNav = [
   { title: "Settings", url: "/app/settings", icon: Settings },
@@ -72,11 +66,9 @@ export function AppSidebar() {
     ? operationsNav.filter((i) => i.url === "/app/waste-log")
     : operationsNav;
 
-  const insightsItems = isOwner
-    ? [insightsNav[0], locationCompareNavItem, insightsNav[1]]
-    : isStaffAtCurrent
-      ? insightsNav.filter((i) => i.url === "/app/notifications")
-      : [...insightsNav];
+  const insightsItems = isStaffAtCurrent
+    ? insightsNav.filter((i) => i.url === "/app/notifications")
+    : [...insightsNav];
 
   const renderGroup = (label: string, items: { title: string; url: string; icon: LucideIcon }[]) => (
     <SidebarGroup key={label}>
@@ -86,7 +78,7 @@ export function AppSidebar() {
           {items.map((item) => (
             <SidebarMenuItem key={item.url}>
               <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                <NavLink to={item.url} end={item.url === "/app/dashboard" || item.url === "/app/reports" || item.url === "/app/settings"}
+                <NavLink to={item.url} end={item.url === "/app/dashboard" || item.url === "/app/settings"}
                   className="gap-3 px-3 py-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground rounded-lg transition-all duration-150"
                   activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
                   <item.icon className="h-4 w-4 shrink-0 opacity-70" />
