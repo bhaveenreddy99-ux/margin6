@@ -371,7 +371,7 @@ export default function SmartOrderPage() {
       await supabase.from("purchase_history").delete().in("id", phIds);
     }
 
-    const { error } = await supabase.from("smart_order_runs").delete().eq("id", idToDelete);
+    const { error } = await supabase.from("smart_order_runs").delete().eq("id", idToDelete).eq("restaurant_id", currentRestaurant.id);
     if (error) {
       toast.error(`Delete failed: ${error.message}`);
       fetchRuns();

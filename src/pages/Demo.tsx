@@ -32,6 +32,7 @@ export default function DemoPage() {
       if (error) throw error;
 
       await refetch();
+      localStorage.setItem("demo_mode", "true");
       toast.success("Demo workspace created!");
       navigate("/app/dashboard");
     } catch (err: any) {

@@ -86,6 +86,14 @@ export async function createInventorySession(args: {
   userId: string;
   locationId?: string | null;
 }) {
+  if (!args.locationId) {
+    console.warn(
+      "[createInventorySession] locationId is null — session will not appear " +
+      "in location-scoped dashboard views. Pass currentLocation?.id from RestaurantContext.",
+      { restaurantId: args.restaurantId, name: args.name }
+    );
+  }
+
   const { data, error } = (await args.supabase
     .from("inventory_sessions")
     .insert({
@@ -369,6 +377,14 @@ export async function moveApprovedInventorySessionToReview(args: {
     };
   }
 
+  // Archive prior smart order run so re-approval can create a fresh one
+  if (!policy.allowed && args.allowWithDownstreamEffects) {
+    await args.supabase
+      .from("smart_order_runs")
+      .update({ status: "archived" })
+      .eq("session_id", args.sessionId);
+  }
+
   const updateResult = await updateInventorySessionStatus({
     supabase: args.supabase,
     sessionId: args.sessionId,
@@ -571,6 +587,21 @@ export async function approveInventorySession(args: {
     };
   }
 
+  const { data: existingRun } = await args.supabase
+    .from("smart_order_runs")
+    .select("run_id:id")
+    .eq("session_id", args.sessionId)
+    .maybeSingle();
+  if (existingRun?.run_id) {
+    return {
+      ok: true as const,
+      errorMessage: null,
+      smartOrderRunId: existingRun.run_id,
+      smartOrderErrorMessage: null,
+      catalogLinksStripped: false,
+    };
+  }
+
   const rpcArgs: ApproveInventorySessionAtomicRpcArgs = {
     p_session_id: args.sessionId,
     p_user_id: args.userId,
@@ -600,14 +631,22 @@ export async function approveInventorySession(args: {
     };
   }
 
-  await publishSmartOrderAttentionNotifications({
-    supabase: args.supabase,
-    restaurantId: args.restaurantId,
-    sessionId: args.sessionId,
-    runId: approvalResult.run_id,
-    redCount: preparedSmartOrder.data.redCount,
-    yellowCount: preparedSmartOrder.data.yellowCount,
-  });
+  try {
+    await publishSmartOrderAttentionNotifications({
+      supabase: args.supabase,
+      restaurantId: args.restaurantId,
+      sessionId: args.sessionId,
+      runId: approvalResult.run_id,
+      redCount: preparedSmartOrder.data.redCount,
+      yellowCount: preparedSmartOrder.data.yellowCount,
+    });
+  } catch (notifyErr) {
+    console.warn(
+      "[approveInventorySession] notification publish failed " +
+      "— session approved, notifications will be missing:",
+      notifyErr,
+    );
+  }
 
   return {
     ok: true as const,

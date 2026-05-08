@@ -647,7 +647,7 @@ export function useListManagementActions({
     if (!itemId) return;
 
     await supabase.from("list_item_category_map").delete().eq("catalog_item_id", itemId);
-    const { error } = await supabase.from("inventory_catalog_items").delete().eq("id", itemId);
+    const { error } = await supabase.from("inventory_catalog_items").delete().eq("id", itemId).eq("restaurant_id", restaurantId);
 
     if (error) {
       toast.error(error.message);

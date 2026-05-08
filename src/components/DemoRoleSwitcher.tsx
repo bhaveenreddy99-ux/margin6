@@ -31,7 +31,7 @@ export function DemoRoleProvider({ children }: { children: ReactNode }) {
   const { currentRestaurant } = useRestaurant();
   const [demoRole, setDemoRole] = useState<DemoRole>("OWNER");
 
-  // Detect demo mode: restaurant name contains "demo" (case-insensitive) or check localStorage
+  // Detect demo mode: only via explicit localStorage flag set by the /demo page.
   let storedDemo: boolean;
   try {
     storedDemo = localStorage.getItem("demo_mode") === "true";
@@ -39,10 +39,7 @@ export function DemoRoleProvider({ children }: { children: ReactNode }) {
     // Safari private / locked storage can throw; avoid blank app
     storedDemo = false;
   }
-  const isDemoMode =
-    currentRestaurant?.name?.toLowerCase().includes("demo") ||
-    currentRestaurant?.name?.toLowerCase().includes("test") ||
-    storedDemo;
+  const isDemoMode = storedDemo;
 
   // Compute effective role
   const effectiveRole = isDemoMode ? demoRole : (currentRestaurant?.role as DemoRole) || "OWNER";

@@ -6,7 +6,7 @@ import { Navigate } from "react-router-dom";
  * STAFF and MANAGER are redirected to the dashboard.
  */
 export function OwnerRoute({ children }: { children: React.ReactNode }) {
-  const { currentRestaurant, loading } = useRestaurant();
+  const { currentRestaurant, restaurants, loading } = useRestaurant();
 
   if (loading) {
     return (
@@ -16,7 +16,11 @@ export function OwnerRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (currentRestaurant?.role !== "OWNER") {
+  const isOwner = currentRestaurant
+    ? currentRestaurant.role === "OWNER"
+    : restaurants.some((r) => r.role === "OWNER");
+
+  if (!isOwner) {
     return <Navigate to="/app/dashboard" replace />;
   }
 

@@ -20,11 +20,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import {
   Building2, Package, BookOpen, MapPin, Users, Loader2,
   ShoppingCart, FileUp, AlertTriangle, Plus, Trash2,
-  X, Pencil, CalendarClock, ChevronRight, ChevronDown, Mail, Copy,
+  X, Pencil, CalendarClock, ChevronRight, ChevronDown, Mail, Copy, UserCircle,
 } from "lucide-react";
 import { InventoryScheduleSection } from "@/pages/app/settings/InventorySchedule";
 import {
@@ -47,6 +47,7 @@ const BRAND_OPTIONS = [
 ] as const;
 
 const TOP_NAV = [
+  { key: "profile",   label: "My Profile",          icon: UserCircle,   desc: "Your name, email and password" },
   { key: "general",   label: "Business Profile",    icon: Building2,    desc: "Restaurant name, contact info, timezone & currency" },
   { key: "invoice",   label: "Invoice Settings",    icon: Mail,         desc: "Unique address for vendor invoice delivery" },
   { key: "inventory", label: "Inventory Defaults",   icon: Package,      desc: "Default categories, units, and entry behavior" },
@@ -65,7 +66,7 @@ const ADVANCED_NAV = [
 export default function SettingsPage() {
   const { currentRestaurant, refetchLocations } = useRestaurant();
   const { user } = useAuth();
-  const [section, setSection] = useState("general");
+  const [section, setSection] = useState("profile");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const isOwner = currentRestaurant?.role === "OWNER";
   const isManager = currentRestaurant?.role === "MANAGER" || isOwner;
@@ -130,6 +131,7 @@ export default function SettingsPage() {
 
         {/* Right content */}
         <div className="flex-1 min-w-0">
+          {section === "profile"    && <ProfileSection />}
           {section === "general"    && <GeneralSection restaurantId={currentRestaurant?.id} isManager={isManager} restaurantName={currentRestaurant?.name} />}
           {section === "invoice"    && <InvoiceSection restaurantId={currentRestaurant?.id} isManager={isManager} restaurantName={currentRestaurant?.name} />}
           {section === "inventory"  && <InventorySection restaurantId={currentRestaurant?.id} isManager={isManager} />}
@@ -146,6 +148,192 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ===== 0) Profile ===== */
+function ProfileSection() {
+  const { user } = useAuth();
+  const [fullName, setFullName] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [savingPw, setSavingPw] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.full_name) setFullName(data.full_name);
+      });
+  }, [user?.id]);
+
+  const handleSaveProfile = async () => {
+    if (!user) return;
+    setSavingProfile(true);
+    const { error } = await supabase
+      .from("profiles")
+      .upsert({ id: user.id, full_name: fullName.trim() }, { onConflict: "id" });
+    setSavingProfile(false);
+    if (error) toast.error("Could not save");
+    else toast.success("Profile updated");
+  };
+
+  const handleSavePassword = async () => {
+    setPwError("");
+    if (newPassword.length < 8) { setPwError("New password must be at least 8 characters"); return; }
+    if (newPassword !== confirmPassword) { setPwError("Passwords do not match"); return; }
+    setSavingPw(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setSavingPw(false);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Password updated — please sign in again");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    }
+  };
+
+  const copyAccountId = async () => {
+    if (!user?.id) return;
+    try {
+      await navigator.clipboard.writeText(user.id);
+      toast.success("Account ID copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
+  const initials = fullName.trim()
+    ? fullName.trim()[0].toUpperCase()
+    : (user?.email?.[0]?.toUpperCase() ?? "?");
+
+  return (
+    <div className="space-y-4">
+      {/* Sub-section A — Personal Info */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Personal Info</CardTitle>
+          <CardDescription>Your display name and login email</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex items-center gap-4">
+            <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-lg font-bold shrink-0 select-none">
+              {initials}
+            </div>
+            <p className="text-xs text-muted-foreground">Your initials are shown as your avatar across RestaurantIQ.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Full Name</Label>
+              <Input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="h-9"
+                placeholder="Your name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Email</Label>
+              <Input value={user?.email ?? ""} readOnly disabled className="h-9" />
+              <p className="text-[11px] text-muted-foreground">Contact support to change your login email</p>
+            </div>
+          </div>
+          <Button onClick={() => void handleSaveProfile()} disabled={savingProfile} className="bg-gradient-amber shadow-amber">
+            {savingProfile ? "Saving…" : "Save Changes"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Sub-section B — Change Password */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Change Password</CardTitle>
+          <CardDescription>Update your account password</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Current Password</Label>
+            <Input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              className="h-9"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">New Password</Label>
+            <Input
+              type="password"
+              value={newPassword}
+              onChange={(e) => { setNewPassword(e.target.value); setPwError(""); }}
+              autoComplete="new-password"
+              className="h-9"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Confirm New Password</Label>
+            <Input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => { setConfirmPassword(e.target.value); setPwError(""); }}
+              autoComplete="new-password"
+              className="h-9"
+            />
+            {pwError && <p className="text-xs text-destructive">{pwError}</p>}
+          </div>
+          <Button
+            onClick={() => void handleSavePassword()}
+            disabled={savingPw || !newPassword}
+            className="bg-gradient-amber shadow-amber"
+          >
+            {savingPw ? "Saving…" : "Save Password"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Sub-section C — Account Info */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Account Info</CardTitle>
+          <CardDescription>Read-only account details</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Account created</span>
+            <span className="font-medium">
+              {user?.created_at ? format(new Date(user.created_at), "MMM d, yyyy") : "—"}
+            </span>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Last sign in</span>
+            <span className="font-medium">
+              {user?.last_sign_in_at ? format(new Date(user.last_sign_in_at), "MMM d, yyyy") : "—"}
+            </span>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Account ID</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs">{user?.id ? `${user.id.slice(0, 8)}…` : "—"}</span>
+              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => void copyAccountId()}>
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -324,7 +324,7 @@ export function useSessionCommands(deps: SessionCommandDeps) {
   async function handleDeleteSession(sessionId: string | null) {
     if (!sessionId) return;
     await supabase.from("inventory_session_items").delete().eq("session_id", sessionId);
-    const { error } = await supabase.from("inventory_sessions").delete().eq("id", sessionId);
+    const { error } = await supabase.from("inventory_sessions").delete().eq("id", sessionId).eq("restaurant_id", deps.currentRestaurantId);
     if (error) { toast.error(error.message); return; }
     toast.success("Session deleted");
     sessionStorage.removeItem("inv_active_session");

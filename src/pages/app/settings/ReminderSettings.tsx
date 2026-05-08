@@ -4,6 +4,16 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -29,6 +39,7 @@ export default function ReminderSettingsPage() {
   const [members, setMembers] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     days_of_week: ["MON", "WED", "FRI"] as string[],
@@ -86,14 +97,14 @@ export default function ReminderSettingsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this reminder?")) return;
     await supabase.from("reminders").delete().eq("id", id);
     toast.success("Reminder deleted"); fetchAll();
   };
 
   const handleToggle = async (id: string, enabled: boolean) => {
-    await supabase.from("reminders").update({ is_enabled: !enabled }).eq("id", id);
-    fetchAll();
+    const { error } = await supabase.from("reminders").update({ is_enabled: !enabled }).eq("id", id);
+    if (error) toast.error("Could not update reminder. Try again.");
+    else fetchAll();
   };
 
   const toggleDay = (day: string) => {
@@ -180,7 +191,7 @@ export default function ReminderSettingsPage() {
                           <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleToggle(r.id, r.is_enabled)}>
                             <Switch checked={r.is_enabled} className="scale-75" />
                           </Button>
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDelete(r.id)}>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setPendingDeleteId(r.id)}>
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
                         </>
@@ -193,6 +204,24 @@ export default function ReminderSettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!pendingDeleteId} onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete reminder?</AlertDialogTitle>
+            <AlertDialogDescription>This reminder will be permanently deleted.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (pendingDeleteId) void handleDelete(pendingDeleteId); setPendingDeleteId(null); }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={open} onOpenChange={v => { if (!v) resetForm(); setOpen(v); }}>
         <DialogContent className="max-w-md">

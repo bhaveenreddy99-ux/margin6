@@ -125,6 +125,7 @@ export async function fetchInvoiceReviewDoc(
     .from("purchase_history")
     .select("*, smart_order_runs(id, po_number, smart_order_run_items(*)), purchase_orders(po_number)")
     .eq("id", id)
+    .eq("restaurant_id", restaurantId)
     .single();
 
   if (!legacyData) return null;

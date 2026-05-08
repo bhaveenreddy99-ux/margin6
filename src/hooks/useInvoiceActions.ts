@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRestaurant } from "@/contexts/RestaurantContext";
 import { PO_MATCH_WINDOW_DAYS } from "@/lib/constants";
 import type { Dispatch, SetStateAction } from "react";
 import * as XLSX from "xlsx";
@@ -73,6 +74,7 @@ export function useInvoiceActions({
   onResetCreateForm,
   onOpenEditorForInvoice,
 }: UseInvoiceActionsArgs) {
+  const { currentLocation } = useRestaurant();
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [intakeUploading, setIntakeUploading] = useState(false);
@@ -627,6 +629,7 @@ export function useInvoiceActions({
           .from("invoices")
           .insert({
             restaurant_id: currentRestaurantId,
+            location_id: currentLocation?.id ?? null,
             status: "draft",
             receipt_status: "pending",
             vendor_name: null,
@@ -758,7 +761,7 @@ export function useInvoiceActions({
   const handleDeleteInvoice = useCallback(
     async (invoiceId: string) => {
       await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
-      await supabase.from("invoices").delete().eq("id", invoiceId);
+      await supabase.from("invoices").delete().eq("id", invoiceId).eq("restaurant_id", currentRestaurantId);
       toast.success("Invoice deleted");
       refreshPurchases();
     },

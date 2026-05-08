@@ -154,11 +154,15 @@ export function useInvoicesData({
 
   useEffect(() => {
     if (!currentRestaurantId) return;
-    supabase
+    let sessionQuery = supabase
       .from("inventory_sessions")
       .select("id")
       .eq("restaurant_id", currentRestaurantId)
-      .eq("status", "APPROVED")
+      .eq("status", "APPROVED");
+    if (currentLocationId) {
+      sessionQuery = sessionQuery.eq("location_id", currentLocationId);
+    }
+    sessionQuery
       .order("approved_at", { ascending: false })
       .limit(1)
       .then(({ data: sessions }) => {
@@ -172,7 +176,7 @@ export function useInvoicesData({
           if (data) setLastSessionItems(data);
         });
       });
-  }, [currentRestaurantId]);
+  }, [currentRestaurantId, currentLocationId]);
 
   useEffect(() => {
     if (!linkedSmartOrderId) {

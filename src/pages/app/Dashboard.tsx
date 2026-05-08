@@ -928,6 +928,274 @@ function PortfolioDashboard({
   );
 }
 
+// ─── Profit & Loss Intelligence ───
+function ProfitLossIntelligence({
+  overstockValue,
+  recordedWasteValue,
+  recordedWasteCount,
+  priceIncreaseImpact,
+  deliveryIssuesCount,
+  missingParCount,
+  topReorder,
+  todayWasteEntries,
+  navigate,
+}: {
+  overstockValue: number;
+  recordedWasteValue: number;
+  recordedWasteCount: number;
+  priceIncreaseImpact: number;
+  deliveryIssuesCount: number;
+  missingParCount: number;
+  topReorder: TopReorderItem[];
+  todayWasteEntries: WasteLogSnapshotRow[];
+  navigate: (path: string) => void;
+}) {
+  const totalSavingsOpportunity = overstockValue + recordedWasteValue + priceIncreaseImpact;
+  const criticalStockItems = topReorder.filter((item) => item.ratio <= 0.2);
+
+  const lossSignals: Array<{
+    icon: LucideIcon;
+    label: string;
+    value: string;
+    accent: string;
+    route: string;
+  }> = [];
+
+  try {
+    if (overstockValue > 0) {
+      lossSignals.push({
+        icon: Package,
+        label: "Overstock exposure",
+        value: `$${overstockValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+        accent: "text-warning",
+        route: "/app/inventory/enter",
+      });
+    }
+    if (priceIncreaseImpact > 0) {
+      lossSignals.push({
+        icon: TrendingUp,
+        label: "Price increase impact",
+        value: `$${priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+        accent: "text-destructive",
+        route: "/app/invoices",
+      });
+    }
+    if (recordedWasteValue > 0) {
+      lossSignals.push({
+        icon: Trash2,
+        label: "Recorded waste value",
+        value: `$${recordedWasteValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+        accent: "text-warning",
+        route: "/app/waste",
+      });
+    } else if (recordedWasteCount > 0) {
+      lossSignals.push({
+        icon: Trash2,
+        label: "Waste entries (no cost data)",
+        value: `${recordedWasteCount} entr${recordedWasteCount !== 1 ? "ies" : "y"}`,
+        accent: "text-muted-foreground",
+        route: "/app/waste",
+      });
+    }
+    if (criticalStockItems.length > 0) {
+      lossSignals.push({
+        icon: AlertTriangle,
+        label: `${criticalStockItems.length} item${criticalStockItems.length !== 1 ? "s" : ""} near stock-out`,
+        value: "Critical",
+        accent: "text-destructive",
+        route: "/app/smart-order",
+      });
+    }
+    if (deliveryIssuesCount > 0) {
+      lossSignals.push({
+        icon: Truck,
+        label: "Unresolved delivery issues",
+        value: String(deliveryIssuesCount),
+        accent: "text-orange-500",
+        route: "/app/invoices",
+      });
+    }
+  } catch (_) {
+    // best effort
+  }
+
+  const suggestions: Array<{
+    label: string;
+    description: string;
+    route: string;
+    cta: string;
+  }> = [];
+
+  try {
+    if (overstockValue > 0) {
+      suggestions.push({
+        label: "Reduce overstock",
+        description: `$${overstockValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} tied up above PAR — pause reorders on those items.`,
+        route: "/app/inventory/enter",
+        cta: "Count inventory",
+      });
+    }
+    if (missingParCount > 0) {
+      suggestions.push({
+        label: "Set missing PAR levels",
+        description: `${missingParCount} item${missingParCount !== 1 ? "s" : ""} have no PAR — reorder guidance is incomplete.`,
+        route: "/app/catalog",
+        cta: "Open catalog",
+      });
+    }
+    if (deliveryIssuesCount > 0) {
+      suggestions.push({
+        label: "Resolve delivery issues",
+        description: `${deliveryIssuesCount} invoice${deliveryIssuesCount !== 1 ? "s" : ""} flagged with discrepancies.`,
+        route: "/app/invoices",
+        cta: "Review invoices",
+      });
+    }
+    if (priceIncreaseImpact > 0) {
+      suggestions.push({
+        label: "Review price increase alerts",
+        description: `Vendors charged $${priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })} above PO prices.`,
+        route: "/app/invoices",
+        cta: "Review invoices",
+      });
+    }
+    if (recordedWasteCount > 0) {
+      suggestions.push({
+        label: "Review waste log",
+        description: `${recordedWasteCount} waste entr${recordedWasteCount !== 1 ? "ies" : "y"} recorded — identify patterns to reduce losses.`,
+        route: "/app/waste",
+        cta: "Open waste log",
+      });
+    }
+    suggestions.push({
+      label: "Build a smart order",
+      description: "Generate a data-driven order based on current PAR gaps.",
+      route: "/app/smart-order",
+      cta: "Start order",
+    });
+  } catch (_) {
+    // best effort
+  }
+
+  if (lossSignals.length === 0 && suggestions.length <= 1) return null;
+
+  return (
+    <section className="mt-8 space-y-4" aria-labelledby="dash-pnl-heading">
+      <h2 id="dash-pnl-heading" className="text-sm font-semibold tracking-tight text-foreground">
+        Profit &amp; Loss Intelligence
+      </h2>
+
+      {totalSavingsOpportunity > 0 && (
+        <div className="rounded-lg border border-success/25 bg-success/[0.05] px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-success shrink-0" />
+            <p className="text-sm font-medium">
+              <span className="font-bold text-success">
+                ${totalSavingsOpportunity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </span>
+              {" "}potential savings identified this period
+            </p>
+          </div>
+          <Badge className="bg-success/10 text-success border-0 text-[10px] shrink-0">Take Action</Badge>
+        </div>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        {/* High Loss Products */}
+        <Card className="hover:shadow-md transition-all duration-200">
+          <div className="flex items-center gap-2 p-5 pb-3">
+            <TrendingDown className="h-4 w-4 text-destructive" />
+            <h3 className="text-sm font-bold tracking-tight">High Loss Products</h3>
+          </div>
+          <CardContent className="pt-0 pb-4 px-5">
+            {lossSignals.length === 0 ? (
+              <div className="flex flex-col items-center py-8 text-center">
+                <CheckCircle2 className="h-8 w-8 text-success/30 mb-3" />
+                <p className="text-sm font-medium text-muted-foreground">No loss signals detected</p>
+                <p className="text-xs text-muted-foreground/60 mt-0.5">Keep counting — you're on track.</p>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {lossSignals.map((signal, i) => {
+                  const Icon = signal.icon;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => navigate(signal.route)}
+                      className="w-full flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/30 transition-colors text-left group"
+                    >
+                      <span className="text-[11px] font-mono text-muted-foreground/40 w-4 shrink-0">{i + 1}</span>
+                      <Icon className={`h-4 w-4 shrink-0 ${signal.accent}`} />
+                      <span className="text-sm flex-1 min-w-0 truncate">{signal.label}</span>
+                      <span className={`text-sm font-mono font-semibold shrink-0 ${signal.accent}`}>{signal.value}</span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground/20 group-hover:text-foreground/40 transition-colors shrink-0" />
+                    </button>
+                  );
+                })}
+                {todayWasteEntries.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-border/40">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1.5 px-3">
+                      Today&apos;s waste
+                    </p>
+                    {todayWasteEntries.slice(0, 3).map((e, i) => (
+                      <div key={i} className="flex items-center gap-3 py-1.5 px-3 text-xs text-muted-foreground">
+                        <span className="flex-1 truncate">{e.item_name}</span>
+                        <span className="font-mono">{Number(e.quantity).toFixed(1)}</span>
+                        {e.reason && (
+                          <Badge variant="secondary" className="text-[9px] h-4">{e.reason}</Badge>
+                        )}
+                      </div>
+                    ))}
+                    {todayWasteEntries.length > 3 && (
+                      <p className="text-[11px] text-muted-foreground/50 px-3 mt-1">
+                        +{todayWasteEntries.length - 3} more
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Savings Suggestions */}
+        <Card className="hover:shadow-md transition-all duration-200">
+          <div className="flex items-center gap-2 p-5 pb-3">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-bold tracking-tight">Savings Suggestions</h3>
+          </div>
+          <CardContent className="pt-0 pb-4 px-5">
+            <div className="space-y-1">
+              {suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/30 transition-colors"
+                >
+                  <span className="text-[10px] font-mono font-bold text-primary/50 mt-0.5 shrink-0">
+                    {String.fromCharCode(65 + i)}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{s.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{s.description}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[10px] shrink-0 mt-0.5"
+                    onClick={() => navigate(s.route)}
+                  >
+                    {s.cta}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  );
+}
+
 // ─── Single Restaurant Dashboard ───
 function SingleDashboard() {
   const { currentRestaurant, currentLocation, locations } = useRestaurant();
@@ -1291,6 +1559,18 @@ function SingleDashboard() {
           />
         </div>
       </section>
+
+      <ProfitLossIntelligence
+        overstockValue={overstockValue}
+        recordedWasteValue={recordedWasteValue}
+        recordedWasteCount={recordedWasteCount}
+        priceIncreaseImpact={priceIncreaseImpact}
+        deliveryIssuesCount={deliveryIssuesCount}
+        missingParCount={missingParCount}
+        topReorder={topReorder}
+        todayWasteEntries={todayWasteEntries}
+        navigate={navigate}
+      />
 
       <div className="mt-10 space-y-8 border-t border-border/60 pt-10">
         {/* Today's Waste Snapshot */}

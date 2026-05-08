@@ -321,7 +321,7 @@ export default function WasteLogPage() {
   // ─── Delete waste entry ───────────────────────────────
   const handleDelete = async () => {
     if (!deleteId) return;
-    const { error } = await supabase.from("waste_log").delete().eq("id", deleteId);
+    const { error } = await supabase.from("waste_log").delete().eq("id", deleteId).eq("restaurant_id", currentRestaurant.id);
     if (error) toast.error(error.message);
     else {
       toast.success("Entry deleted");

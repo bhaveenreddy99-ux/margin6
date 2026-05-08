@@ -271,7 +271,7 @@ export default function InvoiceReviewPage() {
         onConfirm={() => { setConfirmPostOpen(false); void handleConfirmReceipt(); }}
         confirmResult={confirmResult}
         onResultClose={() => setConfirmResult(null)}
-        onNavigateInventory={() => { setConfirmResult(null); navigate("/app/inventory"); }}
+        onNavigateInventory={() => { setConfirmResult(null); navigate("/app/inventory/enter"); }}
         onDone={() => { setConfirmResult(null); navigate("/app/invoices"); }}
       />
     </div>

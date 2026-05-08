@@ -6,6 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CheckCircle, ShoppingCart, ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import { ExportButtons } from "@/components/ExportButtons";
 import { useNavigate } from "react-router-dom";
@@ -39,6 +49,7 @@ export default function ApprovedPage() {
   const [sessionItems, setSessionItems] = useState<Record<string, SessionItemWithApprovedPar[]>>({});
   const [loadingSession, setLoadingSession] = useState<string | null>(null);
   const [decliningId, setDecliningId] = useState<string | null>(null);
+  const [declineSessionId, setDeclineSessionId] = useState<string | null>(null);
   const [localSuggestedOrder, setLocalSuggestedOrder] = useState<Record<string, string>>({});
   const [riskThresholds, setRiskThresholds] = useState<RiskThresholds>({
     redThresholdPercent: 50,
@@ -184,7 +195,7 @@ export default function ApprovedPage() {
                             {isManagerOrOwner && (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
                                 disabled={decliningId === s.id}
-                                onClick={() => handleDecline(s.id)}>
+                                onClick={() => setDeclineSessionId(s.id)}>
                                 <XCircle className="h-3 w-3" />
                                 {decliningId === s.id ? "Declining…" : "Decline"}
                               </Button>
@@ -289,6 +300,27 @@ export default function ApprovedPage() {
           </Table>
         </div>
       )}
+
+      <AlertDialog open={!!declineSessionId} onOpenChange={(open) => { if (!open) setDeclineSessionId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move session back to review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the approved snapshot and move the session back to review. Any smart order
+              suggestions based on this count will no longer be available.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (declineSessionId) handleDecline(declineSessionId); setDeclineSessionId(null); }}
+            >
+              Move to review
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

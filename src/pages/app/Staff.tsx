@@ -5,6 +5,16 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,6 +43,7 @@ export default function StaffPage() {
   const [canSeeInventoryValue, setCanSeeInventoryValue] = useState(false);
   const [canEditPar, setCanEditPar] = useState(true);
   const [sending, setSending] = useState(false);
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
 
   const restaurantLocations = locations.filter(
     (l) => l.restaurant_id === currentRestaurant?.id && l.is_active,
@@ -364,7 +375,7 @@ export default function StaffPage() {
                   </TableCell>
                   <TableCell>
                     {m.role !== "OWNER" && currentRestaurant?.role === "OWNER" && (
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRemove(m.id)}>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setPendingRemoveId(m.id)}>
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </Button>
                     )}
@@ -375,6 +386,26 @@ export default function StaffPage() {
           </Table>
         </Card>
       )}
+
+      <AlertDialog open={!!pendingRemoveId} onOpenChange={(open) => { if (!open) setPendingRemoveId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove team member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This person will lose access to this restaurant immediately. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (pendingRemoveId) void handleRemove(pendingRemoveId); setPendingRemoveId(null); }}
+            >
+              Remove member
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

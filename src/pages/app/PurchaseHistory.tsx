@@ -111,7 +111,7 @@ function isOrderRow(p: UnifiedProcurementRow) {
 }
 
 export default function PurchaseHistoryPage() {
-  const { currentRestaurant } = useRestaurant();
+  const { currentRestaurant, currentLocation } = useRestaurant();
   const navigate = useNavigate();
   const [purchases, setPurchases] = useState<UnifiedProcurementRow[]>([]);
   const [lineItemsByRow, setLineItemsByRow] = useState<Record<string, any[]>>({});
@@ -138,22 +138,20 @@ export default function PurchaseHistoryPage() {
       const rid = currentRestaurant.id;
       const invoiceDocIds = await fetchInvoiceDocumentIdsForRestaurant(rid);
 
+      const locId = currentLocation?.id;
       const [poRes, invRes, phRes] = await Promise.all([
-        supabase
-          .from("purchase_orders")
-          .select("*, inventory_lists(name)")
-          .eq("restaurant_id", rid)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("invoices")
-          .select("*, purchase_orders(po_number, smart_order_run_id, id, status, inventory_lists(name))")
-          .eq("restaurant_id", rid)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("purchase_history")
-          .select("*, inventory_lists(name), source, smart_order_run_id, po_number, receipt_status, invoice_status")
-          .eq("restaurant_id", rid)
-          .order("created_at", { ascending: false }),
+        (locId
+          ? supabase.from("purchase_orders").select("*, inventory_lists(name)").eq("restaurant_id", rid).eq("location_id", locId)
+          : supabase.from("purchase_orders").select("*, inventory_lists(name)").eq("restaurant_id", rid)
+        ).order("created_at", { ascending: false }),
+        (locId
+          ? supabase.from("invoices").select("*, purchase_orders(po_number, smart_order_run_id, id, status, inventory_lists(name))").eq("restaurant_id", rid).eq("location_id", locId)
+          : supabase.from("invoices").select("*, purchase_orders(po_number, smart_order_run_id, id, status, inventory_lists(name))").eq("restaurant_id", rid)
+        ).order("created_at", { ascending: false }),
+        (locId
+          ? supabase.from("purchase_history").select("*, inventory_lists(name), source, smart_order_run_id, po_number, receipt_status, invoice_status").eq("restaurant_id", rid).eq("location_id", locId)
+          : supabase.from("purchase_history").select("*, inventory_lists(name), source, smart_order_run_id, po_number, receipt_status, invoice_status").eq("restaurant_id", rid)
+        ).order("created_at", { ascending: false }),
       ]);
 
       if (cancelled) return;
@@ -234,7 +232,7 @@ export default function PurchaseHistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentRestaurant]);
+  }, [currentRestaurant, currentLocation]);
 
   const totalCost = (items: any[]) =>
     items.reduce((sum, i) => sum + (Number(i.total_cost) || 0), 0);
