@@ -32,7 +32,8 @@ export function buildParGuideLevelMaps(guideItems: ParGuideRow[]): ParGuideLevel
   const byNormalizedName: Record<string, number> = {};
   for (const item of guideItems) {
     const parsed = Number(item.par_level ?? 0);
-    const val = Number.isFinite(parsed) ? parsed : 0;
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    const val = parsed;
     const cid =
       item.catalog_item_id != null && String(item.catalog_item_id).trim() !== ""
         ? String(item.catalog_item_id).trim()
@@ -95,14 +96,14 @@ export function resolveParLevelFromGuideMaps(
       : null;
   if (cid) {
     const fromId = maps.byCatalogId[cid];
-    if (fromId != null) {
+    if (fromId != null && fromId > 0) {
       return { parLevel: fromId, source: "catalog_id" };
     }
   }
   const key = normalizeParGuideItemName(line.item_name);
   if (key) {
     const fromName = maps.byNormalizedName[key];
-    if (fromName != null) {
+    if (fromName != null && fromName > 0) {
       return { parLevel: fromName, source: "item_name" };
     }
   }
