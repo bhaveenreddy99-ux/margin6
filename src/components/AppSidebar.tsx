@@ -9,7 +9,7 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 const mainNav = [
-  { title: "Dashboard", url: "/app/dashboard", icon: LayoutDashboard },
+  { title: "Overview", url: "/app/dashboard", icon: LayoutDashboard },
 ];
 
 const inventoryNav = [
@@ -26,7 +26,6 @@ const operationsNav = [
 ];
 
 const insightsNav = [
-  { title: "Overview", url: "/app/dashboard", icon: BarChart3 },
   { title: "Notifications", url: "/app/notifications", icon: Bell },
 ] as const;
 
