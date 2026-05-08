@@ -103,8 +103,7 @@ export function InventoryCountHubApprovedSection({
                           <p className="text-[11px] text-muted-foreground leading-snug">
                             Unit costs not set for any items in this count.{" "}
                             <Link
-                              to="/app/list-management"
-                              className="text-amber-700 font-medium underline underline-offset-2 hover:text-amber-800"
+                              to="/app/inventory/lists"
                             >
                               Set costs in List Management
                             </Link>
@@ -130,7 +129,7 @@ export function InventoryCountHubApprovedSection({
                                 Includes {itemsWithCost} of {totalItems} items — {itemsWithoutCost} items have no unit
                                 cost set →{" "}
                                 <Link
-                                  to="/app/list-management"
+                                  to="/app/inventory/lists"
                                   className="font-medium underline underline-offset-2 hover:text-amber-700"
                                 >
                                   Set costs in List Management

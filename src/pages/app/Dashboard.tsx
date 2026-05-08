@@ -994,7 +994,7 @@ function ProfitLossIntelligence({
         label: "Recorded waste value",
         value: `$${recordedWasteValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
         accent: "text-warning",
-        route: "/app/waste",
+        route: "/app/waste-log",
       });
     } else if (recordedWasteCount > 0) {
       lossSignals.push({
@@ -1002,7 +1002,7 @@ function ProfitLossIntelligence({
         label: "Waste entries (no cost data)",
         value: `${recordedWasteCount} entr${recordedWasteCount !== 1 ? "ies" : "y"}`,
         accent: "text-muted-foreground",
-        route: "/app/waste",
+        route: "/app/waste-log",
       });
     }
     if (criticalStockItems.length > 0) {
@@ -1047,7 +1047,7 @@ function ProfitLossIntelligence({
       suggestions.push({
         label: "Set missing PAR levels",
         description: `${missingParCount} item${missingParCount !== 1 ? "s" : ""} have no PAR — reorder guidance is incomplete.`,
-        route: "/app/catalog",
+        route: "/app/par",
         cta: "Open catalog",
       });
     }
@@ -1071,7 +1071,7 @@ function ProfitLossIntelligence({
       suggestions.push({
         label: "Review waste log",
         description: `${recordedWasteCount} waste entr${recordedWasteCount !== 1 ? "ies" : "y"} recorded — identify patterns to reduce losses.`,
-        route: "/app/waste",
+        route: "/app/waste-log",
         cta: "Open waste log",
       });
     }
