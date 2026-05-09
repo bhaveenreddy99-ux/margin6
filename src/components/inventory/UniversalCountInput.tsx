@@ -305,6 +305,7 @@ export function UniversalCountInput({
     setRawInput(v);
     const p = parseInputValue(v);
     if (v.trim() === "") {
+      lastPushedCasesRef.current = null;
       onUpdateStock(item.id, "");
       scheduleSave();
       return;
