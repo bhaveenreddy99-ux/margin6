@@ -90,6 +90,7 @@ function IssueRow({ item, onFix, onQuickSave }: {
   const [itemName, setItemName] = useState(item.item_name || "");
   const [vendorSku, setVendorSku] = useState(item.vendor_sku || "");
   const [unit, setUnit] = useState(item.unit || "");
+  const [unitCost, setUnitCost] = useState<number | null>(item.default_unit_cost ?? null);
 
   if (editing) {
     return (
@@ -106,7 +107,7 @@ function IssueRow({ item, onFix, onQuickSave }: {
         <TableCell className="text-xs">{item.vendor_name || <span className="text-muted-foreground/50">—</span>}</TableCell>
         <TableCell><Input className="h-7 text-xs w-24" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Unit" /></TableCell>
         <TableCell className="text-xs">{item.pack_size || <span className="text-destructive">Missing</span>}</TableCell>
-        <TableCell className="text-xs font-mono">{item.default_unit_cost != null ? `$${Number(item.default_unit_cost).toFixed(2)}` : <span className="text-muted-foreground/50">—</span>}</TableCell>
+        <TableCell><Input className="h-7 text-xs w-24" type="number" step="0.01" min="0" placeholder="$/case" value={unitCost ?? ""} onChange={e => setUnitCost(e.target.value === "" ? null : +e.target.value)} /></TableCell>
         <TableCell>
           <div className="flex gap-1">
             <Button size="sm" variant="default" className="h-7 text-xs px-2 bg-gradient-amber" onClick={async () => {
@@ -114,6 +115,7 @@ function IssueRow({ item, onFix, onQuickSave }: {
               updates.item_name = itemName.trim();
               updates.vendor_sku = vendorSku.trim() || null;
               updates.unit = unit.trim() || null;
+              if (unitCost !== null) updates.default_unit_cost = unitCost;
               if (Object.keys(updates).length > 0) await onQuickSave(item.id, updates);
               setEditing(false);
             }}>
