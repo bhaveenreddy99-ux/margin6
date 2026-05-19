@@ -276,15 +276,24 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
     currentLocation?.id,
   ]);
 
-  // Auto-select when there is exactly one location and none is currently selected.
-  // This covers OWNER accounts that skip the MANAGER/STAFF assignment logic above.
+  // Auto-select a location when none is currently selected. Covers:
+  //   • Any role with exactly one location.
+  //   • OWNER with multiple locations (skips MANAGER/STAFF assignment logic above —
+  //     OWNERs have implicit access to every location and otherwise would land with
+  //     currentLocation === null, which causes per-location screens to show
+  //     "latest-approved-anywhere" data instead of a scoped view).
+  // Does not override an existing currentLocation.
   useEffect(() => {
     if (loading || !user || !currentRestaurant) return;
-    if (locations.length !== 1 || currentLocation !== null) return;
-    setCurrentLocationState(locations[0]);
-    void persistUiState(currentRestaurant.id, locations[0].id);
+    if (currentLocation !== null) return;
+    if (locations.length === 0) return;
+    const isOwner = currentRestaurant.role === "OWNER";
+    if (!isOwner && locations.length !== 1) return;
+    const pick = locations.find((l) => l.is_active) ?? locations[0];
+    setCurrentLocationState(pick);
+    void persistUiState(currentRestaurant.id, pick.id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, user, currentRestaurant?.id, locations.length, currentLocation?.id]);
+  }, [loading, user, currentRestaurant?.id, currentRestaurant?.role, locations.length, currentLocation?.id]);
 
   const handleSetCurrent = (r: Restaurant | null) => {
     setCurrentRestaurantState(r);
