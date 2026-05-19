@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2 } from "lucide-react";
+import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2, DollarSign } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -23,6 +23,7 @@ const inventoryNav = [
 const operationsNav = [
   { title: "Invoices (Receiving)", url: "/app/invoices", icon: FileText },
   { title: "Waste Log", url: "/app/waste-log", icon: Trash2 },
+  { title: "Sales Entry", url: "/app/sales", icon: DollarSign },
 ];
 
 const insightsNav = [

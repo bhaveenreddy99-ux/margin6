@@ -32,6 +32,7 @@ import ReportsPage from "@/pages/app/Reports";
 import CompareReport from "@/pages/app/CompareReport";
 import PurchaseHistoryPage from "@/pages/app/PurchaseHistory";
 import WasteLogPage from "@/pages/app/WasteLog";
+import SalesPage from "@/pages/app/Sales";
 import SettingsPage from "@/pages/app/Settings";
 import NotificationsPage from "@/pages/app/Notifications";
 import AlertSettingsPage from "@/pages/app/settings/AlertSettings";
@@ -84,6 +85,7 @@ const App = () => (
                 <Route path="settings/locations" element={<Navigate to="/app/settings" replace />} />
                 <Route path="purchase-history" element={<StaffRestrictedRoute><PurchaseHistoryPage /></StaffRestrictedRoute>} />
                 <Route path="waste-log" element={<WasteLogPage />} />
+                <Route path="sales" element={<StaffRestrictedRoute><SalesPage /></StaffRestrictedRoute>} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="settings" element={<OwnerRoute><SettingsPage /></OwnerRoute>} />
                 <Route path="settings/alerts" element={<OwnerRoute><AlertSettingsPage /></OwnerRoute>} />
