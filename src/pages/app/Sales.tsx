@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { addDays, addWeeks, differenceInDays, format, parseISO, startOfWeek, subWeeks } from "date-fns";
-import { ChevronLeft, ChevronRight, DollarSign, AlertTriangle, Save, CalendarDays, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, DollarSign, AlertTriangle, Save, CalendarDays, Clock, MapPin } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -73,6 +73,7 @@ function parseBulk(raw: string): number[] | null {
 export default function SalesPage() {
   const { user } = useAuth();
   const { currentRestaurant, currentLocation, setCurrentLocation, locations } = useRestaurant();
+  const navigate = useNavigate();
   const role = currentRestaurant?.role;
 
   // ── Mode persistence ────────────────────────────────────────────────────────
@@ -210,21 +211,36 @@ export default function SalesPage() {
       <div className="max-w-md mx-auto p-6">
         <Card>
           <CardContent className="p-6 space-y-4">
-            <div className="text-center space-y-1">
-              <CalendarDays className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-              <h2 className="text-lg font-semibold">Select a location to enter sales</h2>
-              <p className="text-sm text-muted-foreground">Sales are tracked per location.</p>
-            </div>
-            <Select onValueChange={(id) => setCurrentLocation(locations.find((l) => l.id === id) ?? null)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a location" />
-              </SelectTrigger>
-              <SelectContent>
-                {locations.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {locations.length === 0 ? (
+              <>
+                <div className="text-center space-y-1">
+                  <MapPin className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                  <h2 className="text-lg font-semibold">No locations set up yet</h2>
+                  <p className="text-sm text-muted-foreground">Sales tracking requires at least one location.</p>
+                </div>
+                <Button className="w-full" onClick={() => navigate("/app/settings")}>
+                  Create your first location
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="text-center space-y-1">
+                  <CalendarDays className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                  <h2 className="text-lg font-semibold">Select a location to enter sales</h2>
+                  <p className="text-sm text-muted-foreground">Sales are tracked per location.</p>
+                </div>
+                <Select onValueChange={(id) => setCurrentLocation(locations.find((l) => l.id === id) ?? null)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
