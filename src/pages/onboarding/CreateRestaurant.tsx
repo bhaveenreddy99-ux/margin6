@@ -76,6 +76,19 @@ export default function CreateRestaurantPage() {
         throw new Error("Could not assign a unique invoice email. Please try again.");
       }
 
+      // Auto-create a default location for the new restaurant. Single-location
+      // operators (the majority) should never see a "create location" step.
+      // Non-blocking: backfill migration catches missed rows on next deploy.
+      const { error: locationError } = await supabase.from("locations").insert({
+        restaurant_id: newRestaurant.id,
+        name,
+        is_active: true,
+      });
+      if (locationError) {
+        console.error("Failed to create default location:", locationError);
+        toast.error("Default location creation failed. You can add one in Settings.");
+      }
+
       await refetch();
       toast.success("Restaurant created!");
       navigate("/app/dashboard");
