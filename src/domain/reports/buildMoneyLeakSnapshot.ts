@@ -49,6 +49,8 @@ export type MoneyLeakSnapshot = {
   period: MoneyLeakPeriod;
   locationId?: string;
   realLoss: MoneyLeakRealLoss;
+  /** Decimal ratio (0.0342 = 3.42%). Null when gross sales unknown, ≤ 0, or missing. */
+  realLossPercentOfRevenue: number | null;
   riskExposure: MoneyLeakRiskExposure;
   dataIssues: MoneyLeakDataIssues;
   metadata: MoneyLeakMetadata;
@@ -58,6 +60,7 @@ export type BuildMoneyLeakSnapshotInput = {
   restaurantId: string;
   locationId?: string;
   timeFilter: DashboardTimeFilter;
+  grossSalesForWeek?: number | null;
 };
 
 const DEFAULT_NOTES = [
@@ -80,11 +83,16 @@ export function moneyLeakSnapshotFromParts(args: {
   spend: Pick<SpendMetricsResult, "priceIncreaseImpact">;
   invoiceProblemLineCount: number;
   extraNotes?: string[];
+  grossSalesForWeek?: number | null;
 }): MoneyLeakSnapshot {
   const wasteDollars = args.waste.recordedWasteValue;
   const priceIncreaseDollars = args.spend.priceIncreaseImpact;
   const overstockDollars = args.inventory.overstockValue;
   const reorderGapDollars = args.inventory.reorderSummary?.totalReorderValue ?? 0;
+  const realLossTotal = wasteDollars + priceIncreaseDollars;
+  const gross = args.grossSalesForWeek;
+  const realLossPercentOfRevenue =
+    gross != null && Number.isFinite(gross) && gross > 0 ? realLossTotal / gross : null;
 
   const notes = [...DEFAULT_NOTES, ...(args.extraNotes ?? [])];
 
@@ -94,8 +102,9 @@ export function moneyLeakSnapshotFromParts(args: {
     realLoss: {
       wasteDollars,
       priceIncreaseDollars,
-      total: wasteDollars + priceIncreaseDollars,
+      total: realLossTotal,
     },
+    realLossPercentOfRevenue,
     riskExposure: {
       overstockDollars,
       reorderGapDollars,
@@ -178,5 +187,6 @@ export async function buildMoneyLeakSnapshot(input: BuildMoneyLeakSnapshotInput)
     waste,
     spend,
     invoiceProblemLineCount,
+    grossSalesForWeek: input.grossSalesForWeek,
   });
 }

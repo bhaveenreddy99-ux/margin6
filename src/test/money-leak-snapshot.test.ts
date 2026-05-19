@@ -127,6 +127,55 @@ describe("moneyLeakSnapshotFromParts", () => {
   });
 });
 
+describe("realLossPercentOfRevenue", () => {
+  const period = { start: "2026-01-01T00:00:00.000Z", end: "2026-01-07T23:59:59.999Z" };
+  const baseInventory = {
+    overstockValue: 0,
+    reorderSummary: null,
+    missingCostCount: 0,
+    lastSessionApprovedAtIso: null,
+  };
+
+  it("computes loss ratio when gross sales > 0", () => {
+    // wasteDollars + priceIncreaseDollars = 200 + 142 = 342
+    // grossSalesForWeek = 10000 → 342 / 10000 = 0.0342
+    const snap = moneyLeakSnapshotFromParts({
+      period,
+      inventory: baseInventory,
+      waste: { recordedWasteValue: 200, wasteItemsMissingCost: 0 },
+      spend: { priceIncreaseImpact: 142 },
+      invoiceProblemLineCount: 0,
+      grossSalesForWeek: 10000,
+    });
+    expect(snap.realLoss.total).toBe(342);
+    expect(snap.realLossPercentOfRevenue).toBeCloseTo(0.0342, 4);
+  });
+
+  it("returns null when grossSalesForWeek is null", () => {
+    const snap = moneyLeakSnapshotFromParts({
+      period,
+      inventory: baseInventory,
+      waste: { recordedWasteValue: 200, wasteItemsMissingCost: 0 },
+      spend: { priceIncreaseImpact: 142 },
+      invoiceProblemLineCount: 0,
+      grossSalesForWeek: null,
+    });
+    expect(snap.realLossPercentOfRevenue).toBeNull();
+  });
+
+  it("returns null when grossSalesForWeek is 0 to avoid div-by-zero", () => {
+    const snap = moneyLeakSnapshotFromParts({
+      period,
+      inventory: baseInventory,
+      waste: { recordedWasteValue: 200, wasteItemsMissingCost: 0 },
+      spend: { priceIncreaseImpact: 142 },
+      invoiceProblemLineCount: 0,
+      grossSalesForWeek: 0,
+    });
+    expect(snap.realLossPercentOfRevenue).toBeNull();
+  });
+});
+
 describe("buildMoneyLeakSnapshot (integration smoke)", () => {
   it("runs without throwing when restaurant has no data (invalid id)", async () => {
     const snap = await buildMoneyLeakSnapshot({
