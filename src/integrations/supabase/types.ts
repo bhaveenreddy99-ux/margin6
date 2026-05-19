@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.4"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       alert_recipients: {
@@ -145,6 +170,69 @@ export type Database = {
           },
         ]
       }
+      daily_sales: {
+        Row: {
+          comps: number
+          discounts: number
+          entered_at: string
+          entered_by_user_id: string
+          entry_method: string
+          gross_sales: number
+          id: string
+          location_id: string
+          net_sales: number | null
+          restaurant_id: string
+          sale_date: string
+          tax: number
+          updated_at: string
+        }
+        Insert: {
+          comps?: number
+          discounts?: number
+          entered_at?: string
+          entered_by_user_id: string
+          entry_method?: string
+          gross_sales: number
+          id?: string
+          location_id: string
+          net_sales?: number | null
+          restaurant_id: string
+          sale_date: string
+          tax?: number
+          updated_at?: string
+        }
+        Update: {
+          comps?: number
+          discounts?: number
+          entered_at?: string
+          entered_by_user_id?: string
+          entry_method?: string
+          gross_sales?: number
+          id?: string
+          location_id?: string
+          net_sales?: number | null
+          restaurant_id?: string
+          sale_date?: string
+          tax?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_sales_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_sales_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       delivery_issues: {
         Row: {
           catalog_item_id: string | null
@@ -215,6 +303,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      failed_inbound_emails: {
+        Row: {
+          created_at: string
+          from_address: string | null
+          id: string
+          raw_payload: Json | null
+          reason: string
+          received_at: string
+          subject: string | null
+          to_addresses: string[] | null
+        }
+        Insert: {
+          created_at?: string
+          from_address?: string | null
+          id?: string
+          raw_payload?: Json | null
+          reason: string
+          received_at?: string
+          subject?: string | null
+          to_addresses?: string[] | null
+        }
+        Update: {
+          created_at?: string
+          from_address?: string | null
+          id?: string
+          raw_payload?: Json | null
+          reason?: string
+          received_at?: string
+          subject?: string | null
+          to_addresses?: string[] | null
+        }
+        Relationships: []
       }
       import_runs: {
         Row: {
@@ -352,6 +473,7 @@ export type Database = {
           category: string | null
           cost_unit: string | null
           created_at: string
+          current_stock: number | null
           default_par_level: number | null
           default_unit_cost: number | null
           id: string
@@ -378,6 +500,7 @@ export type Database = {
           category?: string | null
           cost_unit?: string | null
           created_at?: string
+          current_stock?: number | null
           default_par_level?: number | null
           default_unit_cost?: number | null
           id?: string
@@ -404,6 +527,7 @@ export type Database = {
           category?: string | null
           cost_unit?: string | null
           created_at?: string
+          current_stock?: number | null
           default_par_level?: number | null
           default_unit_cost?: number | null
           id?: string
@@ -670,6 +794,7 @@ export type Database = {
           unit_cost: number | null
           vendor_name: string | null
           vendor_sku: string | null
+          version: number
         }
         Insert: {
           brand_name?: string | null
@@ -690,6 +815,7 @@ export type Database = {
           unit_cost?: number | null
           vendor_name?: string | null
           vendor_sku?: string | null
+          version?: number
         }
         Update: {
           brand_name?: string | null
@@ -710,6 +836,7 @@ export type Database = {
           unit_cost?: number | null
           vendor_name?: string | null
           vendor_sku?: string | null
+          version?: number
         }
         Relationships: [
           {
@@ -1349,6 +1476,7 @@ export type Database = {
           created_at: string
           food_cost_target_pct: number
           id: string
+          invoice_email: string | null
           location_id: string
           updated_at: string
         }
@@ -1359,6 +1487,7 @@ export type Database = {
           created_at?: string
           food_cost_target_pct?: number
           id?: string
+          invoice_email?: string | null
           location_id: string
           updated_at?: string
         }
@@ -1369,6 +1498,7 @@ export type Database = {
           created_at?: string
           food_cost_target_pct?: number
           id?: string
+          invoice_email?: string | null
           location_id?: string
           updated_at?: string
         }
@@ -1440,11 +1570,14 @@ export type Database = {
           digest_hour: number
           email_digest_mode: Database["public"]["Enums"]["email_digest_mode"]
           id: string
+          invoice_parsed: boolean
           location_id: string | null
           low_stock_red: boolean
           low_stock_yellow: boolean
+          price_change: boolean
           recipients_mode: Database["public"]["Enums"]["recipients_mode"]
           restaurant_id: string
+          stock_update: boolean
           timezone: string
           updated_at: string
           user_id: string | null
@@ -1456,11 +1589,14 @@ export type Database = {
           digest_hour?: number
           email_digest_mode?: Database["public"]["Enums"]["email_digest_mode"]
           id?: string
+          invoice_parsed?: boolean
           location_id?: string | null
           low_stock_red?: boolean
           low_stock_yellow?: boolean
+          price_change?: boolean
           recipients_mode?: Database["public"]["Enums"]["recipients_mode"]
           restaurant_id: string
+          stock_update?: boolean
           timezone?: string
           updated_at?: string
           user_id?: string | null
@@ -1472,11 +1608,14 @@ export type Database = {
           digest_hour?: number
           email_digest_mode?: Database["public"]["Enums"]["email_digest_mode"]
           id?: string
+          invoice_parsed?: boolean
           location_id?: string | null
           low_stock_red?: boolean
           low_stock_yellow?: boolean
+          price_change?: boolean
           recipients_mode?: Database["public"]["Enums"]["recipients_mode"]
           restaurant_id?: string
+          stock_update?: boolean
           timezone?: string
           updated_at?: string
           user_id?: string | null
@@ -1503,7 +1642,10 @@ export type Database = {
           created_at: string
           data: Json | null
           emailed_at: string | null
+          error_message: string | null
+          failed_at: string | null
           id: string
+          idempotency_key: string | null
           location_id: string | null
           message: string
           read_at: string | null
@@ -1517,7 +1659,10 @@ export type Database = {
           created_at?: string
           data?: Json | null
           emailed_at?: string | null
+          error_message?: string | null
+          failed_at?: string | null
           id?: string
+          idempotency_key?: string | null
           location_id?: string | null
           message: string
           read_at?: string | null
@@ -1531,7 +1676,10 @@ export type Database = {
           created_at?: string
           data?: Json | null
           emailed_at?: string | null
+          error_message?: string | null
+          failed_at?: string | null
           id?: string
+          idempotency_key?: string | null
           location_id?: string | null
           message?: string
           read_at?: string | null
@@ -2092,7 +2240,9 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
+          created_from_session_id: string | null
           id: string
+          inventory_list_id: string | null
           location_id: string | null
           notes: string | null
           po_number: string | null
@@ -2106,7 +2256,9 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          created_from_session_id?: string | null
           id?: string
+          inventory_list_id?: string | null
           location_id?: string | null
           notes?: string | null
           po_number?: string | null
@@ -2120,7 +2272,9 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          created_from_session_id?: string | null
           id?: string
+          inventory_list_id?: string | null
           location_id?: string | null
           notes?: string | null
           po_number?: string | null
@@ -2132,6 +2286,20 @@ export type Database = {
           vendor_name?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "purchase_orders_created_from_session_id_fkey"
+            columns: ["created_from_session_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_inventory_list_id_fkey"
+            columns: ["inventory_list_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_lists"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "purchase_orders_location_id_fkey"
             columns: ["location_id"]
@@ -2151,99 +2319,6 @@ export type Database = {
             columns: ["smart_order_run_id"]
             isOneToOne: false
             referencedRelation: "smart_order_runs"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      /**
-       * Stub schema for dropped tables — keeps TS aligned with UI code paths.
-       * Runtime calls fail until tables are re-created in Postgres.
-       */
-      recipe_ingredients: {
-        Row: {
-          catalog_item_id: string | null
-          created_at: string
-          id: string
-          item_name: string
-          quantity: number
-          recipe_id: string
-          unit: string | null
-        }
-        Insert: {
-          catalog_item_id?: string | null
-          created_at?: string
-          id?: string
-          item_name: string
-          quantity: number
-          recipe_id: string
-          unit?: string | null
-        }
-        Update: {
-          catalog_item_id?: string | null
-          created_at?: string
-          id?: string
-          item_name?: string
-          quantity?: number
-          recipe_id?: string
-          unit?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "recipe_ingredients_catalog_item_id_fkey"
-            columns: ["catalog_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_catalog_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "recipe_ingredients_recipe_id_fkey"
-            columns: ["recipe_id"]
-            isOneToOne: false
-            referencedRelation: "recipes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      recipes: {
-        Row: {
-          category: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          name: string
-          notes: string | null
-          restaurant_id: string
-          selling_price: number | null
-          updated_at: string | null
-        }
-        Insert: {
-          category?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          name: string
-          notes?: string | null
-          restaurant_id: string
-          selling_price?: number | null
-          updated_at?: string | null
-        }
-        Update: {
-          category?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          name?: string
-          notes?: string | null
-          restaurant_id?: string
-          selling_price?: number | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "recipes_restaurant_id_fkey"
-            columns: ["restaurant_id"]
-            isOneToOne: false
-            referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
         ]
@@ -2803,62 +2878,6 @@ export type Database = {
           },
         ]
       }
-      user_location_assignments: {
-        Row: {
-          can_approve_orders: boolean
-          can_edit_par: boolean
-          can_see_costs: boolean
-          can_see_food_cost_pct: boolean
-          can_see_inventory_value: boolean
-          created_at: string
-          id: string
-          is_primary: boolean
-          location_id: string
-          order_approval_threshold: number | null
-          role: Database["public"]["Enums"]["app_role"]
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          can_approve_orders?: boolean
-          can_edit_par?: boolean
-          can_see_costs?: boolean
-          can_see_food_cost_pct?: boolean
-          can_see_inventory_value?: boolean
-          created_at?: string
-          id?: string
-          is_primary?: boolean
-          location_id: string
-          order_approval_threshold?: number | null
-          role?: Database["public"]["Enums"]["app_role"]
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          can_approve_orders?: boolean
-          can_edit_par?: boolean
-          can_see_costs?: boolean
-          can_see_food_cost_pct?: boolean
-          can_see_inventory_value?: boolean
-          created_at?: string
-          id?: string
-          is_primary?: boolean
-          location_id?: string
-          order_approval_threshold?: number | null
-          role?: Database["public"]["Enums"]["app_role"]
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "user_location_assignments_location_id_fkey"
-            columns: ["location_id"]
-            isOneToOne: false
-            referencedRelation: "locations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       user_invites: {
         Row: {
           accepted_at: string | null
@@ -2924,6 +2943,62 @@ export type Database = {
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_location_assignments: {
+        Row: {
+          can_approve_orders: boolean
+          can_edit_par: boolean
+          can_see_costs: boolean
+          can_see_food_cost_pct: boolean
+          can_see_inventory_value: boolean
+          created_at: string
+          id: string
+          is_primary: boolean
+          location_id: string
+          order_approval_threshold: number | null
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          can_approve_orders?: boolean
+          can_edit_par?: boolean
+          can_see_costs?: boolean
+          can_see_food_cost_pct?: boolean
+          can_see_inventory_value?: boolean
+          created_at?: string
+          id?: string
+          is_primary?: boolean
+          location_id: string
+          order_approval_threshold?: number | null
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          can_approve_orders?: boolean
+          can_edit_par?: boolean
+          can_see_costs?: boolean
+          can_see_food_cost_pct?: boolean
+          can_see_inventory_value?: boolean
+          created_at?: string
+          id?: string
+          is_primary?: boolean
+          location_id?: string
+          order_approval_threshold?: number | null
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_location_assignments_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
         ]
@@ -3024,33 +3099,57 @@ export type Database = {
       vendor_item_mappings: {
         Row: {
           catalog_item_id: string
+          confidence: string
+          conversion_notes: string | null
           created_at: string
           id: string
+          is_catch_weight: boolean
+          purchase_unit: string | null
           restaurant_id: string
+          total_per_case_override: number | null
+          units_per_case_override: number | null
           updated_at: string
           vendor_item_name: string
           vendor_name: string
           vendor_sku: string | null
+          verified_at: string | null
+          verified_by: string | null
         }
         Insert: {
           catalog_item_id: string
+          confidence?: string
+          conversion_notes?: string | null
           created_at?: string
           id?: string
+          is_catch_weight?: boolean
+          purchase_unit?: string | null
           restaurant_id: string
+          total_per_case_override?: number | null
+          units_per_case_override?: number | null
           updated_at?: string
           vendor_item_name: string
           vendor_name: string
           vendor_sku?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Update: {
           catalog_item_id?: string
+          confidence?: string
+          conversion_notes?: string | null
           created_at?: string
           id?: string
+          is_catch_weight?: boolean
+          purchase_unit?: string | null
           restaurant_id?: string
+          total_per_case_override?: number | null
+          units_per_case_override?: number | null
           updated_at?: string
           vendor_item_name?: string
           vendor_name?: string
           vendor_sku?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Relationships: [
           {
@@ -3126,12 +3225,78 @@ export type Database = {
           },
         ]
       }
+      weekly_sales: {
+        Row: {
+          comps: number
+          discounts: number
+          entered_at: string
+          entered_by_user_id: string
+          entry_method: string
+          gross_sales: number
+          id: string
+          is_partial: boolean
+          location_id: string
+          net_sales: number | null
+          restaurant_id: string
+          tax: number
+          updated_at: string
+          week_start: string
+        }
+        Insert: {
+          comps?: number
+          discounts?: number
+          entered_at?: string
+          entered_by_user_id: string
+          entry_method?: string
+          gross_sales: number
+          id?: string
+          is_partial?: boolean
+          location_id: string
+          net_sales?: number | null
+          restaurant_id: string
+          tax?: number
+          updated_at?: string
+          week_start: string
+        }
+        Update: {
+          comps?: number
+          discounts?: number
+          entered_at?: string
+          entered_by_user_id?: string
+          entry_method?: string
+          gross_sales?: number
+          id?: string
+          is_partial?: boolean
+          location_id?: string
+          net_sales?: number | null
+          restaurant_id?: string
+          tax?: number
+          updated_at?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weekly_sales_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "weekly_sales_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      accept_user_invites: { Args: Record<PropertyKey, never>; Returns: Json }
+      accept_user_invites: { Args: never; Returns: Json }
       alert_pref_restaurant_id: { Args: { pref_id: string }; Returns: string }
       approve_inventory_session_atomic: {
         Args: {
@@ -3183,6 +3348,31 @@ export type Database = {
           purchase_history_id: string
         }[]
       }
+      get_invoice_stock_audit: {
+        Args: { p_invoice_id: string }
+        Returns: {
+          actual_stock_qty: number
+          catalog_item_id: string
+          catalog_item_name: string
+          catalog_stock_unit: string
+          conv_status: string
+          conversion_formula: string
+          expected_stock_qty: number
+          invoice_item_id: string
+          invoice_unit: string
+          is_catch_weight: boolean
+          issue_reason: string
+          item_name: string
+          pack_size: string
+          price_basis: string
+          qty_difference: number
+          quantity_invoiced: number
+          received_qty_used: number
+          status: string
+          total_cost: number
+          unit_cost: number
+        }[]
+      }
       get_location_permissions: {
         Args: { p_location_id: string; p_uid: string }
         Returns: {
@@ -3192,6 +3382,28 @@ export type Database = {
           can_see_food_cost_pct: boolean
           can_see_inventory_value: boolean
           order_approval_threshold: number
+        }[]
+      }
+      get_pack_unit_issues: {
+        Args: { p_restaurant_id: string }
+        Returns: {
+          catalog_item_id: string
+          catalog_item_name: string
+          confidence: string
+          confirmed_at: string
+          conv_status: string
+          failure_reason: string
+          invoice_id: string
+          invoice_item_id: string
+          invoice_number: string
+          invoice_total_cost: number
+          invoice_unit: string
+          item_name: string
+          location_id: string
+          pack_parse_success: boolean
+          pack_size: string
+          received_qty: number
+          vendor_name: string
         }[]
       }
       has_restaurant_role: {
@@ -3229,6 +3441,10 @@ export type Database = {
         Args: { p_purchase_history_id: string }
         Returns: Json
       }
+      notify_pack_conversion_failures: {
+        Args: { p_failed_items: Json; p_invoice_id: string }
+        Returns: Json
+      }
       order_restaurant_id: { Args: { o_id: string }; Returns: string }
       par_guide_restaurant_id: { Args: { pg_id: string }; Returns: string }
       purchase_history_restaurant_id: {
@@ -3240,6 +3456,10 @@ export type Database = {
         Returns: string
       }
       reminder_restaurant_id: { Args: { r_id: string }; Returns: string }
+      reprocess_invoice_item_stock: {
+        Args: { p_invoice_item_id: string }
+        Returns: Json
+      }
       session_item_restaurant_id: {
         Args: { p_session_item_id: string }
         Returns: string
@@ -3392,6 +3612,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_role: ["OWNER", "MANAGER", "STAFF"],
