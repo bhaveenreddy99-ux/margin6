@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2, DollarSign } from "lucide-react";
+import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2, DollarSign, CreditCard } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -32,6 +32,7 @@ const insightsNav = [
 
 const ownerNav = [
   { title: "Settings", url: "/app/settings", icon: Settings },
+  { title: "Billing", url: "/app/billing", icon: CreditCard },
 ];
 
 export function AppSidebar() {

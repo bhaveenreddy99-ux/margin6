@@ -118,10 +118,18 @@ export default function LandingPage() {
                   Start Free <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
-              <Link to="/demo">
+              <Link to="/demo-live">
                 <Button size="lg" variant="outline" className="w-full sm:w-auto text-base px-8 h-12 border-border/60">
-                  Book a Demo
+                  See Live Demo
                 </Button>
+              </Link>
+            </div>
+            <div className="mt-4 flex justify-center">
+              <Link
+                to="/audit"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[hsl(25,95%,53%)] hover:underline"
+              >
+                Free Leak Audit — see your weekly loss in 30 seconds <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
             <div className="mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2">
@@ -364,9 +372,9 @@ export default function LandingPage() {
                   Start Free <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
-              <Link to="/demo">
+              <Link to="/demo-live">
                 <Button size="lg" variant="outline" className="w-full sm:w-auto text-base px-8 h-12 border-white/20 text-white hover:bg-white/10 hover:text-white">
-                  Book a Demo
+                  See Live Demo
                 </Button>
               </Link>
             </div>

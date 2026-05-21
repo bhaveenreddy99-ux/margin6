@@ -592,6 +592,282 @@ Deno.serve(async (req) => {
       results.push(`Shrink check: ${anomalies.length} anomalies for ${restaurant.name}`);
     }
 
+    // ─── 6) Monday 7am UTC Weekly Loss Digest ───────────────────────────────
+    // Fires once per restaurant per week. Emails OWNER + MANAGER members a
+    // breakdown of last week's losses. Skipped if not Mon 07:00–07:59 UTC, or
+    // if a WEEKLY_DIGEST notification already exists for this restaurant in
+    // the last 6 days.
+    digest_block: {
+      const isMonday = now.getUTCDay() === 1;
+      const isSevenAmUtc = now.getUTCHours() === 7;
+      if (!isMonday || !isSevenAmUtc) {
+        break digest_block;
+      }
+
+      // Last week window: Monday 00:00 UTC through Sunday 23:59:59 UTC
+      const lastWeekEnd = new Date(now);
+      lastWeekEnd.setUTCDate(lastWeekEnd.getUTCDate() - 1);
+      lastWeekEnd.setUTCHours(23, 59, 59, 999);
+      const lastWeekStart = new Date(lastWeekEnd);
+      lastWeekStart.setUTCDate(lastWeekStart.getUTCDate() - 6);
+      lastWeekStart.setUTCHours(0, 0, 0, 0);
+
+      const lastWeekStartIso = lastWeekStart.toISOString();
+      const lastWeekEndIso = lastWeekEnd.toISOString();
+      const lastWeekStartDate = lastWeekStartIso.slice(0, 10);
+      const lastWeekEndDate = lastWeekEndIso.slice(0, 10);
+      const dedupeWindowIso = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString();
+
+      const formatUsd = (n: number) =>
+        `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+      for (const restaurant of restaurants || []) {
+        const restaurantId = restaurant.id as string;
+        const restaurantName = (restaurant.name as string) || "Your restaurant";
+
+        // Skip restaurants with no confirmed invoices ever — these are inactive.
+        const { data: anyConfirmed } = await supabase
+          .from("invoices")
+          .select("id")
+          .eq("restaurant_id", restaurantId)
+          .eq("status", "confirmed")
+          .limit(1);
+        if (!anyConfirmed?.length) continue;
+
+        // Duplicate guard: already digested this restaurant within last 6 days.
+        const { data: recentDigest } = await supabase
+          .from("notifications")
+          .select("id")
+          .eq("restaurant_id", restaurantId)
+          .eq("type", "WEEKLY_DIGEST")
+          .gte("created_at", dedupeWindowIso)
+          .limit(1);
+        if (recentDigest?.length) continue;
+
+        // ── Waste total ────────────────────────────────────────────────────
+        let wasteTotal = 0;
+        let topLeakItem: string | null = null;
+        {
+          const { data: wasteRows } = await supabase
+            .from("waste_log")
+            .select("item_name, total_cost, unit_cost, quantity")
+            .eq("restaurant_id", restaurantId)
+            .gte("logged_at", lastWeekStartIso)
+            .lte("logged_at", lastWeekEndIso);
+          const byItem = new Map<string, number>();
+          for (const row of wasteRows || []) {
+            const explicit = Number((row as any).total_cost);
+            const derived = Number((row as any).unit_cost) * Number((row as any).quantity);
+            const value =
+              Number.isFinite(explicit) && explicit > 0
+                ? explicit
+                : Number.isFinite(derived) && derived > 0
+                  ? derived
+                  : 0;
+            if (value <= 0) continue;
+            wasteTotal += value;
+            const name = ((row as any).item_name as string | null)?.trim() || "";
+            if (!name) continue;
+            byItem.set(name, (byItem.get(name) || 0) + value);
+          }
+          let topVal = 0;
+          for (const [name, sum] of byItem.entries()) {
+            if (sum > topVal) {
+              topVal = sum;
+              topLeakItem = name;
+            }
+          }
+        }
+
+        // ── Price hike total (last-week invoices + price_mismatch lines) ───
+        let priceHikeTotal = 0;
+        {
+          const { data: invoices } = await supabase
+            .from("invoices")
+            .select("id")
+            .eq("restaurant_id", restaurantId)
+            .gte("invoice_date", lastWeekStartDate)
+            .lte("invoice_date", lastWeekEndDate);
+          const invoiceIds = (invoices || []).map((i: any) => i.id as string);
+          if (invoiceIds.length > 0) {
+            const { data: comparisons } = await supabase
+              .from("invoice_line_comparisons")
+              .select("po_unit_cost, invoiced_unit_cost, invoiced_qty, status")
+              .in("invoice_id", invoiceIds)
+              .eq("status", "price_mismatch");
+            for (const row of comparisons || []) {
+              const po = Number((row as any).po_unit_cost ?? 0);
+              const inv = Number((row as any).invoiced_unit_cost ?? 0);
+              const qty = Number((row as any).invoiced_qty ?? 0);
+              if (!Number.isFinite(po) || po <= 0) continue;
+              if (!Number.isFinite(inv) || inv <= po) continue;
+              const impact = (inv - po) * qty;
+              if (Number.isFinite(impact) && impact > 0) priceHikeTotal += impact;
+            }
+          }
+        }
+
+        // ── Overstock total (latest approved session) ──────────────────────
+        let overstockTotal = 0;
+        {
+          const { data: latestSession } = await supabase
+            .from("inventory_sessions")
+            .select("id")
+            .eq("restaurant_id", restaurantId)
+            .eq("status", "APPROVED")
+            .order("approved_at", { ascending: false })
+            .limit(1);
+          const sessionId = latestSession?.[0]?.id as string | undefined;
+          if (sessionId) {
+            const { data: items } = await supabase
+              .from("inventory_session_items")
+              .select("current_stock, par_level, unit_cost")
+              .eq("session_id", sessionId);
+            for (const row of items || []) {
+              const stock = Number((row as any).current_stock ?? 0);
+              const par = Number((row as any).par_level ?? 0);
+              const cost = Number((row as any).unit_cost ?? 0);
+              if (stock <= par || cost <= 0) continue;
+              const dollars = (stock - par) * cost;
+              if (Number.isFinite(dollars) && dollars > 0) overstockTotal += dollars;
+            }
+          }
+        }
+
+        // ── Shrinkage total (last-week SHRINK_ALERT / COUNT_VARIANCE) ──────
+        let shrinkageTotal = 0;
+        {
+          const { data: shrinkNotifs } = await supabase
+            .from("notifications")
+            .select("data")
+            .eq("restaurant_id", restaurantId)
+            .in("type", ["SHRINK_ALERT", "COUNT_VARIANCE"])
+            .gte("created_at", lastWeekStartIso)
+            .lte("created_at", lastWeekEndIso);
+          for (const n of shrinkNotifs || []) {
+            const items = Array.isArray((n as any).data?.items) ? (n as any).data.items : [];
+            for (const it of items) {
+              const impact = Number(it?.dollar_impact);
+              if (Number.isFinite(impact) && impact > 0) shrinkageTotal += impact;
+            }
+          }
+        }
+
+        const totalLost = wasteTotal + priceHikeTotal + overstockTotal + shrinkageTotal;
+        if (totalLost <= 0) continue;
+
+        // ── Resolve OWNER + MANAGER emails ─────────────────────────────────
+        const { data: members } = await supabase
+          .from("restaurant_members")
+          .select("user_id")
+          .eq("restaurant_id", restaurantId)
+          .in("role", ["OWNER", "MANAGER"]);
+        const memberIds = (members || []).map((m: any) => m.user_id as string);
+        if (memberIds.length === 0) continue;
+
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, email")
+          .in("id", memberIds);
+        const emails = (profiles || [])
+          .map((p: any) => p.email as string | null)
+          .filter((e): e is string => !!e && e.includes("@"));
+        if (emails.length === 0) continue;
+
+        // ── Build email HTML ───────────────────────────────────────────────
+        const weekStartLabel = lastWeekStart.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+        const weekEndLabel = lastWeekEnd.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+
+        const breakdownRow = (label: string, amount: number, isLast = false) => `
+          <tr>
+            <td style="padding:10px 0;${isLast ? "" : "border-bottom:1px solid #f3f4f6;"}font-size:14px;color:#374151">${label}</td>
+            <td style="padding:10px 0;${isLast ? "" : "border-bottom:1px solid #f3f4f6;"}font-size:14px;text-align:right;font-weight:600;color:#111827;font-family:'Menlo','Consolas',monospace">${formatUsd(amount)}</td>
+          </tr>`;
+
+        const topLeakSection = topLeakItem
+          ? `<div style="margin-top:24px;padding:14px 16px;background:#FFF7ED;border-left:3px solid #F97316;border-radius:6px;font-size:14px;color:#7C2D12"><strong>Your biggest leak:</strong> ${topLeakItem}</div>`
+          : "";
+
+        const html = `
+          <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#FAFAFA">
+            <div style="background:#0F172A;padding:22px 24px;border-radius:12px 12px 0 0">
+              <h1 style="color:#FFFFFF;margin:0;font-size:18px;font-weight:700;letter-spacing:-0.01em">RestaurantIQ <span style="color:#F97316">·</span> Weekly Loss Report</h1>
+            </div>
+            <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-top:none;padding:28px;border-radius:0 0 12px 12px">
+              <p style="color:#6B7280;font-size:12px;margin:0;text-transform:uppercase;letter-spacing:0.04em;font-weight:600">Week of ${weekStartLabel} – ${weekEndLabel}</p>
+              <p style="color:#DC2626;font-size:36px;font-weight:800;margin:6px 0 0;line-height:1.1;letter-spacing:-0.02em">${formatUsd(totalLost)} lost last week</p>
+
+              <table style="width:100%;border-collapse:collapse;margin-top:24px">
+                ${breakdownRow("Food waste", wasteTotal)}
+                ${breakdownRow("Price hikes", priceHikeTotal)}
+                ${breakdownRow("Overstock", overstockTotal)}
+                ${breakdownRow("Shrinkage", shrinkageTotal, true)}
+              </table>
+
+              ${topLeakSection}
+
+              <div style="margin-top:28px">
+                <a href="https://restaurantiq.com/app/dashboard" style="display:inline-block;background:#F97316;color:#FFFFFF;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">See the full breakdown →</a>
+              </div>
+            </div>
+            <p style="text-align:center;color:#9CA3AF;font-size:11px;margin-top:18px;line-height:1.6">You're receiving this because you're an owner/manager at ${restaurantName}.<br/>Unsubscribe in Settings.</p>
+          </div>
+        `;
+
+        const subject = `Your restaurant lost ${formatUsd(totalLost)} last week`;
+        let sentCount = 0;
+        for (const email of emails) {
+          try {
+            const r = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceKey}`,
+              },
+              body: JSON.stringify({ to: email, subject, html }),
+            });
+            if (r.ok) sentCount += 1;
+          } catch (e) {
+            console.error("Weekly digest send-email failed:", e);
+          }
+        }
+
+        if (sentCount === 0) continue;
+
+        // ── Record digest so we don't double-send this week ────────────────
+        const firstMemberId = memberIds[0];
+        await supabase.from("notifications").insert({
+          restaurant_id: restaurantId,
+          user_id: firstMemberId,
+          type: "WEEKLY_DIGEST",
+          title: "Weekly digest sent",
+          message: `Sent loss report to ${sentCount} recipient${sentCount === 1 ? "" : "s"}`,
+          severity: "INFO",
+          data: {
+            total_lost: Math.round(totalLost * 100) / 100,
+            waste_total: Math.round(wasteTotal * 100) / 100,
+            price_hike_total: Math.round(priceHikeTotal * 100) / 100,
+            overstock_total: Math.round(overstockTotal * 100) / 100,
+            shrinkage_total: Math.round(shrinkageTotal * 100) / 100,
+            top_leak_item: topLeakItem,
+            week_start: lastWeekStartDate,
+            week_end: lastWeekEndDate,
+            recipients_count: sentCount,
+          },
+        });
+
+        results.push(`Weekly digest: ${restaurantName} → ${sentCount} recipient(s), ${formatUsd(totalLost)} lost`);
+      }
+    }
+
     return new Response(JSON.stringify({ success: true, processed: results.length, details: results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -22,7 +22,11 @@ export default function DemoPage() {
   const [loading, setLoading] = useState(false);
 
   const handleCreateDemo = async () => {
-    if (!user) return;
+    if (!user) {
+      toast.error("Please sign in first");
+      navigate("/login");
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabase.rpc("create_restaurant_with_owner", {
@@ -35,8 +39,9 @@ export default function DemoPage() {
       localStorage.setItem("demo_mode", "true");
       toast.success("Demo workspace created!");
       navigate("/app/dashboard");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create demo");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create demo";
+      toast.error(msg);
     }
     setLoading(false);
   };

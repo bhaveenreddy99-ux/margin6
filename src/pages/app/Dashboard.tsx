@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
+import { MoneyLostWidget } from "@/components/MoneyLostWidget";
+import { OnboardingChecklist } from "@/components/OnboardingChecklist";
+import { OverstockCashTrapCard } from "@/components/OverstockCashTrapCard";
+import { PriceHikeAlertsCard } from "@/components/PriceHikeAlertsCard";
+import { ProfitLeaksCard } from "@/components/ProfitLeaksCard";
+import { ShrinkageAlertCard } from "@/components/ShrinkageAlertCard";
+import { TrialBanner } from "@/components/TrialBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -1771,6 +1778,9 @@ function SingleDashboard() {
     recordedWasteValue,
     recordedWasteCount,
     wasteItemsMissingCost,
+    shrinkageValue,
+    topProfitLeaks,
+    overstockItems,
   } = useDashboardData({
     currentRestaurantId: currentRestaurant?.id,
     currentLocationId: currentLocation?.id,
@@ -1884,6 +1894,18 @@ function SingleDashboard() {
 
         <TabsContent value="today">
           <div className="space-y-6">
+            {currentRestaurant && (
+              <TrialBanner restaurantId={currentRestaurant.id} />
+            )}
+            {currentRestaurant && (
+              <OnboardingChecklist
+                restaurantId={currentRestaurant.id}
+                locationId={currentLocation?.id}
+                lastSessionDate={lastSessionDate}
+                periodSpend={periodSpend}
+                pendingInvoices={pendingInvoices}
+              />
+            )}
             <TodaysBriefing
               timeFilter={timeFilter}
               setTimeFilter={setTimeFilter}
@@ -1901,6 +1923,39 @@ function SingleDashboard() {
                 </AlertDescription>
               </Alert>
             ) : null}
+
+            {currentRestaurant && (
+              <MoneyLostWidget
+                recordedWasteValue={recordedWasteValue}
+                priceIncreaseImpact={priceIncreaseImpact}
+                overstockValue={overstockValue}
+                shrinkageValue={shrinkageValue}
+                restaurantId={currentRestaurant.id}
+                locationId={currentLocation?.id}
+                timeFilter={timeFilter}
+              />
+            )}
+
+            <ProfitLeaksCard items={topProfitLeaks} loading={loading} />
+
+            {currentRestaurant && (
+              <div className="grid gap-5 lg:grid-cols-2">
+                <PriceHikeAlertsCard
+                  restaurantId={currentRestaurant.id}
+                  locationId={currentLocation?.id}
+                  timeFilter={timeFilter}
+                />
+                <OverstockCashTrapCard items={overstockItems} />
+              </div>
+            )}
+
+            {currentRestaurant && (
+              <ShrinkageAlertCard
+                restaurantId={currentRestaurant.id}
+                locationId={currentLocation?.id}
+                timeFilter={timeFilter}
+              />
+            )}
 
             <section className="space-y-4" aria-labelledby="dash-today-heading">
               <h2 id="dash-today-heading" className="text-sm font-semibold tracking-tight text-foreground">

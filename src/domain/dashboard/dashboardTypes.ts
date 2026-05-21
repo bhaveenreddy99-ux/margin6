@@ -115,6 +115,31 @@ export type ProfitIntelligenceAction = {
   message: string;
 };
 
+export type ProfitLeakReason = "Waste" | "Price Hike" | "Overstock" | "Shrinkage";
+
+export type ProfitLeakBreakdownRow = {
+  label: string;
+  value: number;
+  date: string;
+  source: string;
+};
+
+export type ProfitLeakItem = {
+  item_name: string;
+  total: number;
+  reason: ProfitLeakReason;
+  breakdown: ProfitLeakBreakdownRow[];
+};
+
+export type OverstockItem = {
+  item_name: string;
+  current_stock: number;
+  par_level: number;
+  unit_cost: number;
+  units_over: number;
+  dollars: number;
+};
+
 export type PortfolioLocationBreakdown = {
   /** Real location UUID, or `__unassigned__` for latest approved count with `location_id` IS NULL. */
   locationId: string;
@@ -188,6 +213,9 @@ export type KPISnapshot = {
   recordedWasteValue: number;
   recordedWasteCount: number;
   wasteItemsMissingCost: number;
+  shrinkageValue: number;
+  topProfitLeaks: ProfitLeakItem[];
+  overstockItems: OverstockItem[];
 };
 
 export type SingleDashboardData = KPISnapshot & {

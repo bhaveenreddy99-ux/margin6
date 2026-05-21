@@ -3,6 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { buildDashboardSnapshot } from "@/domain/dashboard/buildDashboardSnapshot";
 import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT, type InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import { loadInvoiceMetrics, type InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
+import { loadOverstockItems } from "@/domain/dashboard/loadOverstockItems";
+import { loadProfitLeaks } from "@/domain/dashboard/loadProfitLeaks";
+import { loadShrinkageValue } from "@/domain/dashboard/loadShrinkageValue";
 import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
 import { loadWasteMetrics } from "@/domain/dashboard/loadWasteMetrics";
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
@@ -43,6 +46,9 @@ const DEFAULT_SNAPSHOT: KPISnapshot = {
   recordedWasteValue: 0,
   recordedWasteCount: 0,
   wasteItemsMissingCost: 0,
+  shrinkageValue: 0,
+  topProfitLeaks: [],
+  overstockItems: [],
 };
 
 const EMPTY_INVOICE_RESULT: InvoiceMetricsResult = { pendingInvoices: 0 };
@@ -144,14 +150,18 @@ export function useDashboardData({
           invoiceResult = cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT;
         }
 
-        const [spendResult, wasteResult] = await Promise.all([
+        const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
+        const [spendResult, wasteResult, shrinkageResult, profitLeaksResult, overstockItemsResult] = await Promise.all([
           loadSpendMetrics(restaurantId, locationId, timeFilter),
           loadWasteMetrics(restaurantId, locationId, timeFilter, latestSessionUnitCostByCatalogIdRef.current),
+          loadShrinkageValue(restaurantId, locationId, timeFilter),
+          loadProfitLeaks(supabase, restaurantId, locationId, startDate, endDate),
+          loadOverstockItems(restaurantId, locationId),
         ]);
 
         if (cancelled) return;
 
-        setSnapshot(buildDashboardSnapshot(inventoryResult, invoiceResult, spendResult, wasteResult));
+        setSnapshot(buildDashboardSnapshot(inventoryResult, invoiceResult, spendResult, wasteResult, shrinkageResult, profitLeaksResult, overstockItemsResult));
         setError(null);
         previousFetchRef.current = { locKey, timeFilter, refetchCount };
       } catch (err) {

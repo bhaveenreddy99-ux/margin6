@@ -1,4 +1,4 @@
-import type { KPISnapshot } from "@/domain/dashboard/dashboardTypes";
+import type { KPISnapshot, OverstockItem, ProfitLeakItem } from "@/domain/dashboard/dashboardTypes";
 import type { InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import type { InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
 import type { SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
@@ -9,6 +9,9 @@ export function buildDashboardSnapshot(
   invoices: InvoiceMetricsResult,
   spend: SpendMetricsResult,
   waste: WasteMetricsResult,
+  shrinkageValue: number = 0,
+  topProfitLeaks: ProfitLeakItem[] = [],
+  overstockItems: OverstockItem[] = [],
 ): KPISnapshot {
   return {
     stockStatus: inventory.stockStatus,
@@ -32,5 +35,8 @@ export function buildDashboardSnapshot(
     recordedWasteValue: waste.recordedWasteValue,
     recordedWasteCount: waste.recordedWasteCount,
     wasteItemsMissingCost: waste.wasteItemsMissingCost,
+    shrinkageValue,
+    topProfitLeaks,
+    overstockItems,
   };
 }

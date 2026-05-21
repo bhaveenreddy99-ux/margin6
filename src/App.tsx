@@ -13,6 +13,8 @@ import LandingPage from "@/pages/Landing";
 import LoginPage from "@/pages/Login";
 import SignupPage from "@/pages/Signup";
 import DemoPage from "@/pages/Demo";
+import PublicDemoPage from "@/pages/PublicDemo";
+import LeakAuditPage from "@/pages/LeakAudit";
 import CreateRestaurantPage from "@/pages/onboarding/CreateRestaurant";
 import AppLayout from "@/layouts/AppLayout";
 import DashboardPage from "@/pages/app/Dashboard";
@@ -35,6 +37,7 @@ import WasteLogPage from "@/pages/app/WasteLog";
 import SalesPage from "@/pages/app/Sales";
 import SettingsPage from "@/pages/app/Settings";
 import NotificationsPage from "@/pages/app/Notifications";
+import BillingPage from "@/pages/app/Billing";
 import AlertSettingsPage from "@/pages/app/settings/AlertSettings";
 import ReminderSettingsPage from "@/pages/app/settings/ReminderSettings";
 import ForgotPasswordPage from "@/pages/ForgotPassword";
@@ -59,6 +62,8 @@ const App = () => (
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/demo" element={<DemoPage />} />
+              <Route path="/demo-live" element={<PublicDemoPage />} />
+              <Route path="/audit" element={<LeakAuditPage />} />
               <Route path="/onboarding/create-restaurant" element={<CreateRestaurantPage />} />
               <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route index element={<Navigate to="dashboard" replace />} />
@@ -88,6 +93,7 @@ const App = () => (
                 <Route path="sales" element={<StaffRestrictedRoute><SalesPage /></StaffRestrictedRoute>} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="settings" element={<OwnerRoute><SettingsPage /></OwnerRoute>} />
+                <Route path="billing" element={<OwnerRoute><BillingPage /></OwnerRoute>} />
                 <Route path="settings/alerts" element={<OwnerRoute><AlertSettingsPage /></OwnerRoute>} />
                 <Route path="settings/reminders" element={<OwnerRoute><ReminderSettingsPage /></OwnerRoute>} />
               </Route>
