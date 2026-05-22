@@ -1306,9 +1306,6 @@ function SingleDashboard() {
               <OnboardingChecklist
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}
-                lastSessionDate={lastSessionDate}
-                periodSpend={periodSpend}
-                pendingInvoices={pendingInvoices}
               />
             )}
             <TodaysBriefing

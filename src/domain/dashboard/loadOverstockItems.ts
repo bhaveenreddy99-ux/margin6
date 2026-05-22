@@ -17,7 +17,8 @@ export async function loadOverstockItems(
     .eq("status", "APPROVED")
     .order("approved_at", { ascending: false })
     .limit(1);
-  if (locationId) sessQ = sessQ.eq("location_id", locationId);
+  // See loadInventoryMetrics: also surface sessions with null location_id.
+  if (locationId) sessQ = sessQ.or(`location_id.eq.${locationId},location_id.is.null`);
 
   const { data: sessions } = (await sessQ) as unknown as {
     data: Array<{ id: string }> | null;

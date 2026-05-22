@@ -49,6 +49,73 @@ import { cn } from "@/lib/utils";
 
 const normalizeItemName = (value: string | null | undefined) => (value || "").trim().toLowerCase();
 
+function SmartOrderEmptyState() {
+  const { currentRestaurant, currentLocation } = useRestaurant();
+  const [hasParGuide, setHasParGuide] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentRestaurant?.id) {
+      setHasParGuide(null);
+      return;
+    }
+    (async () => {
+      let q = supabase
+        .from("par_guides")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", currentRestaurant.id);
+      if (currentLocation?.id) {
+        q = q.or(`location_id.eq.${currentLocation.id},location_id.is.null`);
+      }
+      const { count } = await q;
+      if (cancelled) return;
+      setHasParGuide((count ?? 0) > 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRestaurant?.id, currentLocation?.id]);
+
+  // Until we know whether PAR exists, default to the PAR CTA — a no-op count
+  // can still be created even without PAR, so the missing-PAR message is the
+  // higher-leverage default.
+  const showParCta = hasParGuide !== true;
+
+  return (
+    <Card>
+      <CardContent className="empty-state">
+        <ShoppingCart className="empty-state-icon" />
+        <p className="empty-state-title">No smart orders yet</p>
+        {showParCta ? (
+          <>
+            <p className="empty-state-description">
+              Set PAR levels to unlock Smart Orders. PAR tells us when each item needs reordering.
+            </p>
+            <Button
+              asChild
+              className="mt-4 bg-gradient-orange text-white shadow-orange hover:opacity-90 h-10 min-h-11 text-xs font-semibold"
+            >
+              <Link to="/app/par">Set PAR Levels</Link>
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="empty-state-description">
+              Approve an inventory count in Inventory Management to generate your first Smart Order.
+            </p>
+            <Button
+              asChild
+              className="mt-4 bg-gradient-orange text-white shadow-orange hover:opacity-90 h-10 min-h-11 text-xs font-semibold"
+            >
+              <Link to="/app/inventory/enter">Open Inventory Management</Link>
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 type CatalogRowForUom = Pick<
   Tables<"inventory_catalog_items">,
   "id" | "item_name" | "product_number" | "vendor_sku" | "vendor_name" | "inventory_list_id" | "unit"
@@ -1048,16 +1115,7 @@ export default function SmartOrderPage() {
           {[1, 2, 3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}
         </div>
       ) : runs.length === 0 ? (
-        <Card>
-          <CardContent className="empty-state">
-            <ShoppingCart className="empty-state-icon" />
-            <p className="empty-state-title">No smart orders yet</p>
-            <p className="empty-state-description">Create a smart order from an approved inventory session in Inventory Management.</p>
-            <Button asChild className="mt-4 bg-gradient-orange text-white shadow-orange hover:opacity-90 h-10 min-h-11 text-xs font-semibold">
-              <Link to="/app/inventory/enter">Open Inventory Management</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <SmartOrderEmptyState />
       ) : (
         <Card className="overflow-hidden border shadow-sm">
           <Table>

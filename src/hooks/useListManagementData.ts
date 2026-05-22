@@ -19,12 +19,13 @@ import type {
 
 type UseListManagementDataArgs = {
   restaurantId: string | null | undefined;
+  locationId?: string | null | undefined;
 };
 
 type BasicParGuideRow = Pick<ParGuideRow, "id" | "name">;
 type PurchaseHistoryLookupRow = { id: string; created_at: string; vendor_name: string | null };
 
-export function useListManagementData({ restaurantId }: UseListManagementDataArgs) {
+export function useListManagementData({ restaurantId, locationId }: UseListManagementDataArgs) {
   const [lists, setLists] = useState<InventoryListRow[]>([]);
   const [itemCounts, setItemCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -41,11 +42,18 @@ export function useListManagementData({ restaurantId }: UseListManagementDataArg
     if (!restaurantId) return;
 
     setLoading(true);
-    const { data: listRows } = (await supabase
+    // Scope lists to the active location. Lists that pre-date the
+    // location_id column (or are deliberately shared across the restaurant)
+    // have location_id = NULL and remain visible everywhere.
+    let listsQ = supabase
       .from("inventory_lists")
       .select("*")
       .eq("restaurant_id", restaurantId)
-      .order("created_at", { ascending: false })) as unknown as {
+      .order("created_at", { ascending: false });
+    if (locationId) {
+      listsQ = listsQ.or(`location_id.eq.${locationId},location_id.is.null`);
+    }
+    const { data: listRows } = (await listsQ) as unknown as {
       data: InventoryListRow[] | null;
     };
 
@@ -61,7 +69,7 @@ export function useListManagementData({ restaurantId }: UseListManagementDataArg
     }
 
     setLoading(false);
-  }, [restaurantId]);
+  }, [restaurantId, locationId]);
 
   const loadListDetail = useCallback(
     async (list: InventoryListRow) => {

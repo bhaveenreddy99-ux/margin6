@@ -9,38 +9,102 @@ import { supabase } from "@/integrations/supabase/client";
 interface OnboardingChecklistProps {
   restaurantId: string;
   locationId?: string | null;
-  lastSessionDate: Date | null;
-  periodSpend: number;
-  pendingInvoices: number;
+}
+
+type Flags = {
+  hasInvoice: boolean;
+  hasApprovedCount: boolean;
+  hasParGuide: boolean;
+  hasWeekSales: boolean;
+  hasAlertSetup: boolean;
+};
+
+const DEFAULT_FLAGS: Flags = {
+  hasInvoice: false,
+  hasApprovedCount: false,
+  hasParGuide: false,
+  hasWeekSales: false,
+  hasAlertSetup: false,
+};
+
+function startOfIsoWeek(d: Date): Date {
+  // Monday-anchored week, matching SQL date_trunc('week', ...). Returns a Date
+  // representing 00:00:00 local time on the Monday of d's week.
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  const day = copy.getDay(); // 0 = Sunday … 6 = Saturday
+  const diff = (day + 6) % 7; // days since Monday
+  copy.setDate(copy.getDate() - diff);
+  return copy;
 }
 
 export function OnboardingChecklist({
   restaurantId,
-  locationId: _locationId,
-  lastSessionDate,
-  periodSpend,
-  pendingInvoices,
+  locationId,
 }: OnboardingChecklistProps) {
   const navigate = useNavigate();
-  const [hasSales, setHasSales] = useState(false);
+  const [flags, setFlags] = useState<Flags>(DEFAULT_FLAGS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { count } = await supabase
+      setLoading(true);
+      const weekStart = startOfIsoWeek(new Date()).toISOString().slice(0, 10);
+
+      const invoiceQ = supabase
+        .from("invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", restaurantId)
+        .neq("status", "draft");
+
+      let approvedQ = supabase
+        .from("inventory_sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", restaurantId)
+        .eq("status", "APPROVED");
+      if (locationId) approvedQ = approvedQ.or(`location_id.eq.${locationId},location_id.is.null`);
+
+      let parQ = supabase
+        .from("par_guides")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", restaurantId);
+      if (locationId) parQ = parQ.or(`location_id.eq.${locationId},location_id.is.null`);
+
+      const salesQ = supabase
         .from("weekly_sales")
         .select("id", { count: "exact", head: true })
         .eq("restaurant_id", restaurantId)
-        .limit(1);
+        .gte("week_start", weekStart);
+
+      const prefsQ = supabase
+        .from("notification_preferences")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", restaurantId);
+
+      const [inv, approved, par, sales, prefs] = await Promise.all([
+        invoiceQ,
+        approvedQ,
+        parQ,
+        salesQ,
+        prefsQ,
+      ]);
+
       if (cancelled) return;
-      setHasSales((count ?? 0) > 0);
+
+      setFlags({
+        hasInvoice: (inv.count ?? 0) > 0,
+        hasApprovedCount: (approved.count ?? 0) > 0,
+        hasParGuide: (par.count ?? 0) > 0,
+        hasWeekSales: (sales.count ?? 0) > 0,
+        hasAlertSetup: (prefs.count ?? 0) > 0,
+      });
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [restaurantId]);
+  }, [restaurantId, locationId]);
 
   if (loading) {
     return <Skeleton className="h-48 w-full rounded-xl" />;
@@ -50,36 +114,44 @@ export function OnboardingChecklist({
     {
       title: "Upload your first invoice",
       description: "Forward a vendor invoice so we can track your spend",
-      complete: periodSpend > 0 || pendingInvoices > 0,
+      complete: flags.hasInvoice,
       actionLabel: "Upload Invoice",
       actionRoute: "/app/invoices",
     },
     {
       title: "Complete your first inventory count",
       description: "Count your stock so we can calculate what to reorder",
-      complete: lastSessionDate !== null,
+      complete: flags.hasApprovedCount,
       actionLabel: "Start Count",
       actionRoute: "/app/inventory/enter",
     },
     {
+      title: "Set PAR levels for your items",
+      description: "PAR levels tell us when you need to reorder",
+      complete: flags.hasParGuide,
+      actionLabel: "Set PAR Levels",
+      actionRoute: "/app/par",
+    },
+    {
       title: "Enter this week's sales",
       description: "Add your weekly revenue so we can calculate food cost %",
-      complete: hasSales,
+      complete: flags.hasWeekSales,
       actionLabel: "Enter Sales",
       actionRoute: "/app/sales",
     },
     {
       title: "Set up notifications",
       description: "Get alerted when prices spike or stock runs low",
-      complete: false,
+      complete: flags.hasAlertSetup,
       actionLabel: "Set Up",
       actionRoute: "/app/settings/alerts",
     },
   ];
 
   const completedCount = steps.filter((s) => s.complete).length;
-  if (completedCount === 4) return null;
-  const pct = (completedCount / 4) * 100;
+  const totalSteps = steps.length;
+  if (completedCount === totalSteps) return null;
+  const pct = (completedCount / totalSteps) * 100;
 
   return (
     <Card className="border-l-4 border-orange-400">
@@ -97,7 +169,7 @@ export function OnboardingChecklist({
             </div>
           </div>
           <p className="text-xs font-semibold text-muted-foreground shrink-0 whitespace-nowrap">
-            {completedCount} of 4 complete
+            {completedCount} of {totalSteps} complete
           </p>
         </div>
 

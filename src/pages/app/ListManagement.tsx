@@ -162,7 +162,11 @@ function IssueRow({ item, onFix, onQuickSave }: {
 // ─── COMPONENT ──────────────────────────────────
 
 export default function ListManagementPage() {
-  const { currentRestaurant, currentLocation } = useRestaurant();
+  const { currentRestaurant, currentLocation, locations } = useRestaurant();
+  const locationNameById = useMemo(
+    () => Object.fromEntries(locations.map((l) => [l.id, l.name])) as Record<string, string>,
+    [locations],
+  );
   const { user } = useAuth();
   const navigate = useNavigate();
   const restaurantId = currentRestaurant?.id;
@@ -184,7 +188,7 @@ export default function ListManagementPage() {
     setItemCategoryMaps,
     refreshLists,
     loadListDetail,
-  } = useListManagementData({ restaurantId });
+  } = useListManagementData({ restaurantId, locationId: currentLocation?.id });
 
   // ── Grid state
   const [gridSearch, setGridSearch] = useState("");
@@ -409,6 +413,7 @@ export default function ListManagementPage() {
     handleAddFromPurchase,
   } = useListManagementActions({
     restaurantId,
+    locationId: currentLocation?.id,
     userId: user?.id,
     selectedList,
     setSelectedList,
@@ -1571,7 +1576,7 @@ export default function ListManagementPage() {
             </div>
             <p className="text-xs text-muted-foreground">View all saved orders and procurement costs</p>
             <Button variant="outline" size="sm" className="w-full gap-1 text-xs">
-              Open <ChevronRight className="h-3 w-3" />
+              View Orders <ChevronRight className="h-3 w-3" />
             </Button>
           </CardContent>
         </Card>
@@ -1620,8 +1625,26 @@ export default function ListManagementPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary" className="text-[10px] font-mono">{itemCounts[list.id] || 0} items</Badge>
+                {(() => {
+                  const locName = list.location_id ? locationNameById[list.location_id] : null;
+                  if (locName) {
+                    return (
+                      <Badge variant="outline" className="text-[10px]">
+                        {locName}
+                      </Badge>
+                    );
+                  }
+                  if (locations.length > 1) {
+                    return (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        All locations
+                      </Badge>
+                    );
+                  }
+                  return null;
+                })()}
                 <span className="text-[11px] text-muted-foreground">{new Date(list.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
               </div>
               <div className="grid grid-cols-2 gap-2">

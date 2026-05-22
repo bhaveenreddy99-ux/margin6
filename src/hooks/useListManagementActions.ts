@@ -39,6 +39,8 @@ import { exportToCSV, exportToExcel, exportToPDF, parseFile } from "@/lib/export
 
 type UseListManagementActionsArgs = {
   restaurantId: string | null | undefined;
+  /** Current active location — used to bind newly-created lists to that location. */
+  locationId?: string | null | undefined;
   userId: string | null | undefined;
   selectedList: InventoryListRow | null;
   setSelectedList: Dispatch<SetStateAction<InventoryListRow | null>>;
@@ -105,6 +107,7 @@ type UseListManagementActionsArgs = {
 
 export function useListManagementActions({
   restaurantId,
+  locationId,
   userId,
   selectedList,
   setSelectedList,
@@ -226,6 +229,9 @@ export function useListManagementActions({
 
     const { error } = await supabase.from("inventory_lists").insert({
       restaurant_id: restaurantId,
+      // Bind new lists to the current location so they only surface for that
+      // location's managers. NULL is treated as "shared across the restaurant".
+      location_id: locationId ?? null,
       name: newListName.trim(),
       created_by: userId,
     });

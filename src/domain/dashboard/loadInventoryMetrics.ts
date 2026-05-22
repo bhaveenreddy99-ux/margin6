@@ -87,7 +87,10 @@ export async function loadInventoryMetrics(
     .eq("status", "APPROVED")
     .order("approved_at", { ascending: false })
     .limit(1);
-  if (locationId) sessionQuery = sessionQuery.eq("location_id", locationId);
+  // Sessions created before users had a location selected (or single-location
+  // accounts) carry location_id = NULL. Match those too so dashboards don't
+  // silently hide just-approved counts when the auto-selected location differs.
+  if (locationId) sessionQuery = sessionQuery.or(`location_id.eq.${locationId},location_id.is.null`);
 
   const [sessionsResult, riskSettingsResult] = await Promise.all([
     sessionQuery as unknown as Promise<{ data: InventorySessionRow[] | null }>,
@@ -145,7 +148,7 @@ export async function loadInventoryMetrics(
     .eq("status", "APPROVED")
     .order("approved_at", { ascending: false })
     .limit(8);
-  if (locationId) trendQuery = trendQuery.eq("location_id", locationId);
+  if (locationId) trendQuery = trendQuery.or(`location_id.eq.${locationId},location_id.is.null`);
 
   const { data: trendSessions } = (await trendQuery) as unknown as {
     data: InventoryTrendSessionRow[] | null;
