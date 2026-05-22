@@ -132,7 +132,13 @@ export function computeLineReorderValue(line: CasePlanningLine): LineValueResult
  *   stock=3, par=5, cost=10 → { dollars: 0,  isMissingCost: false }
  */
 export function computeLineOverstockValue(line: CasePlanningLine): LineValueResult {
-  const overage = Math.max(0, resolvedStock(line) - resolvedPar(line));
+  // No PAR configured (null, 0, or negative) → cannot compute overstock — return 0
+  // rather than treating every counted unit as "above PAR".
+  const par = resolvedPar(line);
+  if (par <= 0) {
+    return { dollars: 0, isMissingCost: line.unitCostPerCase == null };
+  }
+  const overage = Math.max(0, resolvedStock(line) - par);
   if (overage === 0) {
     return { dollars: 0, isMissingCost: line.unitCostPerCase == null };
   }

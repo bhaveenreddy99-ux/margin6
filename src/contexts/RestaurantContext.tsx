@@ -204,13 +204,8 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
 
       if (uiState) {
         pendingRestoreLocationIdRef.current = uiState.selected_location_id ?? null;
-        if (uiState.selected_restaurant_id === null && mapped.length > 1) {
-          // Portfolio mode — only valid with multiple restaurants
-          setCurrentRestaurantState(null);
-        } else {
-          const found = mapped.find((r: Restaurant) => r.id === uiState.selected_restaurant_id);
-          setCurrentRestaurantState(found || (mapped.length > 0 ? mapped[0] : null));
-        }
+        const found = mapped.find((r: Restaurant) => r.id === uiState.selected_restaurant_id);
+        setCurrentRestaurantState(found || (mapped.length > 0 ? mapped[0] : null));
       } else if (mapped.length > 0) {
         setCurrentRestaurantState(mapped[0]);
       }
@@ -276,24 +271,23 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
     currentLocation?.id,
   ]);
 
-  // Auto-select a location when none is currently selected. Covers:
-  //   • Any role with exactly one location.
-  //   • OWNER with multiple locations (skips MANAGER/STAFF assignment logic above —
-  //     OWNERs have implicit access to every location and otherwise would land with
-  //     currentLocation === null, which causes per-location screens to show
-  //     "latest-approved-anywhere" data instead of a scoped view).
-  // Does not override an existing currentLocation.
+  // Auto-select the first active location whenever a restaurant is current but
+  // no location is selected. Location is an internal concept — the user never
+  // sees a location picker. The MANAGER/STAFF assignment-based effect above
+  // runs first and scopes the pick to permitted locations; this is the
+  // fallback for OWNERs (and any case where assignments did not yield a pick).
   useEffect(() => {
     if (loading || !user || !currentRestaurant) return;
     if (currentLocation !== null) return;
     if (locations.length === 0) return;
-    const isOwner = currentRestaurant.role === "OWNER";
-    if (!isOwner && locations.length !== 1) return;
-    const pick = locations.find((l) => l.is_active) ?? locations[0];
+    const scoped = locations.filter((l) => l.restaurant_id === currentRestaurant.id);
+    const pool = scoped.length > 0 ? scoped : locations;
+    const pick = pool.find((l) => l.is_active) ?? pool[0];
+    if (!pick) return;
     setCurrentLocationState(pick);
     void persistUiState(currentRestaurant.id, pick.id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, user, currentRestaurant?.id, currentRestaurant?.role, locations.length, currentLocation?.id]);
+  }, [loading, user, currentRestaurant?.id, locations.length, currentLocation?.id]);
 
   const handleSetCurrent = (r: Restaurant | null) => {
     setCurrentRestaurantState(r);

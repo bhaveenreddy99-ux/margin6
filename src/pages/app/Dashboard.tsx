@@ -12,50 +12,36 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Package, AlertTriangle, TrendingUp, TrendingDown, ShoppingCart,
-  Building2, Bell, DollarSign, BarChart3, Sparkles,
+  Bell, DollarSign, BarChart3, Sparkles,
   ClipboardCheck, Clock, CheckCircle2, Zap, ArrowRight,
-  CalendarDays, Activity, Receipt, Trash2, Truck, ChevronDown,
-  ArrowDownRight, ArrowUpRight,
+  CalendarDays, Activity, Receipt, Trash2, Truck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useNavigate, Navigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { useAllLocationsSummary, getFoodCostStatus, type DateRange, type LocationSummary } from "@/hooks/useAllLocationsSummary";
-import { useLocationAlerts, type LocationAlert } from "@/hooks/useLocationAlerts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { loadInventoryMetrics } from "@/domain/dashboard/loadInventoryMetrics";
-import {
-  format,
-  differenceInDays,
-  formatDistanceToNow,
-} from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import type { ComputedUsageItem, PARRecommendation } from "@/lib/usage-analytics";
 import {
   buildDashboardDisplayState,
-  buildPortfolioSummary,
   buildProfitIntelligenceActions,
   dashboardSpendPeriodLabel,
   formatInventoryQty,
-  sortPortfolioRestaurants,
-  spendPeriodPlainName,
-  spendPeriodSubtitle,
   summarizeWasteSnapshot,
 } from "@/domain/dashboard/dashboardSelectors";
 import type {
   DashboardTimeFilter,
-  PortfolioDashboardTotals,
-  PortfolioRestaurantRow,
   ProfitIntelligenceAction,
   TopReorderItem,
   WasteLogSnapshotRow,
 } from "@/domain/dashboard/dashboardTypes";
 import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
-import { useDashboardData, usePortfolioDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData } from "@/hooks/useDashboardData";
 import { useLocationPermissions } from "@/hooks/useLocationPermissions";
 
 // ─── Today's Briefing ───
@@ -715,235 +701,6 @@ function RecommendationsPanel({ recommendations }: { recommendations: PARRecomme
   );
 }
 
-// ─── Multi-Location Section ───
-function MultiLocationView({
-  restaurants,
-  navigate,
-  setCurrentRestaurant,
-}: {
-  restaurants: PortfolioRestaurantRow[];
-  navigate: (path: string) => void;
-  setCurrentRestaurant: (r: { id: string; name: string; role: string } | null) => void;
-}) {
-  const sorted = useMemo(() => sortPortfolioRestaurants(restaurants), [restaurants]);
-
-  const maxValue = Math.max(...restaurants.map((r) => r.red + r.yellow + r.green), 1);
-
-  return (
-    <div className="space-y-5">
-      {/* Location Performance */}
-      <Card className="hover:shadow-md transition-all duration-200">
-        <div className="flex items-center gap-2 p-5 pb-3">
-          <Building2 className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-bold tracking-tight">Location Performance</h3>
-        </div>
-        <CardContent className="pt-0 pb-5 px-5">
-          {restaurants.length === 0 ? (
-            <div className="empty-state py-8">
-              <Building2 className="empty-state-icon h-8 w-8" />
-              <p className="empty-state-title">No restaurants found</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {sorted.map((r) => {
-                const total = r.red + r.yellow + r.green;
-                const redPct = (r.red / Math.max(total, 1)) * 100;
-                const yellowPct = (r.yellow / Math.max(total, 1)) * 100;
-                const greenPct = (r.green / Math.max(total, 1)) * 100;
-                const barWidth = (total / maxValue) * 100;
-
-                return (
-                  <button
-                    key={r.id}
-                    onClick={() => {
-                      setCurrentRestaurant({ id: r.id, name: r.name, role: r.role });
-                      navigate("/app/dashboard");
-                    }}
-                    className="w-full flex items-center gap-4 py-2.5 px-3 rounded-lg hover:bg-muted/30 transition-colors text-left group"
-                  >
-                    <span className="text-sm font-medium w-36 truncate">{r.name}</span>
-                    <div className="flex-1 h-5 rounded-full bg-muted/30 overflow-hidden">
-                      <div className="h-full flex" style={{ width: `${barWidth}%` }}>
-                        {redPct > 0 && <div className="h-full bg-destructive/80" style={{ width: `${redPct}%` }} />}
-                        {yellowPct > 0 && <div className="h-full bg-warning/80" style={{ width: `${yellowPct}%` }} />}
-                        {greenPct > 0 && <div className="h-full bg-success/80" style={{ width: `${greenPct}%` }} />}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] font-mono shrink-0">
-                      <span className="text-destructive">{r.red}</span>
-                      <span className="text-warning">{r.yellow}</span>
-                      <span className="text-success">{r.green}</span>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30 group-hover:text-foreground transition-colors shrink-0" />
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Store Ranking */}
-      <Card className="hover:shadow-md transition-all duration-200">
-        <div className="flex items-center gap-2 p-5 pb-3">
-          <BarChart3 className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-bold tracking-tight">Store Ranking</h3>
-        </div>
-        <CardContent className="pt-0 pb-4 px-5">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/20 hover:bg-muted/20">
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Restaurant</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center">Critical</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center">Low</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center">Orders</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Last Approved</TableHead>
-                <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.map((r) => (
-                <TableRow
-                  key={r.id}
-                  className="hover:bg-muted/20 cursor-pointer transition-colors"
-                  onClick={() => {
-                    setCurrentRestaurant({ id: r.id, name: r.name, role: r.role });
-                    navigate("/app/dashboard");
-                  }}
-                >
-                  <TableCell className="font-medium text-sm">{r.name}</TableCell>
-                  <TableCell className="text-center">
-                    {r.red > 0 ? <Badge variant="destructive" className="text-[10px]">{r.red}</Badge> : <span className="text-muted-foreground text-xs">0</span>}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {r.yellow > 0 ? <Badge className="bg-warning text-warning-foreground text-[10px]">{r.yellow}</Badge> : <span className="text-muted-foreground text-xs">0</span>}
-                  </TableCell>
-                  <TableCell className="text-center text-sm font-mono">{r.recentOrders}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {r.lastApproved ? new Date(r.lastApproved).toLocaleDateString() : "—"}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {r.red === 0 && r.yellow === 0 ? (
-                      <Badge className="bg-success/10 text-success text-[10px] border-0">Best</Badge>
-                    ) : r.red > 2 ? (
-                      <Badge className="bg-destructive/10 text-destructive text-[10px] border-0">Needs Attention</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-[10px]">OK</Badge>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// ─── Portfolio Dashboard (All Restaurants) ───
-function PortfolioDashboard({
-  setCurrentRestaurant,
-}: {
-  setCurrentRestaurant: (r: { id: string; name: string; role: string } | null) => void;
-}) {
-  const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
-  const navigate = useNavigate();
-  const { restaurants: switcherRestaurants } = useRestaurant();
-  const { data, loading } = usePortfolioDashboardData(timeFilter);
-
-  if (loading) {
-    return (
-      <div className="space-y-5 animate-fade-in">
-        <Skeleton className="h-14 rounded-xl" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>
-        <div className="grid gap-5 lg:grid-cols-2">{[1, 2].map(i => <Skeleton key={i} className="h-64 rounded-xl" />)}</div>
-      </div>
-    );
-  }
-
-  const totals: PortfolioDashboardTotals = data?.totals ?? { red: 0, yellow: 0, green: 0 };
-  const restaurants: PortfolioRestaurantRow[] = data?.restaurants ?? [];
-  const { totalItems, portfolioOverstockValue } = buildPortfolioSummary(totals);
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight font-display">Portfolio Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{restaurants.length} location{restaurants.length !== 1 ? "s" : ""} · Overview</p>
-        </div>
-      </div>
-
-      <Alert className="border-amber-400/70 bg-amber-50 text-amber-900 dark:border-amber-600/50 dark:bg-amber-950/40 dark:text-amber-100 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-400">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle className="text-sm font-semibold">Do not use for ordering decisions</AlertTitle>
-        <AlertDescription className="text-sm leading-snug">
-          Portfolio rollups (stock levels, spend, overstock) are approximate and can differ from individual site dashboards.
-          {" "}Open a single restaurant for accurate data before placing orders or making purchasing decisions.
-          {switcherRestaurants.length > 0 ? (
-            <Button
-              type="button"
-              variant="link"
-              className="h-auto p-0 pl-1 text-sm font-semibold text-amber-800 dark:text-amber-300 underline-offset-2"
-              onClick={() => setCurrentRestaurant(switcherRestaurants[0])}
-            >
-              Open a restaurant →
-            </Button>
-          ) : null}
-        </AlertDescription>
-      </Alert>
-
-      <TodaysBriefing
-        timeFilter={timeFilter}
-        setTimeFilter={setTimeFilter}
-        onStartInventory={() => navigate("/app/inventory/enter")}
-        stockStatus={totals}
-        pendingInvoices={0}
-        daysSinceLastCount={null}
-      />
-
-      {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard icon={Package} label="Total Items Tracked" value={totalItems.toLocaleString()} accent="primary" />
-        <KpiCard icon={AlertTriangle} label="At Risk Items" value={String(totals.red + totals.yellow)} accent="destructive" changeLabel={`${totals.red} critical · ${totals.yellow} low`} />
-        <KpiCard
-          icon={Package}
-          label="Overstock Value"
-          value={portfolioOverstockValue > 0 ? `$${portfolioOverstockValue.toFixed(0)}` : "$0"}
-          accent="warning"
-          changeLabel="Estimated value above PAR"
-        />
-        <KpiCard
-          icon={DollarSign}
-          label={dashboardSpendPeriodLabel(timeFilter)}
-          value={totals.spendMonth > 0 ? `$${totals.spendMonth.toFixed(0)}` : "$0"}
-          accent="success"
-          changeLabel="From completed invoices"
-        />
-      </div>
-
-      {/* Action Center + AI Insights */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <ActionCenter
-          criticalCount={totals.red}
-          pendingApprovals={0}
-          daysSinceLastCount={null}
-          recommendationsCount={0}
-          todayWasteCount={0}
-          deliveryIssueCount={0}
-          navigate={navigate}
-        />
-        <RecommendationsPanel recommendations={[]} />
-      </div>
-
-      {/* Multi-Location Section */}
-      <MultiLocationView restaurants={restaurants} navigate={navigate} setCurrentRestaurant={setCurrentRestaurant} />
-    </div>
-  );
-}
-
-// ─── Profit & Loss Intelligence ───
 function ProfitLossIntelligence({
   overstockValue,
   recordedWasteValue,
@@ -1216,50 +973,6 @@ function fmtCurrencyLoc(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-function EstMark() {
-  return <span className="text-[10px] text-muted-foreground align-super ml-0.5">Est.</span>;
-}
-
-function statusBadgeLabel(s: LocationSummary["food_cost_status"]) {
-  switch (s) {
-    case "good": return "Good";
-    case "warning": return "Warning";
-    default: return "Critical";
-  }
-}
-function statusBadgeClass(s: LocationSummary["food_cost_status"]) {
-  switch (s) {
-    case "good": return "border-green-300 text-green-700 bg-green-50 dark:bg-green-950/30";
-    case "warning": return "border-amber-300 text-amber-800 bg-amber-50 dark:bg-amber-950/30";
-    default: return "border-red-300 text-red-700 bg-red-50 dark:bg-red-950/30";
-  }
-}
-function vsTargetClass(diff: number | null): string {
-  if (diff == null) return "text-muted-foreground";
-  if (diff < 0) return "text-green-600 dark:text-green-400";
-  if (diff < 3) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
-}
-function complianceBarClass(ratio: number): string {
-  if (ratio >= 1) return "bg-green-500/90";
-  if (ratio >= 0.5) return "bg-amber-500/90";
-  return "bg-red-500/90";
-}
-function alertCardClass(sev: LocationAlert["severity"]) {
-  switch (sev) {
-    case "critical": return "border-red-200 bg-red-50/80 hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/25";
-    case "warning": return "border-amber-200 bg-amber-50/80 hover:bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/25";
-    default: return "border-blue-200 bg-blue-50/80 hover:bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/25";
-  }
-}
-function severityDotClass(sev: LocationAlert["severity"]) {
-  switch (sev) {
-    case "critical": return "bg-red-600";
-    case "warning": return "bg-amber-600";
-    default: return "bg-blue-600";
-  }
-}
-
 // ─── Reports Tab (inlined from SingleReport) ───
 function DashboardReportsTab({
   restaurantId,
@@ -1464,292 +1177,9 @@ function DashboardReportsTab({
   );
 }
 
-// ─── Locations Tab (inlined from CompareReport) ───
-function DashboardLocationsTab() {
-  const navigate = useNavigate();
-  const { activeRestaurantIds } = useRestaurant();
-  const [dateRange, setDateRange] = useState<DateRange>("30d");
-
-  const summary = useAllLocationsSummary("all_brands", dateRange);
-  const { alerts, loading: alertsExtraLoading } = useLocationAlerts(activeRestaurantIds, summary.locations);
-  const alertsFeedLoading = summary.loading || alertsExtraLoading;
-
-  const sortedRank = useMemo(() => {
-    const copy = [...summary.locations];
-    copy.sort((a, b) => {
-      const fa = a.food_cost_pct;
-      const fb = b.food_cost_pct;
-      if (fa == null && fb == null) return a.location_name.localeCompare(b.location_name);
-      if (fa == null) return 1;
-      if (fb == null) return -1;
-      return fa - fb;
-    });
-    return copy;
-  }, [summary.locations]);
-
-  const complianceSorted = useMemo(() => {
-    const copy = [...summary.locations];
-    copy.sort((a, b) => {
-      if (a.count_overdue !== b.count_overdue) return a.count_overdue ? -1 : 1;
-      const ra = a.counts_expected_this_period > 0 ? a.counts_this_period / a.counts_expected_this_period : 0;
-      const rb = b.counts_expected_this_period > 0 ? b.counts_this_period / b.counts_expected_this_period : 0;
-      return ra - rb;
-    });
-    return copy;
-  }, [summary.locations]);
-
-  const wasteSorted = useMemo(() => {
-    const copy = [...summary.locations];
-    copy.sort((a, b) => b.waste_in_period - a.waste_in_period);
-    return copy;
-  }, [summary.locations]);
-
-  const maxWaste = useMemo(() => wasteSorted.reduce((m, l) => Math.max(m, l.waste_in_period), 0), [wasteSorted]);
-
-  const avgTarget =
-    summary.locations.length > 0
-      ? summary.locations.reduce((s, l) => s + l.food_cost_target_pct, 0) / summary.locations.length
-      : 30;
-
-  const latestCountAny = summary.locations.reduce<string | null>((acc, l) => {
-    if (!l.last_count_date) return acc;
-    if (!acc || new Date(l.last_count_date) > new Date(acc)) return l.last_count_date;
-    return acc;
-  }, null);
-
-  const summaryAvgStatus = getFoodCostStatus(summary.avg_food_cost_pct, avgTarget, latestCountAny);
-
-  if (summary.loading && summary.locations.length === 0) {
-    return (
-      <div className="space-y-6 animate-fade-in">
-        <Skeleton className="h-10 w-full max-w-lg rounded-lg" />
-        <Skeleton className="h-40 rounded-xl" />
-        <Skeleton className="h-64 rounded-xl" />
-      </div>
-    );
-  }
-
-  if (summary.error) {
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-destructive">{summary.error}</p>
-        <Button variant="outline" size="sm" onClick={() => summary.refetch()}>Retry</Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-8 animate-fade-in">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight font-display">Cross-location comparison</h1>
-          <p className="text-sm text-muted-foreground mt-1">Food cost, counts, waste, and alerts across your portfolio.</p>
-        </div>
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/60 border border-border/50 w-fit shrink-0">
-          {(["7d", "30d", "90d"] as DateRange[]).map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => setDateRange(r)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                dateRange === r ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {r === "7d" ? "7 days" : r === "30d" ? "30 days" : "90 days"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Alerts feed</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal">Critical and warning alerts across all locations.</p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {alertsFeedLoading ? (
-            <Skeleton className="h-24 rounded-lg" />
-          ) : alerts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-              <CheckCircle2 className="h-10 w-10 text-green-500/80" />
-              <p className="text-sm font-medium text-green-700 dark:text-green-400">No alerts — all locations on track</p>
-            </div>
-          ) : (
-            alerts.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => navigate(a.action_url)}
-                className={`w-full text-left rounded-xl border px-4 py-3 flex gap-3 items-start transition-colors cursor-pointer ${alertCardClass(a.severity)}`}
-              >
-                <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${severityDotClass(a.severity)}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold leading-snug">{a.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{a.description}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1.5">
-                    {a.restaurant_name ? `${a.restaurant_name} · ` : ""}
-                    {a.location_name}
-                  </p>
-                </div>
-                <div className="text-right shrink-0 pt-0.5">
-                  <p className="text-[11px] text-muted-foreground whitespace-nowrap">
-                    {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })}
-                  </p>
-                  <p className="text-xs font-medium text-primary mt-1 flex items-center justify-end gap-0.5">
-                    View <ArrowRight className="h-3 w-3" />
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Food cost ranking</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-[11px] text-muted-foreground text-center mb-3">
-            * Food cost % is estimated. Add sales data per location for accurate tracking.
-          </p>
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/20">
-                <TableHead className="text-xs w-10">Rank</TableHead>
-                <TableHead className="text-xs">Location</TableHead>
-                <TableHead className="text-xs">Brand</TableHead>
-                <TableHead className="text-xs text-right">Est. food cost %</TableHead>
-                <TableHead className="text-xs text-right">vs Target</TableHead>
-                <TableHead className="text-xs text-right">Trend</TableHead>
-                <TableHead className="text-xs">Last count</TableHead>
-                <TableHead className="text-xs">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedRank.map((loc, i) => {
-                const diff = loc.food_cost_pct != null ? loc.food_cost_pct - loc.food_cost_target_pct : null;
-                const locTrend = loc.food_cost_trend;
-                const vsDisp = diff != null ? `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%` : "—";
-                return (
-                  <TableRow key={loc.location_id}>
-                    <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
-                    <TableCell className="text-sm">
-                      <span className="block text-[10px] text-muted-foreground">{loc.restaurant_name}</span>
-                      <span className="font-medium">{loc.location_name}</span>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{loc.brand ?? "—"}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-semibold">
-                      {loc.food_cost_pct != null ? (
-                        <>{`${loc.food_cost_pct.toFixed(1)}%`}<EstMark /></>
-                      ) : "—"}
-                    </TableCell>
-                    <TableCell className={`text-xs text-right font-mono ${vsTargetClass(diff)}`}>{vsDisp}</TableCell>
-                    <TableCell className="text-xs text-right font-mono">
-                      {locTrend == null ? "—" : (
-                        <span className={locTrend > 0
-                          ? "text-red-600 dark:text-red-400 inline-flex items-center justify-end gap-0.5"
-                          : "text-green-600 dark:text-green-400 inline-flex items-center justify-end gap-0.5"}>
-                          {locTrend > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                          {`${locTrend >= 0 ? "+" : ""}${locTrend.toFixed(1)}% WoW`}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {loc.last_count_date ? new Date(loc.last_count_date).toLocaleDateString() : "—"}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      <Badge variant="outline" className={`text-[10px] ${statusBadgeClass(loc.food_cost_status)}`}>
-                        {statusBadgeLabel(loc.food_cost_status)}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Count compliance</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal">Which locations are on schedule for this period.</p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {complianceSorted.map((loc) => {
-            const exp = Math.max(1, loc.counts_expected_this_period);
-            const ratio = loc.counts_this_period / exp;
-            return (
-              <div key={loc.location_id} className="rounded-lg border border-border/60 p-4 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold">{loc.location_name}</p>
-                    <p className="text-[11px] text-muted-foreground">{loc.brand ?? "—"}</p>
-                  </div>
-                  {loc.count_overdue ? (
-                    <Badge variant="outline" className="text-[10px] border-red-300 text-red-700 bg-red-50">Overdue</Badge>
-                  ) : null}
-                </div>
-                <div className="h-2 rounded-full bg-muted/60 overflow-hidden">
-                  <div className={`h-full rounded-full ${complianceBarClass(ratio)}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{loc.counts_this_period} of {loc.counts_expected_this_period} counts completed</span>
-                  <span>{loc.last_count_date ? new Date(loc.last_count_date).toLocaleDateString() : "—"}</span>
-                </div>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Waste comparison</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal">Waste by location this period.</p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {wasteSorted.map((loc, idx) => {
-            const w = loc.waste_in_period;
-            const widthPct = maxWaste > 0 ? (w / maxWaste) * 100 : 0;
-            const n = wasteSorted.length;
-            let barColor = "bg-amber-500/85";
-            if (w <= 0) barColor = "bg-green-500/85";
-            else if (n === 1) barColor = "bg-amber-500/85";
-            else if (idx === 0) barColor = "bg-red-500/85";
-            else if (idx === n - 1) barColor = "bg-green-500/85";
-            return (
-              <div key={loc.location_id} className="space-y-1.5">
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">{loc.location_name}</span>
-                  <span className="font-mono text-xs">{fmtCurrencyLoc(w)}</span>
-                </div>
-                <div className="h-2 rounded-full bg-muted/60 overflow-hidden">
-                  <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.max(4, widthPct)}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-center">
-        <p className="text-xs text-muted-foreground">
-          Portfolio avg est. food cost{" "}
-          <span className={`font-semibold ${summaryAvgStatus === "good" ? "text-green-600" : summaryAvgStatus === "warning" ? "text-amber-600" : "text-red-600"}`}>
-            {summary.avg_food_cost_pct != null ? `${summary.avg_food_cost_pct.toFixed(1)}%` : "—"}
-          </span>
-          {summary.avg_food_cost_pct != null ? <EstMark /> : null}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ─── Single Restaurant Dashboard ───
 function SingleDashboard() {
-  const { currentRestaurant, currentLocation, locations } = useRestaurant();
+  const { currentRestaurant, currentLocation } = useRestaurant();
   const perms = useLocationPermissions();
   const navigate = useNavigate();
   const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
@@ -1850,12 +1280,6 @@ function SingleDashboard() {
     );
   }
 
-  const ownerActiveLocationCount =
-    currentRestaurant?.role === "OWNER"
-      ? locations.filter((l) => l.restaurant_id === currentRestaurant.id && l.is_active).length
-      : 0;
-  const isOwner = currentRestaurant?.role === "OWNER";
-
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -1863,33 +1287,14 @@ function SingleDashboard() {
           <h1 className="text-xl font-bold tracking-tight font-display">Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {currentRestaurant?.name}
-            {currentLocation ? ` · ${currentLocation.name}` : ""}
           </p>
         </div>
       </div>
-
-      {isOwner && ownerActiveLocationCount > 1 && currentLocation ? (
-        <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3 text-sm">
-          <span className="text-muted-foreground">Viewing </span>
-          <span className="font-medium text-foreground">{currentLocation.name}</span>
-          <span className="text-muted-foreground"> — </span>
-          <Link
-            to="/app/dashboard/all"
-            className="font-semibold text-primary hover:underline inline-flex items-center gap-1"
-          >
-            See all {ownerActiveLocationCount} locations
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-      ) : null}
 
       <Tabs defaultValue="today">
         <TabsList className="sticky top-0 z-10 bg-background border-b border-border/40 rounded-none w-full justify-start px-0 mb-6">
           <TabsTrigger value="today" className="text-sm font-medium">Today</TabsTrigger>
           <TabsTrigger value="reports" className="text-sm font-medium">Reports</TabsTrigger>
-          {isOwner && ownerActiveLocationCount > 1 && (
-            <TabsTrigger value="locations" className="text-sm font-medium">Locations</TabsTrigger>
-          )}
         </TabsList>
 
         <TabsContent value="today">
@@ -1933,6 +1338,12 @@ function SingleDashboard() {
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}
                 timeFilter={timeFilter}
+                noParConfigured={(() => {
+                  const s = reorderSummary;
+                  if (!s) return false;
+                  const total = s.redCount + s.yellowCount + s.greenCount + s.noParCount;
+                  return total > 0 && s.noParCount === total;
+                })()}
               />
             )}
 
@@ -2068,12 +1479,6 @@ function SingleDashboard() {
             />
           )}
         </TabsContent>
-
-        {isOwner && ownerActiveLocationCount > 1 && (
-          <TabsContent value="locations">
-            <DashboardLocationsTab />
-          </TabsContent>
-        )}
       </Tabs>
     </div>
   );
@@ -2081,14 +1486,7 @@ function SingleDashboard() {
 
 // ─── Main Dashboard Page ───
 export default function DashboardPage() {
-  const {
-    isPortfolioMode,
-    setCurrentRestaurant,
-    currentRestaurant,
-    currentLocation,
-    locations,
-    loading,
-  } = useRestaurant();
+  const { loading } = useRestaurant();
 
   if (loading) {
     return (
@@ -2102,19 +1500,6 @@ export default function DashboardPage() {
         </div>
       </div>
     );
-  }
-
-  if (isPortfolioMode) {
-    return <PortfolioDashboard setCurrentRestaurant={setCurrentRestaurant} />;
-  }
-
-  const ownerActiveLocs =
-    currentRestaurant?.role === "OWNER"
-      ? locations.filter((l) => l.restaurant_id === currentRestaurant.id && l.is_active)
-      : [];
-
-  if (currentRestaurant?.role === "OWNER" && ownerActiveLocs.length > 1 && !currentLocation) {
-    return <Navigate to="/app/dashboard/all" replace />;
   }
 
   return <SingleDashboard />;

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import {
   AlertCircle,
   AlertTriangle,
@@ -36,6 +37,8 @@ interface MoneyLostWidgetProps {
   restaurantId: string;
   locationId: string | null | undefined;
   timeFilter: DashboardTimeFilter;
+  /** PAR not configured for any counted item — overstock can't be measured. */
+  noParConfigured?: boolean;
 }
 
 function formatDollars(n: number): string {
@@ -50,6 +53,7 @@ export function MoneyLostWidget({
   restaurantId,
   locationId,
   timeFilter,
+  noParConfigured = false,
 }: MoneyLostWidgetProps) {
   const [openMetric, setOpenMetric] = useState<MetricKey | null>(null);
   const [rows, setRows] = useState<DrilldownRow[]>([]);
@@ -67,6 +71,16 @@ export function MoneyLostWidget({
           <p className="text-xs text-muted-foreground mt-1">
             Upload your first invoice to start tracking.
           </p>
+          {noParConfigured && (
+            <Link
+              to="/app/par"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50/80 px-2.5 py-1.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 transition-colors dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Set PAR levels for accurate overstock tracking
+              <ChevronRight className="h-3 w-3" />
+            </Link>
+          )}
         </CardContent>
       </Card>
     );
@@ -148,6 +162,17 @@ export function MoneyLostWidget({
           <p className="mt-1.5 text-xs text-muted-foreground">
             estimated loss this period · tap any row to see the math
           </p>
+
+          {noParConfigured && (
+            <Link
+              to="/app/par"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50/80 px-2.5 py-1.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 transition-colors dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Set PAR levels for accurate overstock tracking
+              <ChevronRight className="h-3 w-3" />
+            </Link>
+          )}
 
           <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
             {metricOrder.map((k) => {

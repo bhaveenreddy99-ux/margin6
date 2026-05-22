@@ -44,6 +44,8 @@ export async function loadOverstockItems(
     const par = Number(row.par_level ?? 0);
     const cost = Number(row.unit_cost ?? 0);
     if (!Number.isFinite(stock) || !Number.isFinite(par) || !Number.isFinite(cost)) continue;
+    // Items without a PAR cannot be overstocked — skip.
+    if (par <= 0) continue;
     if (stock <= par || cost <= 0) continue;
     const unitsOver = stock - par;
     const dollars = unitsOver * cost;

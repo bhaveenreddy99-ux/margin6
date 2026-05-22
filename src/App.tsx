@@ -18,7 +18,7 @@ import LeakAuditPage from "@/pages/LeakAudit";
 import CreateRestaurantPage from "@/pages/onboarding/CreateRestaurant";
 import AppLayout from "@/layouts/AppLayout";
 import DashboardPage from "@/pages/app/Dashboard";
-import AllLocationsDashboard from "@/pages/app/AllLocationsDashboard";
+import MyRestaurantsPage from "@/pages/app/MyRestaurants";
 import ListManagementPage from "@/pages/app/ListManagement";
 import EnterInventoryPage from "@/pages/app/inventory/EnterInventory";
 import ReviewPage from "@/pages/app/inventory/Review";
@@ -30,8 +30,6 @@ import PARManagementPage from "@/pages/app/PARManagement";
 import PARSuggestionsPage from "@/pages/app/PARSuggestions";
 import InvoicesPage from "@/pages/app/Invoices";
 import InvoiceReviewPage from "@/pages/app/InvoiceReview";
-import ReportsPage from "@/pages/app/Reports";
-import CompareReport from "@/pages/app/CompareReport";
 import PurchaseHistoryPage from "@/pages/app/PurchaseHistory";
 import WasteLogPage from "@/pages/app/WasteLog";
 import SalesPage from "@/pages/app/Sales";
@@ -68,7 +66,8 @@ const App = () => (
               <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="dashboard/all" element={<OwnerRoute><AllLocationsDashboard /></OwnerRoute>} />
+                <Route path="restaurants" element={<MyRestaurantsPage />} />
+                <Route path="restaurants/new" element={<CreateRestaurantPage />} />
                 <Route path="inventory/lists" element={<StaffRestrictedRoute><ListManagementPage /></StaffRestrictedRoute>} />
                 <Route path="inventory/enter" element={<EnterInventoryPage />} />
                 <Route path="inventory/review" element={<StaffRestrictedRoute><ReviewPage /></StaffRestrictedRoute>} />

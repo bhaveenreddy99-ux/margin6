@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, BarChart3, LogOut, Receipt, Settings, Bell, Trash2, DollarSign, CreditCard } from "lucide-react";
+import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, LogOut, Receipt, Settings, Bell, Trash2, DollarSign, CreditCard, Building2 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -8,9 +8,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-const mainNav = [
+const overviewNav = [
   { title: "Overview", url: "/app/dashboard", icon: LayoutDashboard },
 ];
+
+const myRestaurantsItem = { title: "My Restaurants", url: "/app/restaurants", icon: Building2 };
 
 const inventoryNav = [
   { title: "List Management", url: "/app/inventory/lists", icon: ClipboardList },
@@ -106,10 +108,13 @@ export function AppSidebar() {
         </Link>
       </div>
       <SidebarContent className="px-2 pt-2">
-        {renderGroup("Overview", mainNav)}
+        {renderGroup(
+          "Overview",
+          restaurants.length >= 2 ? [myRestaurantsItem, ...overviewNav] : overviewNav,
+        )}
         {renderGroup("Inventory", inventoryNavItems)}
         {renderGroup("Operations", operationsNavItems)}
-        {insightsItems.length > 0 ? renderGroup("Insights", insightsItems as typeof mainNav) : null}
+        {insightsItems.length > 0 ? renderGroup("Insights", insightsItems as typeof overviewNav) : null}
         {isOwner && renderGroup("Admin", ownerNav)}
       </SidebarContent>
       <SidebarFooter className="p-3">

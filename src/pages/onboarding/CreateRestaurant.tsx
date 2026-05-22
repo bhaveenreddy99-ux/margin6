@@ -84,7 +84,7 @@ export default function CreateRestaurantPage() {
       // Non-blocking: backfill migration catches missed rows on next deploy.
       const { error: locationError } = await supabase.from("locations").insert({
         restaurant_id: newRestaurant.id,
-        name,
+        name: "Main Location",
         is_active: true,
       });
       if (locationError) {

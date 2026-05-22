@@ -154,6 +154,20 @@ describe("casePlanningEngine", () => {
       expect(result.dollars).toBe(0);
       expect(result.isMissingCost).toBe(false);
     });
+
+    it("PAR null with stock → overstock $0 (no PAR means no overstock signal)", () => {
+      const line: CasePlanningLine = { currentStockCases: 10, parLevelCases: null, unitCostPerCase: 10 };
+      const result = computeLineOverstockValue(line);
+      expect(result.dollars).toBe(0);
+      expect(result.isMissingCost).toBe(false);
+    });
+
+    it("PAR 0 with stock → overstock $0 (no PAR means no overstock signal)", () => {
+      const line: CasePlanningLine = { currentStockCases: 10, parLevelCases: 0, unitCostPerCase: 10 };
+      const result = computeLineOverstockValue(line);
+      expect(result.dollars).toBe(0);
+      expect(result.isMissingCost).toBe(false);
+    });
   });
 
   // ── portfolio-dashboard edge: same order math as computeSuggestedOrderCases ─
