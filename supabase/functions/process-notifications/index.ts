@@ -108,6 +108,95 @@ function buildReminderEmailHtml(restaurantName: string, locationName: string | n
   `;
 }
 
+type ShrinkAnomalyInput = {
+  item_name: string;
+  usage: number;
+  avg: number;
+  type: "HIGH_USAGE" | "COUNT_VARIANCE";
+};
+
+type ShrinkAnomalyItem = ShrinkAnomalyInput & {
+  dollar_impact: number;
+  unit_cost: number;
+  unit_cost_source: "catalog" | "invoice" | "unknown";
+};
+
+async function resolveUnitCostForShrinkItem(
+  supabase: ReturnType<typeof createClient>,
+  restaurantId: string,
+  itemName: string,
+): Promise<{ unit_cost: number; unit_cost_source: "catalog" | "invoice" | "unknown" }> {
+  const { data: catalogRows } = await supabase
+    .from("inventory_catalog_items")
+    .select("default_unit_cost")
+    .eq("restaurant_id", restaurantId)
+    .ilike("item_name", itemName)
+    .limit(1);
+
+  const catalogCost = Number(catalogRows?.[0]?.default_unit_cost);
+  if (Number.isFinite(catalogCost) && catalogCost >= 0) {
+    return { unit_cost: catalogCost, unit_cost_source: "catalog" };
+  }
+
+  const { data: invoiceItemRows } = await supabase
+    .from("invoice_items")
+    .select("unit_cost, invoices!inner(invoice_date, restaurant_id)")
+    .eq("invoices.restaurant_id", restaurantId)
+    .ilike("item_name", itemName)
+    .limit(20);
+
+  const sorted = (invoiceItemRows || [])
+    .map((row: { unit_cost: number | null; invoices: { invoice_date: string | null } | null }) => ({
+      unit_cost: Number(row.unit_cost),
+      invoice_date: row.invoices?.invoice_date ?? "",
+    }))
+    .filter((row) => Number.isFinite(row.unit_cost) && row.unit_cost >= 0)
+    .sort((a, b) => new Date(b.invoice_date).getTime() - new Date(a.invoice_date).getTime());
+
+  if (sorted.length > 0) {
+    return { unit_cost: sorted[0].unit_cost, unit_cost_source: "invoice" };
+  }
+
+  return { unit_cost: 0, unit_cost_source: "unknown" };
+}
+
+async function enrichShrinkAnomalies(
+  supabase: ReturnType<typeof createClient>,
+  restaurantId: string,
+  anomalies: ShrinkAnomalyInput[],
+): Promise<{ items: ShrinkAnomalyItem[]; total_dollar_impact: number }> {
+  const items: ShrinkAnomalyItem[] = [];
+
+  for (const anomaly of anomalies) {
+    const { unit_cost, unit_cost_source } = await resolveUnitCostForShrinkItem(
+      supabase,
+      restaurantId,
+      anomaly.item_name,
+    );
+
+    let dollar_impact = 0;
+    if (anomaly.type === "HIGH_USAGE") {
+      dollar_impact = Math.max(0, (anomaly.usage - anomaly.avg) * unit_cost);
+    } else if (anomaly.type === "COUNT_VARIANCE") {
+      dollar_impact = Math.abs(anomaly.usage) * unit_cost;
+    }
+    dollar_impact = Math.round(dollar_impact * 100) / 100;
+
+    items.push({
+      ...anomaly,
+      dollar_impact,
+      unit_cost,
+      unit_cost_source,
+    });
+  }
+
+  const total_dollar_impact = Math.round(
+    items.reduce((sum, item) => sum + (item.dollar_impact > 0 ? item.dollar_impact : 0), 0) * 100,
+  ) / 100;
+
+  return { items, total_dollar_impact };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -528,7 +617,7 @@ Deno.serve(async (req) => {
       });
 
       // Compute per-period usage and check for anomalies
-      const anomalies: { item_name: string; usage: number; avg: number; type: string }[] = [];
+      const anomalies: ShrinkAnomalyInput[] = [];
 
       for (const [key, stocks] of Object.entries(itemStocks)) {
         const usages: number[] = [];
@@ -563,8 +652,15 @@ Deno.serve(async (req) => {
       const highUsageItems = anomalies.filter(a => a.type === "HIGH_USAGE");
       const varianceItems = anomalies.filter(a => a.type === "COUNT_VARIANCE");
 
+      const enrichedHighUsage = highUsageItems.length > 0
+        ? await enrichShrinkAnomalies(supabase, restaurant.id, highUsageItems)
+        : null;
+      const enrichedVariance = varianceItems.length > 0
+        ? await enrichShrinkAnomalies(supabase, restaurant.id, varianceItems)
+        : null;
+
       for (const userId of recipientUserIds) {
-        if (highUsageItems.length > 0) {
+        if (enrichedHighUsage && enrichedHighUsage.items.length > 0) {
           await supabase.from("notifications").insert({
             restaurant_id: restaurant.id,
             user_id: userId,
@@ -572,11 +668,14 @@ Deno.serve(async (req) => {
             title: `${highUsageItems.length} item${highUsageItems.length > 1 ? "s" : ""} with abnormal usage`,
             message: `${restaurant.name}: ${highUsageItems.map(a => `${a.item_name} (${a.usage.toFixed(0)} vs avg ${a.avg.toFixed(0)})`).slice(0, 3).join(", ")}`,
             severity: highUsageItems.length >= 3 ? "CRITICAL" : "WARNING",
-            data: { items: highUsageItems },
+            data: {
+              items: enrichedHighUsage.items,
+              total_dollar_impact: enrichedHighUsage.total_dollar_impact,
+            },
           });
         }
 
-        if (varianceItems.length > 0) {
+        if (enrichedVariance && enrichedVariance.items.length > 0) {
           await supabase.from("notifications").insert({
             restaurant_id: restaurant.id,
             user_id: userId,
@@ -584,7 +683,10 @@ Deno.serve(async (req) => {
             title: `${varianceItems.length} item${varianceItems.length > 1 ? "s" : ""} with count variance`,
             message: `${restaurant.name}: ${varianceItems.map(a => a.item_name).slice(0, 5).join(", ")} — stock increased without recorded delivery`,
             severity: varianceItems.length >= 3 ? "WARNING" : "INFO",
-            data: { items: varianceItems },
+            data: {
+              items: enrichedVariance.items,
+              total_dollar_impact: enrichedVariance.total_dollar_impact,
+            },
           });
         }
       }

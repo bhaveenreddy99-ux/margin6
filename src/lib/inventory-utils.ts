@@ -2,7 +2,7 @@
  * Shared inventory utilities for formatting, risk calculation, and smart order logic.
  */
 
-import { formatCurrency as formatCurrencyUsd } from "@/lib/format";
+import { formatCurrency as formatCurrencyUsd } from "./format.ts";
 
 // ── Number Formatting ──────────────────────────────────
 /** Format a numeric value for display: max 2 decimals, no trailing zeros, no float artifacts */

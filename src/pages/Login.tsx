@@ -17,9 +17,33 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
     if (error) {
+      setLoading(false);
       toast.error(error.message);
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setLoading(false);
+      navigate("/app/dashboard");
+      return;
+    }
+
+    const { count, error: memberError } = await supabase
+      .from("restaurant_members")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id);
+
+    setLoading(false);
+    if (memberError) {
+      toast.error(memberError.message);
+      navigate("/app/dashboard");
+      return;
+    }
+
+    if ((count ?? 0) === 0) {
+      navigate("/onboarding/create-restaurant");
     } else {
       navigate("/app/dashboard");
     }

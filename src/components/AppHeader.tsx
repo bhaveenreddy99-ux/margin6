@@ -99,7 +99,13 @@ export function AppHeader() {
                 ) : filteredRestaurants.map((r) => (
                   <DropdownMenuItem
                     key={r.id}
-                    onClick={() => { setCurrentRestaurant(r); setRestaurantSearch(""); }}
+                    onClick={() => {
+                      setCurrentRestaurant(r);
+                      setRestaurantSearch("");
+                      if (r.id !== currentRestaurant?.id) {
+                        navigate("/app/dashboard");
+                      }
+                    }}
                     className={r.id === currentRestaurant?.id ? "bg-accent" : ""}
                   >
                     <span className="truncate">{r.name}</span>

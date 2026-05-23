@@ -6,8 +6,9 @@ import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ChefHat, CheckCircle2, Mail, Copy, Check } from "lucide-react";
+import { ChefHat, CheckCircle2, Copy, Check } from "lucide-react";
 
 const INVOICE_EMAIL_DOMAIN = "invoices.restaurantiq.com";
 
@@ -36,7 +37,10 @@ export default function CreateRestaurantPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
   const [invoiceEmail, setInvoiceEmail] = useState<string | null>(null);
+  const [emailFetchFailed, setEmailFetchFailed] = useState(false);
   const [restaurantName, setRestaurantName] = useState<string>("");
   const [copied, setCopied] = useState(false);
 
@@ -79,9 +83,6 @@ export default function CreateRestaurantPage() {
         throw new Error("Could not assign a unique invoice email. Please try again.");
       }
 
-      // Auto-create a default location for the new restaurant. Single-location
-      // operators (the majority) should never see a "create location" step.
-      // Non-blocking: backfill migration catches missed rows on next deploy.
       const { error: locationError } = await supabase.from("locations").insert({
         restaurant_id: newRestaurant.id,
         name: "Main Location",
@@ -94,16 +95,27 @@ export default function CreateRestaurantPage() {
 
       await refetch();
 
-      const { data: settings } = await supabase
+      setRestaurantName(name);
+      setShowSuccess(true);
+      setEmailLoading(true);
+      setEmailFetchFailed(false);
+
+      const { data: settings, error: settingsFetchError } = await supabase
         .from("restaurant_settings")
         .select("invoice_email")
         .eq("restaurant_id", newRestaurant.id)
         .single();
 
-      setRestaurantName(name);
-      setInvoiceEmail(settings?.invoice_email ?? savedInvoiceEmail);
-    } catch (err: any) {
-      toast.error(err.message);
+      if (settingsFetchError || !settings?.invoice_email) {
+        setEmailFetchFailed(true);
+        setInvoiceEmail(`your-restaurant@${INVOICE_EMAIL_DOMAIN}`);
+      } else {
+        setInvoiceEmail(settings.invoice_email ?? savedInvoiceEmail);
+      }
+      setEmailLoading(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      toast.error(message);
     }
     setLoading(false);
   };
@@ -119,7 +131,7 @@ export default function CreateRestaurantPage() {
     }
   };
 
-  if (invoiceEmail) {
+  if (showSuccess) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="w-full max-w-md space-y-7 animate-fade-in">
@@ -129,22 +141,24 @@ export default function CreateRestaurantPage() {
             <p className="text-sm text-muted-foreground mt-1">{restaurantName}</p>
           </div>
 
-          <div className="rounded-xl border border-amber-200/70 bg-amber-50/80 p-5 dark:border-amber-800/50 dark:bg-amber-950/30">
-            <div className="flex items-center gap-2 text-amber-900 dark:text-amber-100">
-              <Mail className="h-4 w-4" />
-              <p className="text-xs font-semibold uppercase tracking-wider">
-                Forward your invoices to this address
-              </p>
-            </div>
+          <div className="rounded-xl border-2 border-[hsl(25,95%,53%)]/50 bg-amber-50/80 p-5 dark:border-amber-700/50 dark:bg-amber-950/30">
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-900 dark:text-amber-100">
+              Your invoice email address:
+            </p>
             <div className="mt-3 flex items-center gap-2">
-              <p className="flex-1 break-all rounded-lg bg-white/70 px-3 py-2 font-mono text-base sm:text-lg font-bold text-amber-950 dark:bg-amber-900/40 dark:text-amber-50">
-                {invoiceEmail}
-              </p>
+              {emailLoading ? (
+                <Skeleton className="h-11 flex-1 rounded-lg" />
+              ) : (
+                <p className="flex-1 break-all rounded-lg bg-white/70 px-3 py-2 font-mono text-base sm:text-lg font-bold text-amber-950 dark:bg-amber-900/40 dark:text-amber-50">
+                  {invoiceEmail}
+                </p>
+              )}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={handleCopy}
+                disabled={emailLoading || !invoiceEmail}
                 className="shrink-0 gap-1.5"
               >
                 {copied ? (
@@ -160,29 +174,32 @@ export default function CreateRestaurantPage() {
                 )}
               </Button>
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Vendors email invoices here → we parse them automatically
+            <p className="mt-3 text-sm text-muted-foreground">
+              Forward any Sysco, US Foods, or Performance Food invoice to this address.
+              We&apos;ll parse every line item automatically — usually within 60 seconds.
             </p>
+            {emailFetchFailed && (
+              <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                Find your exact address in Settings if this placeholder differs.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">
             <Button
               type="button"
-              className="w-full bg-gradient-amber"
+              className="w-full bg-gradient-amber text-white shadow-amber"
               onClick={() => navigate("/app/dashboard")}
             >
-              Go to Dashboard
+              Go to Dashboard →
             </Button>
-            <Button
+            <button
               type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() =>
-                window.open("https://docs.restaurantiq.com", "_blank", "noopener,noreferrer")
-              }
+              className="text-sm text-muted-foreground hover:text-primary transition-colors"
+              onClick={() => navigate("/app/dashboard")}
             >
-              Learn how it works
-            </Button>
+              Skip for now →
+            </button>
           </div>
         </div>
       </div>

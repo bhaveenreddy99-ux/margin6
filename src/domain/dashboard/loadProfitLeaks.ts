@@ -231,6 +231,51 @@ export async function loadProfitLeaks(
     // swallow
   }
 
+  // ── 4. Shrinkage (SHRINK_ALERT / COUNT_VARIANCE notifications) ───────────
+  try {
+    let shrinkQ = supabase
+      .from("notifications")
+      .select("data, created_at")
+      .eq("restaurant_id", restaurantId)
+      .in("type", ["SHRINK_ALERT", "COUNT_VARIANCE"])
+      .gte("created_at", from)
+      .lte("created_at", to);
+    if (loc) shrinkQ = shrinkQ.eq("location_id", loc);
+
+    const { data: shrinkNotifs } = (await shrinkQ) as unknown as {
+      data: Array<{ data: unknown; created_at: string | null }> | null;
+    };
+
+    for (const notif of shrinkNotifs ?? []) {
+      const raw = notif.data as { items?: unknown } | null | undefined;
+      const items = Array.isArray(raw?.items)
+        ? (raw.items as Array<{
+            item_name?: string;
+            dollar_impact?: number | string;
+            type?: string;
+          }>)
+        : [];
+
+      for (const item of items) {
+        const name = (item.item_name ?? "").trim();
+        if (!name) continue;
+        const impact = Number(item.dollar_impact);
+        if (!Number.isFinite(impact) || impact <= 0) continue;
+
+        const bucket = getOrCreate(buckets, leakKey(name, "Shrinkage"));
+        bucket.total += impact;
+        bucket.rows.push({
+          label: name,
+          value: impact,
+          date: fmtDate(notif.created_at),
+          source: item.type ?? "shrinkage",
+        });
+      }
+    }
+  } catch {
+    // swallow
+  }
+
   const leaks: ProfitLeakItem[] = [];
   for (const [key, bucket] of buckets.entries()) {
     if (bucket.total <= 0) continue;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { MoneyLostWidget } from "@/components/MoneyLostWidget";
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
@@ -14,7 +14,7 @@ import {
   Package, AlertTriangle, TrendingUp, TrendingDown, ShoppingCart,
   Bell, DollarSign, BarChart3, Sparkles,
   ClipboardCheck, Clock, CheckCircle2, Zap, ArrowRight,
-  CalendarDays, Activity, Receipt, Trash2, Truck,
+  CalendarDays, Activity, Receipt, Trash2, Truck, Lock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -43,6 +43,8 @@ import type {
 import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { useLocationPermissions } from "@/hooks/useLocationPermissions";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 // ─── Today's Briefing ───
 function TodaysBriefing({
@@ -1179,10 +1181,27 @@ function DashboardReportsTab({
 
 // ─── Single Restaurant Dashboard ───
 function SingleDashboard() {
-  const { currentRestaurant, currentLocation } = useRestaurant();
+  const { currentRestaurant, currentLocation, restaurants } = useRestaurant();
   const perms = useLocationPermissions();
   const navigate = useNavigate();
   const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
+  const prevRestaurantIdRef = useRef<string | null>(null);
+  const [namePulse, setNamePulse] = useState(false);
+
+  useEffect(() => {
+    const id = currentRestaurant?.id;
+    if (!id) return;
+
+    if (prevRestaurantIdRef.current && prevRestaurantIdRef.current !== id) {
+      toast.success(`Switched to ${currentRestaurant.name}`);
+      setNamePulse(true);
+      const timer = window.setTimeout(() => setNamePulse(false), 1500);
+      prevRestaurantIdRef.current = id;
+      return () => window.clearTimeout(timer);
+    }
+
+    prevRestaurantIdRef.current = id;
+  }, [currentRestaurant?.id, currentRestaurant?.name]);
   const {
     stockStatus,
     topReorder,
@@ -1285,9 +1304,20 @@ function SingleDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight font-display">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p
+            className={cn(
+              "text-sm text-muted-foreground mt-0.5 rounded-md inline-block transition-colors duration-700",
+              namePulse && "bg-primary/10 text-foreground px-1.5 -mx-1.5",
+            )}
+          >
             {currentRestaurant?.name}
           </p>
+          {restaurants.length >= 2 && currentRestaurant?.name && (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
+              <Lock className="h-3 w-3 opacity-60 shrink-0" />
+              Showing data for {currentRestaurant.name} only
+            </p>
+          )}
         </div>
       </div>
 

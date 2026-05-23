@@ -17,7 +17,9 @@ export default function SignupPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    // Faster activation: disable "Confirm email" in Supabase Dashboard →
+    // Authentication → Providers → Email → Confirm email (off).
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -28,8 +30,18 @@ export default function SignupPage() {
     setLoading(false);
     if (error) {
       toast.error(error.message);
-    } else {
-      toast.success("Check your email to confirm your account!");
+      return;
+    }
+
+    if (data.session && data.user) {
+      toast.success("Account created — let's set up your restaurant");
+      navigate("/onboarding/create-restaurant");
+      return;
+    }
+
+    if (data.user) {
+      toast.success("Check your email to continue");
+      toast.message("Didn't get it? Check spam or try again.");
       navigate("/login");
     }
   };

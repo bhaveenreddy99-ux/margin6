@@ -4,7 +4,8 @@ import { expect, type Page } from "@playwright/test";
 import { getSmokeCredentials, getStorageStatePath } from "./env";
 
 export async function expectAppShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: /dashboard/i })).toBeVisible();
+  // Sidebar uses "Overview" as the dashboard link label.
+  await expect(page.getByRole("link", { name: /^overview$/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /list management/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /inventory management/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /invoices \(receiving\)/i })).toBeVisible();
