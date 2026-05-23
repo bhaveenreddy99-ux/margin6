@@ -1,3 +1,7 @@
+// DEPRECATED: Not connected to UI. Use loadRestaurantPortfolioSummaries
+// in src/domain/dashboard/loadRestaurantPortfolioSummaries.ts instead.
+// Do not call this function from new code.
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeOrderQtyCases, computeRiskLevel } from "../../../src/lib/inventory-utils.ts";
 

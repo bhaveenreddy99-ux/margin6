@@ -4,6 +4,8 @@ import { expectAppShell, expectNoRuntimeOverlay, loginIfNeeded } from "./auth";
 export async function openAppRoute(page: Page, path: string): Promise<void> {
   await loginIfNeeded(page);
   await page.goto(path, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(800);
+  await expect(page.getByRole("link", { name: /^overview$/i })).toBeVisible({ timeout: 20_000 });
   await expectAppShell(page);
   await expectNoRuntimeOverlay(page);
 }

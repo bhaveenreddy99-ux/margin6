@@ -12,7 +12,7 @@ export interface Notification {
   title: string;
   message: string;
   severity: "INFO" | "WARNING" | "CRITICAL";
-  data: any;
+  data: Record<string, unknown> | null;
   created_at: string;
   read_at: string | null;
   emailed_at: string | null;
@@ -28,23 +28,23 @@ function unreadWindowStartIso(): string {
 
 export function useNotifications() {
   const { user } = useAuth();
-  const { currentRestaurant } = useRestaurant();
+  const { currentRestaurant, activeRestaurantIds } = useRestaurant();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [currentRestaurantUnreadCount, setCurrentRestaurantUnreadCount] = useState(0);
+  const [totalUnreadLoading, setTotalUnreadLoading] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const restaurantId = currentRestaurant?.id ?? null;
+  const activeIdsKey = activeRestaurantIds.join(",");
 
-  const fetch = useCallback(async () => {
+  const fetchFeed = useCallback(async () => {
     if (!user) {
       setNotifications([]);
-      setUnreadCount(0);
       setLoading(false);
       return;
     }
 
-    // Feed: latest 100 notifications for the user (across restaurants, so the
-    // bell still surfaces something during restaurant switches).
     const feedQ = supabase
       .from("notifications")
       .select("*")
@@ -52,27 +52,58 @@ export function useNotifications() {
       .order("created_at", { ascending: false })
       .limit(100);
 
-    // Unread count: a server-side COUNT scoped to the current restaurant and
-    // the last 30 days. This is the bell badge's source of truth — never
-    // computed from the feed slice (which could be smaller or stale).
-    let unreadQ = supabase
+    const { data } = await feedQ;
+    if (data) setNotifications(data as Notification[]);
+    setLoading(false);
+  }, [user]);
+
+  const fetchUnreadCounts = useCallback(async () => {
+    if (!user) {
+      setUnreadCount(0);
+      setCurrentRestaurantUnreadCount(0);
+      setTotalUnreadLoading(false);
+      return;
+    }
+
+    setTotalUnreadLoading(true);
+
+    let totalUnreadQ = supabase
       .from("notifications")
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
       .is("read_at", null)
       .gte("created_at", unreadWindowStartIso());
-    if (restaurantId) unreadQ = unreadQ.eq("restaurant_id", restaurantId);
 
-    const [feed, unread] = await Promise.all([feedQ, unreadQ]);
+    if (activeRestaurantIds.length > 0) {
+      totalUnreadQ = totalUnreadQ.in("restaurant_id", activeRestaurantIds);
+    }
 
-    if (feed.data) setNotifications(feed.data as Notification[]);
-    setUnreadCount(unread.count ?? 0);
-    setLoading(false);
-  }, [user, restaurantId]);
+    let currentUnreadQ = supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .is("read_at", null)
+      .gte("created_at", unreadWindowStartIso());
+    if (restaurantId) currentUnreadQ = currentUnreadQ.eq("restaurant_id", restaurantId);
+
+    const [totalUnread, currentUnread] = await Promise.all([totalUnreadQ, currentUnreadQ]);
+
+    setUnreadCount(totalUnread.count ?? 0);
+    setCurrentRestaurantUnreadCount(currentUnread.count ?? 0);
+    setTotalUnreadLoading(false);
+  }, [user, restaurantId, activeIdsKey, activeRestaurantIds]);
+
+  const refetch = useCallback(async () => {
+    await Promise.all([fetchFeed(), fetchUnreadCounts()]);
+  }, [fetchFeed, fetchUnreadCounts]);
 
   useEffect(() => {
-    void fetch();
-  }, [fetch]);
+    void fetchFeed();
+  }, [fetchFeed]);
+
+  useEffect(() => {
+    void fetchUnreadCounts();
+  }, [fetchUnreadCounts]);
 
   useEffect(() => {
     if (!user) return;
@@ -82,14 +113,14 @@ export function useNotifications() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
         () => {
-          void fetch();
+          void refetch();
         },
       )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [user, fetch]);
+  }, [user, refetch]);
 
   const markRead = async (id: string) => {
     await supabase
@@ -97,7 +128,7 @@ export function useNotifications() {
       .update({ read_at: new Date().toISOString() })
       .eq("id", id)
       .is("read_at", null);
-    void fetch();
+    void refetch();
   };
 
   const markAllRead = async () => {
@@ -109,8 +140,17 @@ export function useNotifications() {
       .is("read_at", null);
     if (restaurantId) q = q.eq("restaurant_id", restaurantId);
     await q;
-    void fetch();
+    void refetch();
   };
 
-  return { notifications, unreadCount, loading, markRead, markAllRead, refetch: fetch };
+  return {
+    notifications,
+    unreadCount,
+    currentRestaurantUnreadCount,
+    totalUnreadLoading,
+    loading,
+    markRead,
+    markAllRead,
+    refetch,
+  };
 }

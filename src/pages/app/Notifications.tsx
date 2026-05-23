@@ -1,4 +1,6 @@
+import { useState, useMemo } from "react";
 import { useNotifications, Notification } from "@/hooks/useNotifications";
+import { useRestaurant } from "@/contexts/RestaurantContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +15,6 @@ const severityConfig = {
   INFO:     { color: "bg-primary/10 text-primary",                   icon: Bell },
 };
 
-// Per-type icon overrides — layered on top of severity config
 const typeIconConfig: Record<string, { icon: React.ElementType; color: string }> = {
   PRICE_INCREASE: { icon: TrendingUp,   color: "bg-orange-500/15 text-orange-600" },
   PRICE_DECREASE: { icon: TrendingDown, color: "bg-emerald-500/15 text-emerald-600" },
@@ -21,10 +22,9 @@ const typeIconConfig: Record<string, { icon: React.ElementType; color: string }>
   LOW_STOCK:      { icon: AlertTriangle,color: "bg-warning/15 text-warning" },
 };
 
-// Expand price-change notification data into readable item rows
 function PriceChangeDetail({ n }: { n: Notification }) {
   const items: Array<{ item_name: string; old_cost?: number; new_cost: number; pct_change?: number }> =
-    n.data?.items ?? [];
+    (n.data?.items as Array<{ item_name: string; old_cost?: number; new_cost: number; pct_change?: number }>) ?? [];
   if (!items.length) return null;
   const isIncrease = n.type === "PRICE_INCREASE";
   return (
@@ -47,7 +47,25 @@ function PriceChangeDetail({ n }: { n: Notification }) {
   );
 }
 
-function NotificationItem({ n, onRead }: { n: Notification; onRead: (id: string) => void }) {
+type NotificationItemProps = {
+  n: Notification;
+  onRead: (id: string) => void;
+  restaurantName?: string;
+  showRestaurantBadge: boolean;
+  currentRestaurantId: string | null | undefined;
+  setCurrentRestaurant: (r: { id: string; name: string; role: string }) => void;
+  restaurants: Array<{ id: string; name: string; role: string }>;
+};
+
+function NotificationItem({
+  n,
+  onRead,
+  restaurantName,
+  showRestaurantBadge,
+  currentRestaurantId,
+  setCurrentRestaurant,
+  restaurants,
+}: NotificationItemProps) {
   const navigate = useNavigate();
   const severityCfg = severityConfig[n.severity] || severityConfig.INFO;
   const typeCfg = typeIconConfig[n.type];
@@ -56,10 +74,14 @@ function NotificationItem({ n, onRead }: { n: Notification; onRead: (id: string)
 
   const isPriceNotif = n.type === "PRICE_INCREASE" || n.type === "PRICE_DECREASE";
   const isDeliveryIssue = n.type === "DELIVERY_ISSUE";
-  const invoiceId = n.data?.invoice_id ?? n.data?.purchase_history_id;
+  const invoiceId = (n.data?.invoice_id ?? n.data?.purchase_history_id) as string | undefined;
 
   const handleClick = () => {
     if (!n.read_at) onRead(n.id);
+    if (n.restaurant_id !== currentRestaurantId) {
+      const restaurant = restaurants.find((r) => r.id === n.restaurant_id);
+      if (restaurant) setCurrentRestaurant(restaurant);
+    }
     if (isDeliveryIssue && invoiceId) navigate(`/app/invoices/${invoiceId}/review`);
   };
 
@@ -74,11 +96,15 @@ function NotificationItem({ n, onRead }: { n: Notification; onRead: (id: string)
         <Icon className="h-4 w-4" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium">{n.title}</span>
+          {showRestaurantBadge && restaurantName && (
+            <Badge variant="secondary" className="text-[10px] font-normal">
+              {restaurantName}
+            </Badge>
+          )}
           {!n.read_at && <div className="h-2 w-2 rounded-full bg-primary" />}
         </div>
-        {/* For price notifications show the item-level breakdown; others show plain message */}
         {isPriceNotif ? (
           <PriceChangeDetail n={n} />
         ) : (
@@ -100,34 +126,94 @@ function NotificationItem({ n, onRead }: { n: Notification; onRead: (id: string)
 }
 
 export default function NotificationsPage() {
-  const { notifications, unreadCount, markRead, markAllRead, loading } = useNotifications();
+  const { restaurants, currentRestaurant, setCurrentRestaurant } = useRestaurant();
+  const { notifications, currentRestaurantUnreadCount, markRead, markAllRead, loading } = useNotifications();
+  const hasMultiple = restaurants.length >= 2;
+
+  const [restaurantFilter, setRestaurantFilter] = useState<string | null>(null);
+
+  const effectiveRestaurantFilter =
+    restaurantFilter ?? (hasMultiple && currentRestaurant ? currentRestaurant.id : "all");
+
+  const restaurantNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of restaurants) map.set(r.id, r.name);
+    return map;
+  }, [restaurants]);
+
+  const filteredByRestaurant = useMemo(() => {
+    if (!hasMultiple || effectiveRestaurantFilter === "all") return notifications;
+    return notifications.filter((n) => n.restaurant_id === effectiveRestaurantFilter);
+  }, [notifications, effectiveRestaurantFilter, hasMultiple]);
 
   const filterNotifications = (tab: string): Notification[] => {
-    if (tab === "critical")  return notifications.filter(n => n.severity === "CRITICAL");
-    if (tab === "reminders") return notifications.filter(n => n.type === "REMINDER");
-    if (tab === "invoices")  return notifications.filter(n =>
+    const base = filteredByRestaurant;
+    if (tab === "critical")  return base.filter(n => n.severity === "CRITICAL");
+    if (tab === "reminders") return base.filter(n => n.type === "REMINDER");
+    if (tab === "invoices")  return base.filter(n =>
       ["PRICE_INCREASE", "PRICE_DECREASE", "DELIVERY_ISSUE"].includes(n.type)
     );
-    return notifications;
+    return base;
   };
 
-  const invoiceNotifCount = notifications.filter(n =>
+  const invoiceNotifCount = filteredByRestaurant.filter(n =>
     ["PRICE_INCREASE", "PRICE_DECREASE", "DELIVERY_ISSUE"].includes(n.type) && !n.read_at
   ).length;
+
+  const activeFilterName =
+    effectiveRestaurantFilter === "all"
+      ? "All Restaurants"
+      : restaurantNameById.get(effectiveRestaurantFilter) ?? currentRestaurant?.name ?? "this restaurant";
 
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="page-header">
         <div>
           <h1 className="page-title">Notifications</h1>
-          <p className="page-description">{unreadCount} unread notification{unreadCount !== 1 ? "s" : ""}</p>
+          <p className="page-description">
+            {currentRestaurantUnreadCount} unread notification{currentRestaurantUnreadCount !== 1 ? "s" : ""}
+          </p>
+          {hasMultiple && currentRestaurant && (
+            <>
+              <p className="text-xs text-muted-foreground mt-1">
+                Showing alerts for {activeFilterName}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Switch restaurants in the header to see other stores
+              </p>
+            </>
+          )}
         </div>
-        {unreadCount > 0 && (
+        {currentRestaurantUnreadCount > 0 && (
           <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={markAllRead}>
             <CheckCheck className="h-3.5 w-3.5" /> Mark all read
           </Button>
         )}
       </div>
+
+      {hasMultiple && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant={effectiveRestaurantFilter === "all" ? "default" : "outline"}
+            className="text-xs h-8"
+            onClick={() => setRestaurantFilter("all")}
+          >
+            All Restaurants
+          </Button>
+          {restaurants.map((r) => (
+            <Button
+              key={r.id}
+              size="sm"
+              variant={effectiveRestaurantFilter === r.id ? "default" : "outline"}
+              className="text-xs h-8"
+              onClick={() => setRestaurantFilter(r.id)}
+            >
+              {r.name}
+            </Button>
+          ))}
+        </div>
+      )}
 
       <Tabs defaultValue="all">
         <TabsList className="mb-4">
@@ -160,7 +246,16 @@ export default function NotificationsPage() {
                 ) : (
                   <div className="space-y-1">
                     {filterNotifications(tab).map((n) => (
-                      <NotificationItem key={n.id} n={n} onRead={markRead} />
+                      <NotificationItem
+                        key={n.id}
+                        n={n}
+                        onRead={markRead}
+                        restaurantName={restaurantNameById.get(n.restaurant_id)}
+                        showRestaurantBadge={hasMultiple}
+                        currentRestaurantId={currentRestaurant?.id}
+                        setCurrentRestaurant={setCurrentRestaurant}
+                        restaurants={restaurants}
+                      />
                     ))}
                   </div>
                 )}

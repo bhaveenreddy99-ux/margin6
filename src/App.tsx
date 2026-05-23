@@ -4,7 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { RestaurantProvider } from "@/contexts/RestaurantContext";
+import { RestaurantProvider, useRestaurant } from "@/contexts/RestaurantContext";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DemoRoleProvider } from "@/components/DemoRoleSwitcher";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { OwnerRoute } from "@/components/OwnerRoute";
@@ -44,6 +45,22 @@ import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
 
+function SmartLanding() {
+  const { restaurants, loading } = useRestaurant();
+  if (loading) {
+    return (
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+  if (restaurants.length >= 2) {
+    return <Navigate to="/app/restaurants" replace />;
+  }
+  return <Navigate to="/app/dashboard" replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -64,7 +81,7 @@ const App = () => (
               <Route path="/audit" element={<LeakAuditPage />} />
               <Route path="/onboarding/create-restaurant" element={<CreateRestaurantPage />} />
               <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route index element={<SmartLanding />} />
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="restaurants" element={<MyRestaurantsPage />} />
                 <Route path="restaurants/new" element={<CreateRestaurantPage />} />

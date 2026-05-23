@@ -1,3 +1,6 @@
+// DEPRECATED: Not used. See loadRestaurantPortfolioSummaries.ts
+// Do not delete — it may have useful logic for future reference.
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { buildDashboardSnapshot } from "@/domain/dashboard/buildDashboardSnapshot";

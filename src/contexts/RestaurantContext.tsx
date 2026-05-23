@@ -36,7 +36,6 @@ interface RestaurantContextType {
   restaurants: Restaurant[];
   currentRestaurant: Restaurant | null;
   setCurrentRestaurant: (r: Restaurant | null) => void;
-  isPortfolioMode: boolean;
   locations: Location[];
   currentLocation: Location | null;
   setCurrentLocation: (l: Location | null) => void;
@@ -51,7 +50,6 @@ const RestaurantContext = createContext<RestaurantContextType>({
   restaurants: [],
   currentRestaurant: null,
   setCurrentRestaurant: () => {},
-  isPortfolioMode: false,
   locations: [],
   currentLocation: null,
   setCurrentLocation: () => {},
@@ -77,8 +75,6 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
   // Holds the location ID to restore after fetchLocations completes.
   // undefined = no pending restore; null = uiState loaded but no location selected; string = restore this id.
   const pendingRestoreLocationIdRef = useRef<string | null | undefined>(undefined);
-
-  const isPortfolioMode = currentRestaurant === null && restaurants.length > 0 && !loading;
 
   const activeRestaurantIds = useMemo(
     () =>
@@ -309,7 +305,6 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
         restaurants,
         currentRestaurant,
         setCurrentRestaurant: handleSetCurrent,
-        isPortfolioMode,
         locations,
         currentLocation,
         setCurrentLocation: handleSetLocation,

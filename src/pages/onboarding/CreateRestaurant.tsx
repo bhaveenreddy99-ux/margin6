@@ -33,7 +33,7 @@ function randomInvoiceSuffix(): string {
 
 export default function CreateRestaurantPage() {
   const { user } = useAuth();
-  const { refetch } = useRestaurant();
+  const { refetch, setCurrentRestaurant } = useRestaurant();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,6 +42,7 @@ export default function CreateRestaurantPage() {
   const [invoiceEmail, setInvoiceEmail] = useState<string | null>(null);
   const [emailFetchFailed, setEmailFetchFailed] = useState(false);
   const [restaurantName, setRestaurantName] = useState<string>("");
+  const [createdRestaurant, setCreatedRestaurant] = useState<{ id: string; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -96,6 +97,7 @@ export default function CreateRestaurantPage() {
       await refetch();
 
       setRestaurantName(name);
+      setCreatedRestaurant({ id: newRestaurant.id, name });
       setShowSuccess(true);
       setEmailLoading(true);
       setEmailFetchFailed(false);
@@ -129,6 +131,14 @@ export default function CreateRestaurantPage() {
     } catch {
       toast.error("Could not copy to clipboard");
     }
+  };
+
+  const handleGoToDashboard = async () => {
+    if (createdRestaurant) {
+      await refetch();
+      setCurrentRestaurant({ ...createdRestaurant, role: "OWNER" });
+    }
+    navigate("/app/dashboard");
   };
 
   if (showSuccess) {
@@ -189,14 +199,14 @@ export default function CreateRestaurantPage() {
             <Button
               type="button"
               className="w-full bg-gradient-amber text-white shadow-amber"
-              onClick={() => navigate("/app/dashboard")}
+              onClick={() => void handleGoToDashboard()}
             >
               Go to Dashboard →
             </Button>
             <button
               type="button"
               className="text-sm text-muted-foreground hover:text-primary transition-colors"
-              onClick={() => navigate("/app/dashboard")}
+              onClick={() => void handleGoToDashboard()}
             >
               Skip for now →
             </button>
