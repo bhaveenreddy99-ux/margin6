@@ -13,7 +13,7 @@ async function settle(page: import("@playwright/test").Page): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════
 // Authenticated suite — covers everything behind /app/*
 // ═══════════════════════════════════════════════════════════════════════════
-test.describe("RestaurantIQ — full feature suite (authenticated)", () => {
+test.describe("Margin6 — full feature suite (authenticated)", () => {
   test.skip(Boolean(missingAuthReason), missingAuthReason ?? "");
 
   // ── 1. Auth ───────────────────────────────────────────────────────────────
@@ -376,7 +376,7 @@ test.describe("RestaurantIQ — full feature suite (authenticated)", () => {
     );
     await expectAnyVisible(
       [
-        page.getByText(/@invoices\.restaurantiq\.com/i),
+        page.getByText(/@invoices\.margin6\.com/i),
         page.getByText(/invoice email/i),
       ],
       "Settings page should show the invoice email or its label.",
@@ -459,7 +459,7 @@ test.describe("RestaurantIQ — full feature suite (authenticated)", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // Public suite — /audit never requires auth
 // ═══════════════════════════════════════════════════════════════════════════
-test.describe("RestaurantIQ — public Free Leak Audit", () => {
+test.describe("Margin6 — public Free Leak Audit", () => {
   test("22 /audit page — loads without login in a fresh browser context", async ({ browser }) => {
     const context = await browser.newContext({
       storageState: { cookies: [], origins: [] },

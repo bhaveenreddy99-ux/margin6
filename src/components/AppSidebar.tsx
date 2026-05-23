@@ -100,7 +100,7 @@ export function AppSidebar() {
       <div className="p-4 pb-2">
         <Link to="/app/dashboard" className="flex items-center gap-2.5 mb-3 cursor-pointer hover:opacity-80 transition-opacity">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary/10 overflow-hidden shrink-0">
-            <img src={logo} alt="RestaurantIQ" className="h-full w-full object-contain" />
+            <img src={logo} alt="Margin6" className="h-full w-full object-contain" />
           </div>
           <span className="text-[15px] font-bold text-sidebar-accent-foreground tracking-tight">
             Restau<span className="text-sidebar-primary">rantIQ</span>

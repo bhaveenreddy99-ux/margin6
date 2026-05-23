@@ -230,7 +230,7 @@ function ProfileSection() {
             <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-lg font-bold shrink-0 select-none">
               {initials}
             </div>
-            <p className="text-xs text-muted-foreground">Your initials are shown as your avatar across RestaurantIQ.</p>
+            <p className="text-xs text-muted-foreground">Your initials are shown as your avatar across Margin6.</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
@@ -405,7 +405,7 @@ function GeneralSection({ restaurantId, isManager, restaurantName }: { restauran
   );
 }
 
-const INVOICE_EMAIL_DOMAIN = "invoices.restaurantiq.com";
+const INVOICE_EMAIL_DOMAIN = "invoices.margin6.com";
 
 function slugifyRestaurantNameForInvoice(name: string): string {
   const slug = name
@@ -496,7 +496,7 @@ function InvoiceSection({ restaurantId, isManager, restaurantName }: { restauran
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Invoice Settings</CardTitle>
-          <CardDescription>Unique address for distributors to send invoices into RestaurantIQ</CardDescription>
+          <CardDescription>Unique address for distributors to send invoices into Margin6</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {loading ? (
@@ -525,7 +525,7 @@ function InvoiceSection({ restaurantId, isManager, restaurantName }: { restauran
               <li>Copy your unique email address above</li>
               <li>Log into Sysco Shop at sysco.com</li>
               <li>Go to Account → Invoice Preferences</li>
-              <li>Replace invoice email with your RestaurantIQ address</li>
+              <li>Replace invoice email with your Margin6 address</li>
               <li>Click Save</li>
             </ol>
             <p className="text-sm text-muted-foreground">Your next Sysco invoice will arrive automatically.</p>
@@ -544,7 +544,7 @@ function InvoiceSection({ restaurantId, isManager, restaurantName }: { restauran
                   <li>Copy your unique email address above</li>
                   <li>Log into US Foods at usfoods.com</li>
                   <li>Open your account settings and find invoice or document delivery preferences</li>
-                  <li>Set the invoice email to your RestaurantIQ address</li>
+                  <li>Set the invoice email to your Margin6 address</li>
                   <li>Save your changes</li>
                 </ol>
                 <p className="text-sm text-muted-foreground">Your next US Foods invoice will arrive automatically.</p>
@@ -565,7 +565,7 @@ function InvoiceSection({ restaurantId, isManager, restaurantName }: { restauran
                   <li>Copy your unique email address above</li>
                   <li>Log into Performance Foodservice at pfgc.com</li>
                   <li>Open your account profile and locate invoice or e-document preferences</li>
-                  <li>Set the invoice email to your RestaurantIQ address</li>
+                  <li>Set the invoice email to your Margin6 address</li>
                   <li>Save your changes</li>
                 </ol>
                 <p className="text-sm text-muted-foreground">Your next PFG invoice will arrive automatically.</p>

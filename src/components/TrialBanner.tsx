@@ -28,7 +28,7 @@ export function TrialBanner({ restaurantId }: TrialBannerProps) {
               Your free trial has ended.
             </p>
             <p className="text-xs text-amber-900/85 dark:text-amber-100/85 mt-0.5">
-              Upgrade to keep accessing RestaurantIQ. $99/month — cancel anytime.
+              Upgrade to keep accessing Margin6. $99/month — cancel anytime.
             </p>
           </div>
           <Link

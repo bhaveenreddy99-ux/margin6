@@ -47,7 +47,7 @@ test.describe("Signup flow", () => {
       await page.goto("/signup", { waitUntil: "domcontentloaded" });
       await settle(page);
 
-      const uniqueEmail = `restaurantiq.e2e.${Date.now()}@gmail.com`;
+      const uniqueEmail = `margin6.e2e.${Date.now()}@gmail.com`;
       await page.getByLabel(/full name/i).fill("E2E Multi Restaurant");
       await page.getByLabel(/^email$/i).fill(uniqueEmail);
       await page.getByLabel(/^password$/i).fill("TestPass123!");
@@ -362,7 +362,7 @@ test.describe("Create restaurant flow", () => {
       [
         page.getByText(/your restaurant is ready/i),
         page.getByText(/invoice.*email/i),
-        page.getByText(/invoices\.restaurantiq\.com/i),
+        page.getByText(/invoices\.margin6\.com/i),
         page.getByText(/forward/i),
         page.getByText(/ready/i),
         page.getByRole("button", { name: /copy/i }),

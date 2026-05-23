@@ -101,7 +101,7 @@ export default function BillingPage() {
                 <h2 className="text-base font-bold tracking-tight">Pro Plan</h2>
               </div>
               <p className="text-sm text-muted-foreground mt-1">
-                Everything RestaurantIQ ships, billed monthly, cancel anytime.
+                Everything Margin6 ships, billed monthly, cancel anytime.
               </p>
             </div>
             <p className="text-3xl font-extrabold tracking-tight tabular-nums">
@@ -206,7 +206,7 @@ function StatusCard({
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold">Your plan has been canceled</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Re-subscribe to keep using RestaurantIQ.
+              Re-subscribe to keep using Margin6.
             </p>
           </div>
         </CardContent>
@@ -231,7 +231,7 @@ function StatusCard({
                 Your free trial has ended
               </p>
               <p className="text-xs text-amber-900/80 dark:text-amber-100/80 mt-1">
-                Upgrade to keep accessing RestaurantIQ. ${PLAN_PRICE_MONTHLY}/month —
+                Upgrade to keep accessing Margin6. ${PLAN_PRICE_MONTHLY}/month —
                 cancel anytime.
               </p>
             </div>

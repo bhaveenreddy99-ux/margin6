@@ -216,7 +216,7 @@ export default function LeakAuditPage() {
               <ChefHat className="h-5 w-5 text-white" />
             </div>
             <span className="text-xl font-bold tracking-tight text-foreground">
-              Restaurant<span className="text-gradient-orange">IQ</span>
+              Margin<span className="text-gradient-orange">6</span>
             </span>
           </Link>
           <Link to="/signup" className="text-sm font-medium text-muted-foreground hover:text-foreground">
@@ -543,15 +543,15 @@ function generateLeakAuditPdf(result: AuditResult) {
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text("RestaurantIQ", margin, 35);
+  doc.text("Margin6", margin, 35);
   doc.setTextColor(...accent);
-  doc.text(" · ", margin + doc.getTextWidth("RestaurantIQ"), 35);
+  doc.text(" · ", margin + doc.getTextWidth("Margin6"), 35);
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(12);
   doc.text(
     "Free Leak Audit Report",
-    margin + doc.getTextWidth("RestaurantIQ  ·  "),
+    margin + doc.getTextWidth("Margin6  ·  "),
     35,
   );
 
@@ -675,7 +675,7 @@ function generateLeakAuditPdf(result: AuditResult) {
   doc.setTextColor(...accent);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("Sign up free at restaurantiq.com/signup", margin, y);
+  doc.text("Sign up free at margin6.com/signup", margin, y);
 
   y += 32;
   doc.setTextColor(...muted);
@@ -687,6 +687,6 @@ function generateLeakAuditPdf(result: AuditResult) {
     y,
   );
 
-  const filename = `restaurantiq-leak-audit-${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `margin6-leak-audit-${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(filename);
 }

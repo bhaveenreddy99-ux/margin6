@@ -340,7 +340,7 @@ export function buildProfitIntelligenceActions(args: {
   if (args.priceIncreaseImpact > 0) {
     actions.push({
       type: "WARNING",
-      message: `RestaurantIQ flagged $${args.priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })} in supplier price increases`,
+      message: `Margin6 flagged $${args.priceIncreaseImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })} in supplier price increases`,
     });
   }
   if (args.missingParCount > 0) {

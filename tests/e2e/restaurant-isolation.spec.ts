@@ -112,7 +112,7 @@ async function openInvoiceSettingsSection(page: Page): Promise<void> {
 
 async function extractInvoiceEmail(page: Page): Promise<string | null> {
   const text = await page.locator("main").innerText();
-  const match = text.match(/[a-z0-9-]+@invoices\.restaurantiq\.com/i);
+  const match = text.match(/[a-z0-9-]+@invoices\.margin6\.com/i);
   return match?.[0] ?? null;
 }
 
@@ -395,7 +395,7 @@ test.describe("Invoice Isolation", () => {
 
     await expectAnyVisible(
       [
-        page.getByText(/invoices\.restaurantiq\.com/i),
+        page.getByText(/invoices\.margin6\.com/i),
         page.getByText(/invoice.*email/i),
         page.getByText(/@invoices/i),
         page.getByText(/generate invoice email/i),
@@ -420,7 +420,7 @@ test.describe("Invoice Isolation", () => {
     const emailB = await extractInvoiceEmail(page);
     if (emailB) {
       expect(emailB).not.toBe(emailA);
-      expect(emailB).toMatch(/@invoices\.restaurantiq\.com/i);
+      expect(emailB).toMatch(/@invoices\.margin6\.com/i);
     }
 
     await assertNoCrash(page);
@@ -864,8 +864,8 @@ test.describe("Complete Data Isolation Proof", () => {
     const emailB = await extractInvoiceEmail(page);
     if (emailB) {
       expect(emailB).not.toBe(emailA);
-      expect(emailA).toMatch(/@invoices\.restaurantiq\.com/i);
-      expect(emailB).toMatch(/@invoices\.restaurantiq\.com/i);
+      expect(emailA).toMatch(/@invoices\.margin6\.com/i);
+      expect(emailB).toMatch(/@invoices\.margin6\.com/i);
     }
 
     await assertNoCrash(page);

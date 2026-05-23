@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ChefHat, CheckCircle2, Copy, Check } from "lucide-react";
 
-const INVOICE_EMAIL_DOMAIN = "invoices.restaurantiq.com";
+const INVOICE_EMAIL_DOMAIN = "invoices.margin6.com";
 
 function slugifyRestaurantNameForInvoice(name: string): string {
   const slug = name
@@ -222,7 +222,7 @@ export default function CreateRestaurantPage() {
         <div className="text-center">
           <ChefHat className="mx-auto h-10 w-10 text-primary mb-3" />
           <h1 className="text-2xl font-bold">Create Your Restaurant</h1>
-          <p className="text-sm text-muted-foreground mt-1">Get started with RestaurantIQ</p>
+          <p className="text-sm text-muted-foreground mt-1">Get started with Margin6</p>
         </div>
         <form onSubmit={handleCreate} className="space-y-4">
           <div className="space-y-2">

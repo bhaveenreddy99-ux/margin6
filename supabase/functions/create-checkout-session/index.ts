@@ -4,7 +4,7 @@ import Stripe from "https://esm.sh/stripe@17.7.0?target=denonext";
 // Creates a Stripe Checkout Session for the caller's currently-selected
 // restaurant. Required secrets:
 //   STRIPE_SECRET_KEY, STRIPE_PRICE_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-//   APP_URL (optional; defaults to https://restaurantiq.com)
+//   APP_URL (optional; defaults to https://margin6.com)
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
   const priceId = Deno.env.get("STRIPE_PRICE_ID");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const appUrl = Deno.env.get("APP_URL") || "https://restaurantiq.com";
+  const appUrl = Deno.env.get("APP_URL") || "https://margin6.com";
 
   if (!stripeSecret || !priceId || !supabaseUrl || !serviceKey) {
     console.error("create-checkout-session: missing env vars");

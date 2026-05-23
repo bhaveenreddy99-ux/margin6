@@ -1,116 +1,145 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  ChefHat, BarChart3, ClipboardList, ArrowRight,
-  CheckCircle2, Upload, ListChecks, ShoppingCart, AlertTriangle, Brain,
-  FileDown, CalendarClock, Users, TrendingUp, Building2, Rocket, Award,
-  MapPin, Eye
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  CheckCircle2,
+  Upload,
+  ListChecks,
+  Brain,
+  TrendingUp,
+  TrendingDown,
+  FileDown,
+  CalendarClock,
 } from "lucide-react";
+import { MarketingNav, MarketingFooter } from "@/components/MarketingChrome";
 
-/* ── data ── */
 const trustBullets = [
   "No credit card required",
-  "Built for single & multi-location brands",
-  "Enterprise-grade security",
+  "No POS integration needed",
+  "Live in under 10 minutes",
 ];
 
-const coreFeatures = [
+const problemCards = [
   {
-    icon: ClipboardList,
-    title: "Smart Inventory Tracking",
-    desc: "Track weekly counts with guided workflows and approval controls.",
+    icon: AlertTriangle,
+    title: "Vendor price hikes go unnoticed",
+    desc: "Sysco raises chicken breast 15% and you find out weeks later when margins shrink. By then you've already lost hundreds.",
+  },
+  {
+    icon: TrendingDown,
+    title: "Waste adds up silently",
+    desc: "3 lbs of tomatoes spoiled Monday. 2 lbs Tuesday. By Friday you've thrown away $32 you never tracked.",
   },
   {
     icon: Brain,
-    title: "AI-Powered Smart Ordering",
-    desc: "Automatically generate vendor-ready orders based on PAR and risk analysis.",
-  },
-  {
-    icon: MapPin,
-    title: "Multi-Location Visibility",
-    desc: "Compare store performance instantly and identify which locations are underperforming.",
+    title: "You're guessing your food cost",
+    desc: "You know your rent. You know payroll. But your real food cost percentage? Most owners are off by 3-5 points.",
   },
 ];
 
 const steps = [
-  { num: "01", icon: Upload, title: "Import or build", desc: "Import or build your inventory list." },
-  { num: "02", icon: ListChecks, title: "Count & review", desc: "Enter weekly counts and review PAR levels." },
-  { num: "03", icon: ShoppingCart, title: "Order in one click", desc: "Approve and generate smart vendor-ready orders in one click." },
+  {
+    num: "01",
+    icon: Upload,
+    title: "Forward your invoices",
+    desc: "Email any Sysco, US Foods, or Performance Food invoice to your unique address. We parse every line item in 60 seconds.",
+  },
+  {
+    num: "02",
+    icon: ListChecks,
+    title: "Count your inventory",
+    desc: "Staff count on their phone. You review and approve. 15 minutes on a slow day.",
+  },
+  {
+    num: "03",
+    icon: BarChart3,
+    title: "See exactly what you lost",
+    desc: "Dashboard shows: You lost $342 this week. Price hikes $43. Waste $32. Shrinkage $85. Click any number to see the raw math.",
+  },
 ];
 
 const featureGrid = [
-  { icon: AlertTriangle, title: "Risk Alerts", desc: "Low / Medium / High" },
-  { icon: Brain, title: "Automated PAR Suggestions", desc: "AI-driven reorder levels" },
-  { icon: FileDown, title: "Vendor Order Export", desc: "One-click PDF & CSV" },
-  { icon: CalendarClock, title: "Weekly Scheduling", desc: "Reminders & deadlines" },
-  { icon: Users, title: "Role-Based Permissions", desc: "Owner / Manager / Staff" },
-  { icon: BarChart3, title: "Real-time Reports", desc: "Live dashboards & trends" },
+  {
+    icon: TrendingUp,
+    title: "Price Hike Detection",
+    desc: "Alerts you the moment a vendor raises prices. Shows exact $ impact before your next order.",
+  },
+  {
+    icon: AlertTriangle,
+    title: "Waste Tracking",
+    desc: "Log waste on a phone in 10 seconds. Weekly totals and which items cost you most.",
+  },
+  {
+    icon: Brain,
+    title: "AI Invoice Parsing",
+    desc: "Forward an email. Every line item appears in 60 seconds. Zero manual data entry.",
+  },
+  {
+    icon: BarChart3,
+    title: "Show Your Math",
+    desc: "Click any number to see every raw line that built it. Your bookkeeper will trust it.",
+  },
+  {
+    icon: CalendarClock,
+    title: "Monday Morning Digest",
+    desc: "Every Monday at 7am: 'You lost $342 last week. Top leak: Chicken Breast.' Before you get in the car.",
+  },
+  {
+    icon: FileDown,
+    title: "Free Leak Audit",
+    desc: "Upload any invoice. No signup. PDF showing your estimated weekly leak in 30 seconds.",
+  },
 ];
 
-const growthCallouts = [
-  { icon: Rocket, label: "Startup friendly" },
-  { icon: Building2, label: "Franchise ready" },
-  { icon: Award, label: "Enterprise scalable" },
+const moneyLostRows = [
+  { label: "Waste", amount: "$32" },
+  { label: "Price hikes", amount: "$43" },
+  { label: "Overstock", amount: "$0" },
+  { label: "Shrinkage", amount: "$85" },
 ];
 
-/* ── mock chart data for dashboard ── */
-const locationBars = [
-  { name: "Downtown", value: 82, color: "hsl(142 65% 40%)" },
-  { name: "Midtown", value: 64, color: "hsl(38 92% 50%)" },
-  { name: "Uptown", value: 45, color: "hsl(0 72% 51%)" },
-  { name: "Airport", value: 91, color: "hsl(142 65% 40%)" },
-  { name: "Mall", value: 73, color: "hsl(38 92% 50%)" },
+const profitLeaks = [
+  { rank: 1, item: "Chicken Breast", badge: "PRICE HIKE", badgeClass: "bg-amber-500/15 text-amber-700", amount: "$21" },
+  { rank: 2, item: "Cooking Oil", badge: "PRICE HIKE", badgeClass: "bg-amber-500/15 text-amber-700", amount: "$11" },
+  { rank: 3, item: "Tomatoes", badge: "PRICE HIKE", badgeClass: "bg-amber-500/15 text-amber-700", amount: "$11" },
+  { rank: 4, item: "Chicken Breast", badge: "WASTE", badgeClass: "bg-destructive/15 text-destructive", amount: "$9" },
+  { rank: 5, item: "Cooking Oil", badge: "WASTE", badgeClass: "bg-destructive/15 text-destructive", amount: "$8" },
 ];
 
-const smartOrderPreview = [
-  { item: "Chicken Breast", qty: 24, risk: "red" },
-  { item: "Olive Oil", qty: 8, risk: "yellow" },
-  { item: "Tomato Sauce", qty: 12, risk: "green" },
-  { item: "Mozzarella", qty: 18, risk: "red" },
-  { item: "Flour (50lb)", qty: 4, risk: "green" },
+const priceHikes = [
+  { item: "Chicken Breast", vendor: "Sysco", pct: "+15.6%", amount: "$21" },
+  { item: "Cooking Oil", vendor: "Sysco", pct: "+17.5%", amount: "$11" },
+  { item: "Tomatoes", vendor: "Sysco", pct: "+27.5%", amount: "$11" },
 ];
 
-const riskColor = (r: string) =>
-  r === "red" ? "bg-risk-red" : r === "yellow" ? "bg-risk-yellow" : "bg-risk-green";
+const foundingFeatures = [
+  "Unlimited AI invoice parsing",
+  "Money Lost dashboard",
+  "Price hike alerts",
+  "Shrinkage detection",
+  "Monday 7am digest email",
+  "Show Your Math audit trail",
+  "Free Leak Audit tool",
+  "Multiple restaurants",
+  "14-day free trial",
+];
 
-/* ── COMPONENT ── */
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white">
-      {/* ═══ NAV ═══ */}
-      <header className="border-b border-border/30 bg-white/90 backdrop-blur-md sticky top-0 z-50">
-        <div className="container flex h-16 items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-orange">
-              <ChefHat className="h-5 w-5 text-white" />
-            </div>
-            <span className="text-xl font-bold tracking-tight text-foreground">
-              Restaurant<span className="text-gradient-orange">IQ</span>
-            </span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link to="/login">
-              <Button variant="ghost" size="sm">Log in</Button>
-            </Link>
-            <Link to="/signup">
-              <Button size="sm" className="bg-gradient-orange shadow-orange text-white hover:opacity-90">
-                Start Free
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </header>
+      <MarketingNav />
 
-      {/* ═══ HERO ═══ */}
+      {/* HERO */}
       <section className="landing-section overflow-hidden">
         <div className="container">
           <div className="mx-auto max-w-3xl text-center">
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.05] text-foreground">
-              Turn inventory into{" "}
-              <span className="text-gradient-orange">profit.</span>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.08] text-foreground">
+              Find out exactly how much money your restaurant lost this week.
             </h1>
             <p className="mt-6 text-lg sm:text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              Cut food waste, automate ordering, and compare every location — all in one intelligent platform built for modern restaurant operators.
+              Margin6 connects your invoices, inventory, and sales to show you where every dollar is going — and why. No POS required. Live in 10 minutes.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row justify-center gap-4">
               <Link to="/signup">
@@ -142,7 +171,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Dashboard Mockup */}
+          {/* Dashboard mockup */}
           <div className="mt-16 mx-auto max-w-5xl rounded-2xl border border-border/40 bg-white dashboard-mockup-shadow overflow-hidden">
             <div className="bg-foreground/[0.03] border-b border-border/30 px-5 py-3 flex items-center gap-2">
               <div className="flex gap-1.5">
@@ -150,68 +179,72 @@ export default function LandingPage() {
                 <div className="h-3 w-3 rounded-full bg-risk-yellow/60" />
                 <div className="h-3 w-3 rounded-full bg-risk-green/60" />
               </div>
-              <span className="text-xs text-muted-foreground ml-2 font-medium">RestaurantIQ — Dashboard</span>
+              <span className="text-xs text-muted-foreground ml-2 font-medium">Margin6 — Dashboard</span>
             </div>
             <div className="p-6 grid md:grid-cols-3 gap-5">
-              {/* Risk Summary */}
+              {/* Panel 1 — Money Lost */}
               <div className="rounded-xl border border-border/40 p-4 bg-white">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Risk Overview</p>
-                <div className="space-y-2.5">
-                  {[
-                    { label: "Critical", count: 4, color: "bg-risk-red", w: "w-[85%]" },
-                    { label: "Warning", count: 8, color: "bg-risk-yellow", w: "w-[60%]" },
-                    { label: "Healthy", count: 22, color: "bg-risk-green", w: "w-[95%]" },
-                  ].map((r) => (
-                    <div key={r.label}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-muted-foreground">{r.label}</span>
-                        <span className="font-semibold text-foreground">{r.count}</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-muted/40 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${r.color} ${r.w}`}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Location Comparison */}
-              <div className="rounded-xl border border-border/40 p-4 bg-white">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Location Comparison</p>
+                <p className="text-[10px] font-bold text-destructive uppercase tracking-wider mb-2">
+                  Money Lost This Period
+                </p>
+                <p className="text-3xl font-extrabold text-destructive mb-4">$342</p>
                 <div className="space-y-2">
-                  {locationBars.map((loc) => (
-                    <div key={loc.name} className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground w-16 truncate">{loc.name}</span>
-                      <div className="flex-1 h-5 rounded bg-muted/30 overflow-hidden">
-                        <div
-                          className="h-full rounded"
-                          style={{ backgroundColor: loc.color, width: `${loc.value}%` }}
-                        />
-                      </div>
-                      <span className="text-xs font-semibold text-foreground w-8 text-right">{loc.value}%</span>
+                  {moneyLostRows.map((row) => (
+                    <div key={row.label} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{row.label}</span>
+                      <span className="flex items-center gap-1 font-semibold text-[hsl(25,95%,53%)]">
+                        {row.amount}
+                        <span className="text-muted-foreground/50">→</span>
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Smart Order Preview */}
+              {/* Panel 2 — Top Profit Leaks */}
               <div className="rounded-xl border border-border/40 p-4 bg-white">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Smart Order Preview</p>
-                <div className="space-y-1.5">
-                  <div className="flex text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pb-1 border-b border-border/30">
-                    <span className="flex-1">Item</span>
-                    <span className="w-10 text-center">Qty</span>
-                    <span className="w-10 text-center">Risk</span>
-                  </div>
-                  {smartOrderPreview.map((item) => (
-                    <div key={item.item} className="flex items-center text-xs py-1">
-                      <span className="flex-1 text-foreground truncate">{item.item}</span>
-                      <span className="w-10 text-center font-medium text-foreground">{item.qty}</span>
-                      <span className="w-10 flex justify-center">
-                        <span className={`h-2.5 w-2.5 rounded-full ${riskColor(item.risk)}`} />
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                  Top Profit Leaks
+                </p>
+                <div className="space-y-2">
+                  {profitLeaks.map((row) => (
+                    <div key={`${row.rank}-${row.item}-${row.badge}`} className="flex items-center gap-2 text-xs">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
+                        {row.rank}
                       </span>
+                      <span className="flex-1 truncate font-medium text-foreground">{row.item}</span>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${row.badgeClass}`}>
+                        {row.badge}
+                      </span>
+                      <span className="shrink-0 font-semibold text-[hsl(25,95%,53%)]">{row.amount}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Panel 3 — Price Hike Alerts */}
+              <div className="rounded-xl border border-border/40 p-4 bg-white">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Price Hike Alerts
+                  </p>
+                  <span className="rounded-full bg-[hsl(25,95%,53%)]/15 px-2 py-0.5 text-[9px] font-bold text-[hsl(25,95%,53%)]">
+                    3 PRICE HIKES THIS WEEK
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {priceHikes.map((row) => (
+                    <div key={row.item} className="flex items-start justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate">{row.item}</p>
+                        <p className="text-[10px] text-muted-foreground">{row.vendor}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                          {row.pct}
+                        </span>
+                        <span className="font-semibold text-[hsl(25,95%,53%)]">{row.amount}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -221,17 +254,19 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ SECTION 1 – BUILT FOR MODERN RESTAURANTS ═══ */}
+      {/* THE PROBLEM */}
       <section className="landing-section-alt">
         <div className="container">
           <div className="text-center mb-14">
-            <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Built for modern restaurants</p>
+            <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">The problem</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
-              From single store to 50+ locations — scale with confidence
+              You know something is wrong.
+              <br className="hidden sm:block" />
+              You just don&apos;t know where.
             </h2>
           </div>
           <div className="grid gap-6 md:grid-cols-3 max-w-5xl mx-auto">
-            {coreFeatures.map((f) => (
+            {problemCards.map((f) => (
               <div
                 key={f.title}
                 className="group rounded-2xl border border-border/50 bg-white p-7 hover:shadow-landing transition-all duration-300"
@@ -247,13 +282,13 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ SECTION 2 – HOW IT WORKS ═══ */}
+      {/* HOW IT WORKS */}
       <section className="landing-section">
         <div className="container">
           <div className="text-center mb-14">
             <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">How it works</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
-              Simple for managers. Powerful for owners.
+              From zero to knowing your number in 10 minutes.
             </h2>
           </div>
           <div className="grid gap-8 md:grid-cols-3 max-w-4xl mx-auto">
@@ -271,42 +306,13 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ SECTION 3 – MULTI-LOCATION DASHBOARD ═══ */}
-      <section className="landing-navy py-20 lg:py-28">
-        <div className="container">
-          <div className="text-center mb-14">
-            <p className="text-sm font-semibold text-[hsl(25,95%,53%)] uppercase tracking-wider mb-3">Multi-Location Intelligence</p>
-            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
-              See every store. In one place.
-            </h2>
-          </div>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 max-w-5xl mx-auto">
-            {[
-              { icon: BarChart3, title: "Inventory Value by Location", desc: "Compare stock value across every store." },
-              { icon: AlertTriangle, title: "Risk Heatmap", desc: "Spot critical shortages across all locations instantly." },
-              { icon: TrendingUp, title: "Store Rankings", desc: "See which locations are outperforming and which need attention." },
-              { icon: Eye, title: "Waste Trends", desc: "Track waste patterns over time per location." },
-            ].map((card) => (
-              <div
-                key={card.title}
-                className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 hover:bg-white/10 transition-colors duration-300"
-              >
-                <card.icon className="h-8 w-8 text-[hsl(25,95%,53%)] mb-4" />
-                <h3 className="font-bold text-white text-sm mb-1.5">{card.title}</h3>
-                <p className="text-xs text-white/60 leading-relaxed">{card.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ═══ SECTION 4 – FEATURES THAT DRIVE PROFIT ═══ */}
-      <section className="landing-section">
+      {/* FEATURES */}
+      <section className="landing-section-alt">
         <div className="container">
           <div className="text-center mb-14">
             <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Features</p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
-              Features that drive profit
+              Everything you need. Nothing you don&apos;t.
             </h2>
           </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
@@ -320,7 +326,7 @@ export default function LandingPage() {
                 </div>
                 <div>
                   <h3 className="font-bold text-foreground text-[15px]">{f.title}</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">{f.desc}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{f.desc}</p>
                 </div>
               </div>
             ))}
@@ -328,53 +334,94 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ SECTION 5 – BUILT FOR GROWTH ═══ */}
-      <section className="landing-section-alt">
+      {/* SOCIAL PROOF */}
+      <section className="landing-navy py-20 lg:py-28">
         <div className="container">
-          <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Built for growth</p>
-            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
-              Designed for restaurants that are growing.
+          <div className="text-center mb-14">
+            <p className="text-sm font-semibold text-[hsl(25,95%,53%)] uppercase tracking-wider mb-3">
+              Built for independent operators
+            </p>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+              Not chains. Not franchises. Real restaurants.
             </h2>
-            <p className="mt-5 text-base text-muted-foreground leading-relaxed">
-              Whether you operate one store or manage a growing group, RestaurantIQ gives you the control, automation, and intelligence needed to scale efficiently.
+          </div>
+          <div className="grid gap-6 sm:grid-cols-3 max-w-3xl mx-auto">
+            {[
+              { stat: "$400/week", label: "Average weekly leak found" },
+              { stat: "10 min", label: "Average setup time" },
+              { stat: "No POS", label: "Required. Ever." },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-8 text-center"
+              >
+                <p className="text-3xl sm:text-4xl font-extrabold text-white">{item.stat}</p>
+                <p className="mt-2 text-sm text-white/60">{item.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* PRICING TEASER */}
+      <section className="landing-section">
+        <div className="container">
+          <div className="text-center mb-10">
+            <p className="text-sm font-semibold text-gradient-orange uppercase tracking-wider mb-3">Simple pricing</p>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
+              One plan. Everything included.
+            </h2>
+          </div>
+          <div className="mx-auto max-w-md">
+            <div className="rounded-2xl border-2 border-[hsl(25,95%,53%)] bg-white p-8 shadow-landing text-center">
+              <span className="inline-block rounded-full bg-[hsl(25,95%,53%)]/15 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-[hsl(25,95%,53%)]">
+                Founding Member · First 100 only
+              </span>
+              <p className="mt-6 text-5xl font-extrabold text-foreground">$69.99<span className="text-lg font-medium text-muted-foreground">/month</span></p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Locked in forever · Goes to $99 after first 100 members
+              </p>
+              <ul className="mt-8 space-y-2.5 text-left text-sm">
+                {foundingFeatures.map((f) => (
+                  <li key={f} className="flex items-start gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-success mt-0.5" />
+                    <span className="text-foreground/90">{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link to="/signup" className="block mt-8">
+                <Button className="w-full bg-gradient-orange shadow-orange text-white h-11 hover:opacity-90">
+                  Start Free Trial →
+                </Button>
+              </Link>
+              <p className="mt-3 text-xs text-muted-foreground">No credit card required · Cancel anytime</p>
+            </div>
+            <p className="mt-6 text-center text-xs text-muted-foreground leading-relaxed">
+              MarketMan: $239/mo · Restaurant365: $499/mo · Margin6: $69.99/mo
             </p>
           </div>
-          <div className="mt-12 flex flex-wrap justify-center gap-6">
-            {growthCallouts.map((c) => (
-              <div
-                key={c.label}
-                className="flex items-center gap-3 rounded-2xl border border-border/50 bg-white px-6 py-4 shadow-landing"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-orange text-white">
-                  <c.icon className="h-5 w-5" />
-                </div>
-                <span className="font-bold text-foreground">{c.label}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
-      {/* ═══ FINAL CTA ═══ */}
+      {/* FINAL CTA */}
       <section className="landing-navy py-20 lg:py-28">
         <div className="container">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
-              Ready to simplify your restaurant operations?
+              Find out what you&apos;re losing this week. Free.
             </h2>
             <p className="mt-4 text-base text-white/60 leading-relaxed">
-              Start free today or schedule a demo to see RestaurantIQ in action.
+              Upload any invoice — no signup, no credit card. See your estimated weekly leak in 30 seconds.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row justify-center gap-4">
-              <Link to="/signup">
+              <Link to="/audit">
                 <Button size="lg" className="bg-gradient-orange shadow-orange text-white gap-2 w-full sm:w-auto text-base px-8 h-12 hover:opacity-90">
-                  Start Free <ArrowRight className="h-4 w-4" />
+                  Free Leak Audit →
                 </Button>
               </Link>
-              <Link to="/demo-live">
+              <Link to="/signup">
                 <Button size="lg" variant="outline" className="w-full sm:w-auto text-base px-8 h-12 border-white/20 text-white hover:bg-white/10 hover:text-white">
-                  See Live Demo
+                  Start Free Trial
                 </Button>
               </Link>
             </div>
@@ -382,12 +429,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ FOOTER ═══ */}
-      <footer className="border-t border-border/30 bg-white py-10">
-        <div className="container text-center text-sm text-muted-foreground">
-          © 2026 RestaurantIQ. All rights reserved.
-        </div>
-      </footer>
+      <MarketingFooter />
     </div>
   );
 }

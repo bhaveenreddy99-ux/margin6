@@ -11,6 +11,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { OwnerRoute } from "@/components/OwnerRoute";
 import { StaffRestrictedRoute } from "@/components/StaffRestrictedRoute";
 import LandingPage from "@/pages/Landing";
+import PricingPage from "@/pages/Pricing";
 import LoginPage from "@/pages/Login";
 import SignupPage from "@/pages/Signup";
 import DemoPage from "@/pages/Demo";
@@ -72,6 +73,7 @@ const App = () => (
           <DemoRoleProvider>
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              <Route path="/pricing" element={<PricingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />

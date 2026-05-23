@@ -2,7 +2,7 @@
  * inbound-invoice-email
  *
  * Receives Resend inbound email webhooks when vendors email invoices to
- * a restaurant's unique address (e.g. midwest-ab3x7f@invoices.restaurantiq.com).
+ * a restaurant's unique address (e.g. midwest-ab3x7f@invoices.margin6.com).
  *
  * Flow:
  *   1. Verify the webhook secret from Resend
@@ -19,7 +19,7 @@
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_WEBHOOK_SECRET (optional)
  *
  * Required DNS / Resend setup (outside codebase):
- *   - MX records for invoices.restaurantiq.com → Resend inbound MX servers
+ *   - MX records for invoices.margin6.com → Resend inbound MX servers
  *   - Resend dashboard: Inbound webhook URL =
  *       https://<project-ref>.supabase.co/functions/v1/inbound-invoice-email
  */

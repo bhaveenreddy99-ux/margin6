@@ -97,7 +97,7 @@ export function exportToPDF(
   const doc = new jsPDF();
   let y = 15;
   doc.setFontSize(16);
-  doc.text("RestaurantIQ Export", 14, y);
+  doc.text("Margin6 Export", 14, y);
   y += 8;
   doc.setFontSize(10);
   if (meta?.listName) { doc.text(`List: ${meta.listName}`, 14, y); y += 5; }

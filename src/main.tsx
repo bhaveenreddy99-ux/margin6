@@ -42,6 +42,6 @@ import("./app-entry")
     mod.mountApp(rootEl);
   })
   .catch((err) => {
-    console.error("[RestaurantIQ] Bootstrap failed:", err);
+    console.error("[Margin6] Bootstrap failed:", err);
     showBootstrapFailure(err);
   });

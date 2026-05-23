@@ -159,7 +159,7 @@ export function AppHeader() {
       </Button>
 
       <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
-        <img src={logo} alt="RestaurantIQ" className="h-full w-full object-contain" />
+        <img src={logo} alt="Margin6" className="h-full w-full object-contain" />
       </div>
     </header>
   );

@@ -17,12 +17,12 @@ const DEV_FALLBACK_ANON =
 if (!envUrl || !envKey) {
   if (import.meta.env.DEV) {
     console.warn(
-      "[RestaurantIQ] VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY is not set. Using local dev fallbacks. " +
+      "[Margin6] VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY is not set. Using local dev fallbacks. " +
         "Add them to `.env` (see `.env.example`) or run `supabase start` to match 127.0.0.1:54321.",
     );
   } else {
     console.error(
-      "[RestaurantIQ] Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY. Set them in the hosting project env; auth and data will not work until set.",
+      "[Margin6] Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY. Set them in the hosting project env; auth and data will not work until set.",
     );
   }
 }

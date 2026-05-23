@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #1a1a1a;">You've been invited!</h2>
         <p style="color: #4a4a4a; font-size: 16px; line-height: 1.5;">
-          <strong>${inviterName}</strong> has invited you to join <strong>${restaurantName}</strong> on RestaurantIQ as a <strong>${role}</strong>.
+          <strong>${inviterName}</strong> has invited you to join <strong>${restaurantName}</strong> on Margin6 as a <strong>${role}</strong>.
         </p>
         <div style="margin: 30px 0;">
           <a href="${signupUrl}" 
@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: "RestaurantIQ <onboarding@resend.dev>",
+        from: "Margin6 <onboarding@resend.dev>",
         to: [email],
         subject: `${inviterName} invited you to join ${restaurantName}`,
         html: emailHtml,

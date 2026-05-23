@@ -61,7 +61,7 @@ function buildAlertEmailHtml(restaurantName: string, locationName: string | null
           ⚡ Review your inventory and consider placing a Smart Order.
         </div>
       </div>
-      <p style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">RestaurantIQ — Inventory Intelligence</p>
+      <p style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">Margin6 — Inventory Intelligence</p>
     </div>
   `;
 }
@@ -86,7 +86,7 @@ function buildDigestEmailHtml(userName: string, groups: any[]): string {
       <div style="background:white;border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 12px 12px">
         ${sections}
       </div>
-      <p style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">RestaurantIQ — Inventory Intelligence</p>
+      <p style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">Margin6 — Inventory Intelligence</p>
     </div>
   `;
 }
@@ -103,7 +103,7 @@ function buildReminderEmailHtml(restaurantName: string, locationName: string | n
         <p style="color:#6b7280;font-size:14px;margin:0">It's time to enter your inventory counts. Please log in and complete your inventory entry.</p>
         <p style="color:#9ca3af;font-size:12px;margin:16px 0 0">Scheduled for: ${timestamp}</p>
       </div>
-      <p style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">RestaurantIQ — Inventory Intelligence</p>
+      <p style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">Margin6 — Inventory Intelligence</p>
     </div>
   `;
 }
@@ -901,7 +901,7 @@ Deno.serve(async (req) => {
         const html = `
           <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#FAFAFA">
             <div style="background:#0F172A;padding:22px 24px;border-radius:12px 12px 0 0">
-              <h1 style="color:#FFFFFF;margin:0;font-size:18px;font-weight:700;letter-spacing:-0.01em">RestaurantIQ <span style="color:#F97316">·</span> Weekly Loss Report</h1>
+              <h1 style="color:#FFFFFF;margin:0;font-size:18px;font-weight:700;letter-spacing:-0.01em">Margin6 <span style="color:#F97316">·</span> Weekly Loss Report</h1>
             </div>
             <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-top:none;padding:28px;border-radius:0 0 12px 12px">
               <p style="color:#6B7280;font-size:12px;margin:0;text-transform:uppercase;letter-spacing:0.04em;font-weight:600">Week of ${weekStartLabel} – ${weekEndLabel}</p>
@@ -917,7 +917,7 @@ Deno.serve(async (req) => {
               ${topLeakSection}
 
               <div style="margin-top:28px">
-                <a href="https://restaurantiq.com/app/dashboard" style="display:inline-block;background:#F97316;color:#FFFFFF;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">See the full breakdown →</a>
+                <a href="https://margin6.com/app/dashboard" style="display:inline-block;background:#F97316;color:#FFFFFF;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">See the full breakdown →</a>
               </div>
             </div>
             <p style="text-align:center;color:#9CA3AF;font-size:11px;margin-top:18px;line-height:1.6">You're receiving this because you're an owner/manager at ${restaurantName}.<br/>Unsubscribe in Settings.</p>

@@ -51,7 +51,7 @@ export default function DemoPage() {
       <div className="mx-auto max-w-3xl animate-fade-in">
         <div className="text-center mb-10">
           <ChefHat className="mx-auto h-12 w-12 text-primary mb-4" />
-          <h1 className="text-3xl font-bold">Welcome to Restau<span className="text-gradient-amber">rantIQ</span></h1>
+          <h1 className="text-3xl font-bold">Margin<span className="text-gradient-amber">6</span></h1>
           <p className="mt-2 text-muted-foreground">Here's how the workflow works</p>
         </div>
 
