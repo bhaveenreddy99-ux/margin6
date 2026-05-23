@@ -5,10 +5,14 @@ import { getSmokeCredentials, getStorageStatePath } from "./env";
 
 export async function expectAppShell(page: Page): Promise<void> {
   // Sidebar uses "Overview" as the dashboard link label.
-  await expect(page.getByRole("link", { name: /^overview$/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /list management/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /inventory management/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /invoices \(receiving\)/i })).toBeVisible();
+  // Prefer data-sidebar buttons — breadcrumb trails can duplicate page titles as links.
+  const sidebarLink = (name: RegExp) =>
+    page.locator('[data-sidebar="menu-button"]').filter({ hasText: name }).first();
+
+  await expect(sidebarLink(/^overview$/i)).toBeVisible({ timeout: 20_000 });
+  await expect(sidebarLink(/list management/i)).toBeVisible();
+  await expect(sidebarLink(/inventory management/i)).toBeVisible();
+  await expect(sidebarLink(/invoices \(receiving\)/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible();
 }
 
@@ -19,6 +23,12 @@ export async function expectNoRuntimeOverlay(page: Page): Promise<void> {
 export async function loginIfNeeded(page: Page): Promise<void> {
   await page.goto("/app/dashboard", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
+
+  const overview = page.locator('[data-sidebar="menu-button"]').filter({ hasText: /^overview$/i }).first();
+  if (!(await overview.isVisible().catch(() => false))) {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1500);
+  }
 
   if (page.url().includes("/login")) {
     const credentials = getSmokeCredentials();

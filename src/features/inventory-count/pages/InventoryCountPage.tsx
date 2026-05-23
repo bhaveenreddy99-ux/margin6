@@ -167,23 +167,6 @@ export default function InventoryCountPage() {
     }
   }, [inProgressSessions, activeSession]);
 
-  // Only warn on actual page-unload (tab close / hard reload) when an in-progress
-  // count edit has not been flushed to the server. React Router navigation does
-  // NOT fire beforeunload, so SPA sidebar clicks no longer surface a dialog.
-  // `lastEditedId` is cleared by handleSaveStock/handleSavePrice once the write
-  // round-trips, so this flips back to "clean" after every successful save.
-  useEffect(() => {
-    if (!activeSession) return;
-    const hasUnsavedEdits = !!lastEditedId && !!savingId;
-    if (!hasUnsavedEdits) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [activeSession, lastEditedId, savingId]);
-
   useEffect(() => {
     if (!countingParGuideId || !activeSession?.inventory_list_id || !currentRestaurant?.id) return;
     let cancelled = false;
@@ -375,6 +358,23 @@ export default function InventoryCountPage() {
     setManagerParEditItem: editor.setManagerParEditItem,
     setManagerPriceEditItem: editor.setManagerPriceEditItem,
   });
+
+  // Only warn on actual page-unload (tab close / hard reload) when an in-progress
+  // count edit has not been flushed to the server. React Router navigation does
+  // NOT fire beforeunload, so SPA sidebar clicks no longer surface a dialog.
+  // `lastEditedId` is cleared by handleSaveStock/handleSavePrice once the write
+  // round-trips, so this flips back to "clean" after every successful save.
+  useEffect(() => {
+    if (!activeSession) return;
+    const hasUnsavedEdits = !!lastEditedId && !!savingId;
+    if (!hasUnsavedEdits) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [activeSession, lastEditedId, savingId]);
 
   const zoneCount = useMemo(
     () => ({

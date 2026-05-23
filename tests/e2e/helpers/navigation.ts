@@ -5,7 +5,9 @@ export async function openAppRoute(page: Page, path: string): Promise<void> {
   await loginIfNeeded(page);
   await page.goto(path, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
-  await expect(page.getByRole("link", { name: /^overview$/i })).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.locator('[data-sidebar="menu-button"]').filter({ hasText: /^overview$/i }).first(),
+  ).toBeVisible({ timeout: 20_000 });
   await expectAppShell(page);
   await expectNoRuntimeOverlay(page);
 }
