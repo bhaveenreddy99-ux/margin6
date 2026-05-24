@@ -20,6 +20,7 @@ import { InventoryCountHubApprovedSection } from "@/features/inventory-count/com
 import { InventoryCountHubModals } from "@/features/inventory-count/components/InventoryCountHubModals";
 import { InventoryCountHubReviewSection } from "@/features/inventory-count/components/InventoryCountHubReviewSection";
 import { parseInputValue } from "@/lib/inventory-utils";
+import { normalizeSessionItemForUi } from "@/domain/inventory/display/sessionItemStockUi";
 import {
   buildCatalogDefaultParById,
   buildCatalogDefaultParByName,
@@ -445,10 +446,19 @@ export default function InventoryCountPage() {
     setItemById((prev) => {
       const row = prev[id];
       if (!row) return prev;
-      return { ...prev, [id]: { ...row, current_stock: parsed } };
+      const patch: Partial<InventorySessionItemRow> = { current_stock: parsed };
+      if (rawValue.trim() === "") {
+        patch.counted_as = null;
+        patch.counted_value = null;
+        patch.conversion_formula = null;
+      } else if (parsed === 0) {
+        patch.counted_as = "cases";
+        patch.counted_value = 0;
+      }
+      return { ...prev, [id]: { ...row, ...patch } };
     });
     setLastEditedId(id);
-  }, []);
+  }, [setItemById, setLastEditedId]);
 
   const handleUpdatePrice = useCallback((id: string, rawValue: string) => {
     const parsed = parseInputValue(rawValue);
@@ -501,7 +511,9 @@ export default function InventoryCountPage() {
     }
     if (r.data) {
       setItemOrder(r.data.map((i) => i.id));
-      setItemById(Object.fromEntries(r.data.map((i) => [i.id, i])));
+      setItemById(
+        Object.fromEntries(r.data.map((i) => [i.id, normalizeSessionItemForUi(i)])),
+      );
       toast.success("Counts reloaded from server.");
     }
   }, [activeSession?.id, reloadSessionItems, setItemOrder, setItemById]);

@@ -16,6 +16,7 @@ export type InventorySessionUnitedDesktopTableProps = Omit<
   groupedItems: Record<string, InventorySessionItemRow[]>;
   phoneCompact?: boolean;
   hideCategoryHeaders?: boolean;
+  inputResetKey?: number;
 };
 
 export function InventorySessionUnitedDesktopTable(props: InventorySessionUnitedDesktopTableProps) {
@@ -25,6 +26,7 @@ export function InventorySessionUnitedDesktopTable(props: InventorySessionUnited
     globalIndexByItemId,
     phoneCompact = false,
     hideCategoryHeaders = false,
+    inputResetKey = 0,
   } = props;
   const canEditPar = props.canEditPar ?? true;
 
@@ -56,6 +58,7 @@ export function InventorySessionUnitedDesktopTable(props: InventorySessionUnited
     onCommitZoneCount: props.onCommitZoneCount,
     canEditPar,
     phoneCompact,
+    inputResetKey,
   };
 
   return (

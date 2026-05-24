@@ -807,6 +807,7 @@ export function InventorySessionEditor({
             canEditPar={canEditPar}
             phoneCompact={isPhone}
             hideCategoryHeaders={editor.sortMode === "alphabetic"}
+            inputResetKey={editor.countInputResetKey}
           />
         </div>
       )}

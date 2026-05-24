@@ -45,6 +45,7 @@ type RowContext = {
   zoneStripEnabled: boolean;
   getZoneStripConfig: (item: InventorySessionItemRow) => ZoneStripConfig;
   categoryLabel: string;
+  inputResetKey?: number;
 };
 
 function unitTypeLabel(unit: string | null | undefined): string {
@@ -69,6 +70,7 @@ function VirtualRow({
   renderRowActionsMenu,
   getApprovedPar,
   catalogById,
+  inputResetKey = 0,
 }: RowComponentProps<RowContext>) {
   const item = catItems[index];
   if (!item) return null;
@@ -145,6 +147,7 @@ function VirtualRow({
             inputRef={(el) => {
               inputRefs.current[item.id] = el;
             }}
+            inputResetKey={inputResetKey}
           />
         </div>
 

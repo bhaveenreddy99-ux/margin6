@@ -9,6 +9,7 @@ import {
   persistInventorySortMode,
   readInventorySortMode,
 } from "@/features/inventory-count/types/inventorySortMode";
+import { normalizeSessionItemForUi } from "@/domain/inventory/display/sessionItemStockUi";
 
 export type FilterStatus = "all" | "uncounted" | "below_par" | "low" | "critical";
 
@@ -128,6 +129,7 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
   const [smartOrderSession, setSmartOrderSession] = useState<InventorySessionListRow | null>(null);
   const [smartOrderSelectedPar, setSmartOrderSelectedPar] = useState("");
   const [clearEntriesSessionId, setClearEntriesSessionId] = useState<string | null>(null);
+  const [countInputResetKey, setCountInputResetKey] = useState(0);
   const [clearInProgressSessionId, setClearInProgressSessionId] = useState<string | null>(null);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [newCountNameDialogOpen, setNewCountNameDialogOpen] = useState(false);
@@ -172,7 +174,11 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
     }) => {
       setActiveSession(openArgs.session);
       setItemOrder(openArgs.items.map((item) => item.id));
-      setItemById(Object.fromEntries(openArgs.items.map((item) => [item.id, item])));
+      setItemById(
+        Object.fromEntries(
+          openArgs.items.map((item) => [item.id, normalizeSessionItemForUi(item)]),
+        ),
+      );
       setCategoryMode(openArgs.categoryMode);
       setCountingParGuideId(openArgs.countingParGuideId);
       setParColumnVisible(false);
@@ -199,12 +205,19 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
   }, []);
 
   // Local row clear (called from the page only after a successful handleClearEntries DB write).
-  // current_stock is NOT NULL in the schema, so we mirror the DB by writing 0 (counted predicate is `> 0`).
   const clearAllItemEntries = useCallback(() => {
+    setCountInputResetKey((k) => k + 1);
     setItemById((prev) => {
       const next = { ...prev };
       for (const id of Object.keys(next)) {
-        next[id] = { ...next[id], current_stock: 0, inventory_session_item_zones: [] };
+        next[id] = {
+          ...next[id],
+          current_stock: null,
+          inventory_session_item_zones: [],
+          counted_as: null,
+          counted_value: null,
+          conversion_formula: null,
+        };
       }
       return next;
     });
@@ -296,6 +309,7 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
     // Modal triggers
     clearEntriesSessionId,
     setClearEntriesSessionId,
+    countInputResetKey,
     clearInProgressSessionId,
     setClearInProgressSessionId,
     deleteSessionId,

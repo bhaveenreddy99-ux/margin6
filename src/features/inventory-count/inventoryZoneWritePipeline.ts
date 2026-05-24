@@ -98,6 +98,10 @@ export async function writeLegacySessionItemStockAndClearZones(
     patch.counted_as = null;
     patch.counted_value = null;
     patch.conversion_formula = null;
+  } else if (stockVal === 0) {
+    patch.counted_as = meta?.counted_as ?? "cases";
+    patch.counted_value = meta?.counted_value ?? 0;
+    patch.conversion_formula = meta?.conversion_formula ?? null;
   }
 
   const { error: updateError } = await supabase

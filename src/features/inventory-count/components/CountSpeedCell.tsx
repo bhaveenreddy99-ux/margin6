@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type Ref } from "react";
 import { cn } from "@/lib/utils";
-import { inputDisplayValue, parseInputValue } from "@/lib/inventory-utils";
+import { getRowState, parseInputValue } from "@/lib/inventory-utils";
 import { parseUnitsPerPlanningUnitFromPackSize } from "@/domain/inventory/planningUnitMeta";
 import type { InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
 
@@ -27,17 +27,15 @@ function availableUnits(item: InventorySessionItemRow): SpeedCountUnit[] {
   return [...new Set(units)];
 }
 
-function displayForUnit(
-  item: InventorySessionItemRow,
+function stockDisplayValue(
+  stock: number | null | undefined,
   unit: SpeedCountUnit,
   W: number | null,
 ): string {
-  const Qn =
-    item.current_stock == null || !Number.isFinite(Number(item.current_stock))
-      ? null
-      : Math.max(0, Number(item.current_stock));
-  if (Qn === null || Qn === 0) return "";
-  if (unit === "Weight" && W != null && W > 0) {
+  if (stock === null || stock === undefined) return "";
+  const Qn = Number(stock);
+  if (!Number.isFinite(Qn)) return "";
+  if (unit === "Weight" && W != null && W > 0 && Qn > 0) {
     return String(Math.round(Qn * W * 1e6) / 1e6);
   }
   return String(Qn);
@@ -52,6 +50,8 @@ export type CountSpeedCellProps = {
   onKeyDown?: (event: KeyboardEvent, index: number) => void;
   globalIndex?: number;
   inputRef?: Ref<HTMLInputElement | null>;
+  /** Increments on Clear All Counts to force input reset */
+  inputResetKey?: number;
 };
 
 export function CountSpeedCell({
@@ -63,25 +63,44 @@ export function CountSpeedCell({
   onKeyDown,
   globalIndex = 0,
   inputRef,
+  inputResetKey = 0,
 }: CountSpeedCellProps) {
   const W = parseUnitsPerPlanningUnitFromPackSize(item.pack_size);
   const unitOptions = availableUnits(item);
   const [activeUnit, setActiveUnit] = useState<SpeedCountUnit>(unitOptions[0]);
+  const [draft, setDraft] = useState(() =>
+    stockDisplayValue(item.current_stock, unitOptions[0], W),
+  );
   const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     if (!unitOptions.includes(activeUnit)) setActiveUnit(unitOptions[0]);
   }, [item.id, unitOptions, activeUnit]);
 
-  const stock = item.current_stock;
-  const counted = stock != null && Number(stock) > 0;
-  const atOrAbovePar = rowPar > 0 && counted && Number(stock) >= rowPar;
+  useEffect(() => {
+    if (!focused) {
+      setDraft(stockDisplayValue(item.current_stock, activeUnit, W));
+    }
+  }, [item.id, item.current_stock, activeUnit, W, inputResetKey, focused]);
+
+  const effectiveStock = focused ? parseInputValue(draft) : item.current_stock;
+  const rowState = getRowState(effectiveStock);
+  const atOrAbovePar =
+    rowPar > 0 && rowState !== "uncounted" && Number(effectiveStock ?? 0) >= rowPar;
 
   const persist = async (raw: string) => {
-    const parsed = parseInputValue(raw);
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      onUpdateStock(item.id, "");
+      await onSaveStock(item.id, null);
+      setDraft("");
+      return;
+    }
+    const parsed = parseInputValue(trimmed);
     const cases = casesFromUiQuantity(activeUnit, parsed, W);
-    onUpdateStock(item.id, raw);
+    onUpdateStock(item.id, trimmed);
     await onSaveStock(item.id, cases);
+    setDraft(stockDisplayValue(cases, activeUnit, W));
   };
 
   return (
@@ -93,7 +112,12 @@ export function CountSpeedCell({
               key={u}
               type="button"
               disabled={!isCountingEditable}
-              onClick={() => setActiveUnit(u)}
+              onClick={() => {
+                setActiveUnit(u);
+                if (!focused) {
+                  setDraft(stockDisplayValue(item.current_stock, u, W));
+                }
+              }}
               className={cn(
                 "rounded-full px-[5px] py-[2px] text-[9px] font-medium leading-tight transition-colors",
                 activeUnit === u
@@ -112,8 +136,7 @@ export function CountSpeedCell({
         type="text"
         inputMode="decimal"
         readOnly={!isCountingEditable}
-        defaultValue={displayForUnit(item, activeUnit, W)}
-        key={`${item.id}-${activeUnit}-${item.current_stock}`}
+        value={draft}
         placeholder="—"
         onFocus={(e) => {
           setFocused(true);
@@ -123,11 +146,15 @@ export function CountSpeedCell({
           setFocused(false);
           void persist(e.target.value);
         }}
-        onChange={(e) => onUpdateStock(item.id, e.target.value)}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onUpdateStock(item.id, e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             void persist((e.target as HTMLInputElement).value);
+            (e.target as HTMLInputElement).blur();
           }
           onKeyDown?.(e, globalIndex);
         }}

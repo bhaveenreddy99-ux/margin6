@@ -58,6 +58,7 @@ export type InventorySessionDesktopItemRowsProps = {
   /** Phone: hide PAR/Price/UnitSize columns */
   phoneCompact?: boolean;
   hideCategoryHeaders?: boolean;
+  inputResetKey?: number;
 };
 
 export function formatParCell(parValue: number): string {
@@ -143,6 +144,7 @@ export function InventorySessionDesktopItemRows(p: InventorySessionDesktopItemRo
     getApprovedPar,
     catalogById,
     phoneCompact = false,
+    inputResetKey = 0,
   } = p;
 
   return (
@@ -194,6 +196,7 @@ export function InventorySessionDesktopItemRows(p: InventorySessionDesktopItemRo
                   onKeyDown={(e) => onKeyDown(e, globalIdx, "stock")}
                   globalIndex={globalIdx}
                   inputRef={(el) => { inputRefs.current[item.id] = el; }}
+                  inputResetKey={inputResetKey}
                 />
               </div>
               <div role="cell" className="flex justify-center py-2">
@@ -260,6 +263,7 @@ export function InventorySessionDesktopItemRows(p: InventorySessionDesktopItemRo
                 onKeyDown={(e) => onKeyDown(e, globalIdx, "stock")}
                 globalIndex={globalIdx}
                 inputRef={(el) => { inputRefs.current[item.id] = el; }}
+                inputResetKey={inputResetKey}
               />
             </div>
 

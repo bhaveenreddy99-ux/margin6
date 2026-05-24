@@ -73,10 +73,20 @@ export function useItemCommands(deps: ItemCommandDeps) {
     if (sessionLocked(deps.activeSession?.status)) return;
     if (clientOffline()) return;
     const prev = deps.getSessionItem(id);
-    deps.onItemUpdated(id, {
+    const patch: Partial<InventorySessionItemRow> = {
       current_stock: stockVal ?? null,
       inventory_session_item_zones: [],
-    });
+    };
+    if (stockVal === null) {
+      patch.counted_as = null;
+      patch.counted_value = null;
+      patch.conversion_formula = null;
+    } else if (stockVal === 0) {
+      patch.counted_as = "cases";
+      patch.counted_value = 0;
+      patch.conversion_formula = null;
+    }
+    deps.onItemUpdated(id, patch);
     setSavingId(id);
     const result = await writeLegacySessionItemStockAndClearZones(id, stockVal ?? null);
     setSavingId(null);
@@ -172,7 +182,13 @@ export function useItemCommands(deps: ItemCommandDeps) {
     if (sessionLocked(deps.activeSession?.status)) return;
     if (clientOffline()) return;
     const prev = deps.getSessionItem(id);
-    deps.onItemUpdated(id, { current_stock: 0, inventory_session_item_zones: [] });
+    deps.onItemUpdated(id, {
+      current_stock: null,
+      inventory_session_item_zones: [],
+      counted_as: null,
+      counted_value: null,
+      conversion_formula: null,
+    });
     setSavingId(id);
     const result = await writeLegacySessionItemStockAndClearZones(id, null);
     setSavingId(null);
@@ -215,7 +231,12 @@ export function useItemCommands(deps: ItemCommandDeps) {
     // current_stock is NOT NULL — write 0 to "clear" (counted predicate is `> 0`).
     const { error } = await supabase
       .from("inventory_session_items")
-      .update({ current_stock: 0 })
+      .update({
+        current_stock: 0,
+        counted_as: null,
+        counted_value: null,
+        conversion_formula: null,
+      })
       .eq("session_id", sessionId);
     if (error) {
       toast.error(error.message);
