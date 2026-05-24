@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 import { formatNum, inputDisplayValue, parseInputValue } from "@/lib/inventory-utils";
 import { CountSheetItemStockField } from "@/features/inventory-count/components/CountSheetItemStockField";
 import {
-  countRowBorderClass,
-  getCountRowVisualState,
+  countRowSurfaceClass,
+  getCountRowRisk,
 } from "@/features/inventory-count/utils/countRowState";
 import { catalogIdFromSessionItem } from "@/domain/inventory/sessionItemCatalogLink";
 import type { InventoryCatalogItemRow, InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
@@ -140,10 +140,9 @@ export function TabletCountView({
               const sku = item.vendor_sku?.trim() || getProductNumber(item);
               const cid = catalogIdFromSessionItem(item);
               const cat = cid ? (catalogById[cid] ?? null) : null;
-              const visual = getCountRowVisualState({
+              const risk = getCountRowRisk({
                 currentStock: item.current_stock,
                 par: rowPar,
-                focused: focusedId === item.id,
               });
 
               return (
@@ -151,7 +150,7 @@ export function TabletCountView({
                   key={item.id}
                   className={cn(
                     "flex items-center min-h-[72px] border-b border-border/30 px-3 gap-2",
-                    countRowBorderClass(visual),
+                    countRowSurfaceClass(risk),
                     lastEditedId === item.id && "ring-1 ring-primary/20",
                   )}
                 >

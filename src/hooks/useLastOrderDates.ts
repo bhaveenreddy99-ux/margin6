@@ -12,11 +12,13 @@ import { fetchInvoiceDocumentIdsForRestaurant } from "@/lib/procurement-dedupe";
  */
 export function useLastOrderDates(restaurantId: string | undefined, locationId?: string | null) {
   const [dateMap, setDateMap] = useState<Record<string, string>>({});
+  const [dateByItemName, setDateByItemName] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!restaurantId) {
       setDateMap({});
+      setDateByItemName({});
       return;
     }
 
@@ -43,13 +45,12 @@ export function useLastOrderDates(restaurantId: string | undefined, locationId?:
       });
       const invIds = Object.keys(invDates);
 
-      let invItems: { catalog_item_id: string | null; invoice_id: string }[] = [];
+      let invItems: { catalog_item_id: string | null; invoice_id: string; item_name?: string | null }[] = [];
       if (invIds.length > 0) {
         const { data: ii } = await supabase
           .from("invoice_items")
-          .select("catalog_item_id, invoice_id")
-          .in("invoice_id", invIds)
-          .not("catalog_item_id", "is", null);
+          .select("catalog_item_id, invoice_id, item_name")
+          .in("invoice_id", invIds);
         invItems = (ii ?? []) as typeof invItems;
       }
 
@@ -73,39 +74,48 @@ export function useLastOrderDates(restaurantId: string | undefined, locationId?:
         phDateMap[p.id] = p.invoice_date || p.created_at;
       });
 
-      let phItems: { catalog_item_id: string | null; purchase_history_id: string }[] = [];
+      let phItems: {
+        catalog_item_id: string | null;
+        purchase_history_id: string;
+        item_name?: string | null;
+      }[] = [];
       if (phIds.length > 0) {
         const { data: phi } = await supabase
           .from("purchase_history_items")
-          .select("catalog_item_id, purchase_history_id")
-          .in("purchase_history_id", phIds)
-          .not("catalog_item_id", "is", null);
+          .select("catalog_item_id, purchase_history_id, item_name")
+          .in("purchase_history_id", phIds);
         phItems = (phi ?? []) as typeof phItems;
       }
 
       const result: Record<string, string> = {};
+      const byName: Record<string, string> = {};
 
-      const takeMax = (catalogId: string, date: string) => {
-        if (!date) return;
-        if (!result[catalogId] || date > result[catalogId]) {
-          result[catalogId] = date;
+      const takeMax = (target: Record<string, string>, key: string, date: string) => {
+        if (!date || !key) return;
+        if (!target[key] || date > target[key]) {
+          target[key] = date;
         }
       };
 
       invItems.forEach((item) => {
-        if (!item.catalog_item_id) return;
         const date = invDates[item.invoice_id];
-        if (date) takeMax(item.catalog_item_id, date);
+        if (!date) return;
+        if (item.catalog_item_id) takeMax(result, item.catalog_item_id, date);
+        const nameKey = item.item_name?.trim().toLowerCase();
+        if (nameKey) takeMax(byName, nameKey, date);
       });
 
       phItems.forEach((item) => {
-        if (!item.catalog_item_id) return;
         const date = phDateMap[item.purchase_history_id];
-        if (date) takeMax(item.catalog_item_id, date);
+        if (!date) return;
+        if (item.catalog_item_id) takeMax(result, item.catalog_item_id, date);
+        const nameKey = item.item_name?.trim().toLowerCase();
+        if (nameKey) takeMax(byName, nameKey, date);
       });
 
       if (!cancelled) {
         setDateMap(result);
+        setDateByItemName(byName);
         setLoading(false);
       }
     };
@@ -116,5 +126,5 @@ export function useLastOrderDates(restaurantId: string | undefined, locationId?:
     };
   }, [restaurantId, locationId]);
 
-  return { lastOrderDates: dateMap, loading };
+  return { lastOrderDates: dateMap, lastOrderDatesByItemName: dateByItemName, loading };
 }

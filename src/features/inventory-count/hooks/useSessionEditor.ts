@@ -10,7 +10,7 @@ import {
   readInventorySortMode,
 } from "@/features/inventory-count/types/inventorySortMode";
 
-export type FilterStatus = "all" | "uncounted" | "low" | "critical";
+export type FilterStatus = "all" | "uncounted" | "below_par" | "low" | "critical";
 
 export type SessionEditorState = ReturnType<typeof useSessionEditor>;
 

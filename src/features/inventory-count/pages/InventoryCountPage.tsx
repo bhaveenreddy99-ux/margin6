@@ -53,7 +53,7 @@ export default function InventoryCountPage() {
   const isCompact = useIsCompact();
   const networkOnline = useOnlineStatus();
   const locationPerms = useLocationPermissions();
-  const { lastOrderDates } = useLastOrderDates(currentRestaurant?.id, currentLocation?.id);
+  const { lastOrderDates, lastOrderDatesByItemName } = useLastOrderDates(currentRestaurant?.id, currentLocation?.id);
 
   // ── Page-level state (not owned by session editor) ──────────────────────
   const [selectedList, setSelectedList] = useState("");
@@ -218,10 +218,12 @@ export default function InventoryCountPage() {
   const getLastOrderDate = useCallback(
     (itemName: string): string | null => {
       const cat = catalogLookup[itemName];
-      if (!cat) return null;
-      return lastOrderDates[cat.id] || null;
+      if (cat?.id && lastOrderDates[cat.id]) return lastOrderDates[cat.id];
+      const key = itemName?.trim().toLowerCase();
+      if (key && lastOrderDatesByItemName[key]) return lastOrderDatesByItemName[key];
+      return null;
     },
-    [catalogLookup, lastOrderDates],
+    [catalogLookup, lastOrderDates, lastOrderDatesByItemName],
   );
 
   const { filteredItems, globalIndexByItemId, groupedItems, sortedCategoryKeys } = useMemo(

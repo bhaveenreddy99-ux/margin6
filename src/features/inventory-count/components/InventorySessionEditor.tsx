@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ListImperativeAPI } from "react-window";
-import { PhoneCountView } from "@/features/inventory-count/components/PhoneCountView";
-import { TabletCountView } from "@/features/inventory-count/components/TabletCountView";
+import { format } from "date-fns";
 import {
   INVENTORY_SORT_LABELS,
   type InventorySortMode,
 } from "@/features/inventory-count/types/inventorySortMode";
-import { useIsMobile, useIsTablet } from "@/hooks/use-mobile";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { getCountRowRisk } from "@/features/inventory-count/utils/countRowState";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,35 +35,28 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "sonner";
 import {
   ArrowLeft,
   BarChart3,
   BookOpen,
   Check,
-  ChevronRight,
   ClipboardList,
   DollarSign,
   Eraser,
   ExternalLink,
   Eye,
   EyeOff,
-  Filter,
-  ListOrdered,
   Lock,
-  MapPin,
   MoreHorizontal,
   MoreVertical,
   Package,
   Pencil,
   Plus,
   RefreshCw,
-  Send,
   Search,
 } from "lucide-react";
 import ItemIdentityBlock from "@/components/ItemIdentityBlock";
-import { InventorySessionDesktopCategoryList } from "@/features/inventory-count/components/InventorySessionDesktopCategoryList";
 import { InventorySessionUnitedDesktopTable } from "@/features/inventory-count/components/InventorySessionUnitedDesktopTable";
 import { CountSheetItemStockField } from "@/features/inventory-count/components/CountSheetItemStockField";
 import { SessionItemZoneCountStrip } from "@/features/inventory-count/components/SessionItemZoneCountStrip";
@@ -341,24 +334,34 @@ export function InventorySessionEditor({
   }, [zoneCount]);
 
   const isPhone = useIsMobile();
-  const isTablet = useIsTablet();
-  const isDesktop = !isPhone && !isTablet;
-  const useCompactLayout = isTablet;
-  /** Single desktop table: only when no category is large enough to require react-window. */
-  const VIRTUAL_LIST_ROW_THRESHOLD = 80;
-  const useUnitedSessionDesktopTable = useMemo(
-    () =>
-      sortedCategoryKeys.length > 0 &&
-      sortedCategoryKeys.every(
-        (k) => (groupedItems[k]?.length ?? 0) < VIRTUAL_LIST_ROW_THRESHOLD,
-      ),
-    [sortedCategoryKeys, groupedItems],
-  );
+
+  const riskDotCounts = useMemo(() => {
+    let ok = 0;
+    let low = 0;
+    let critical = 0;
+    for (const item of items) {
+      const par = fns.getApprovedPar(item);
+      const risk = getCountRowRisk({ currentStock: item.current_stock, par });
+      if (risk === "ok") ok += 1;
+      else if (risk === "low") low += 1;
+      else if (risk === "critical") critical += 1;
+    }
+    return { ok, low, critical };
+  }, [items, fns]);
+
+  const sessionDateLabel = useMemo(() => {
+    try {
+      return format(new Date(activeSession.updated_at), "MMM d, yyyy");
+    } catch {
+      return "—";
+    }
+  }, [activeSession.updated_at]);
+
+  const locationLabel = currentLocation?.name ?? selectedListName ?? "—";
   const isCountingEditable =
     activeSession.status !== "IN_REVIEW" && activeSession.status !== "APPROVED";
   const canCloudActions = isCountingEditable && networkOnline;
   const showAdvancedListControls = isManagerOrOwner || !isCountingEditable;
-  const remainingItems = Math.max(0, totalItems - countedItems);
 
   const sessionModeBadge =
     activeSession.status === "IN_PROGRESS"
@@ -599,12 +602,10 @@ export function InventorySessionEditor({
   );
 
   return (
-    <div className="space-y-0 animate-fade-in pb-28 lg:pb-4">
-      {/* ═══ STICKY TOP CONTROL BAR ═══ */}
-      {!isPhone && (
-      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm -mx-4 px-4 lg:-mx-0 lg:px-0 border-b border-border/40">
-        {/* Row 1: Breadcrumb + Status Badge */}
-        <div className="flex items-center gap-2 py-3">
+    <div className="space-y-0 animate-fade-in pb-16">
+      {/* ═══ STICKY TOP BAR + PROGRESS + FILTER BAR ═══ */}
+      <div className="sticky top-0 z-20 bg-background -mx-4 px-4 lg:-mx-0 lg:px-0">
+        <div className="flex items-center gap-2 py-2.5 border-b border-border/30">
           <Button
             variant="ghost"
             size="icon"
@@ -614,123 +615,63 @@ export function InventorySessionEditor({
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-              <button
-                type="button"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                onClick={handlers.onLeave}
-              >
-                Inventory Count
-              </button>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
-              <h1 className="text-sm font-semibold truncate min-w-0">{activeSession.name}</h1>
-              <Badge
-                variant="outline"
-                className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${sessionModeBadge.className}`}
-              >
-                {sessionModeBadge.label}
-              </Badge>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              {selectedListName && (
-                <span className="text-xs text-muted-foreground">List: {selectedListName}</span>
-              )}
-              {locations.length > 1 && currentLocation && (
-                <Badge variant="outline" className="text-[10px] gap-1 shrink-0 font-normal">
-                  <MapPin className="h-2.5 w-2.5" />
-                  {currentLocation.name}
-                </Badge>
-              )}
-              {editor.parColumnVisible && countingParGuideName ? (
-                <span className="text-[11px] text-muted-foreground">PAR: {countingParGuideName}</span>
-              ) : null}
-            </div>
+            <p className="text-sm font-medium truncate text-foreground">
+              {activeSession.name} · {locationLabel}
+            </p>
+            <p className="text-[11px] text-muted-foreground truncate">
+              {sessionDateLabel}
+              {countingParGuideName ? ` · PAR: ${countingParGuideName}` : ""}
+            </p>
           </div>
-          <div className="shrink-0 min-w-[50px] text-right hidden lg:block">
-            {savingId && <span className="text-xs text-muted-foreground animate-pulse">Saving…</span>}
-            {!savingId && savedId && (
-              <span className="text-xs text-success flex items-center gap-1 justify-end">
+          <div className="shrink-0 flex items-center gap-2">
+            {savingId ? (
+              <span className="text-xs text-muted-foreground animate-pulse hidden sm:inline">Saving…</span>
+            ) : savedId ? (
+              <span className="text-xs text-success hidden sm:flex items-center gap-1">
                 <Check className="h-3.5 w-3.5" /> Saved
               </span>
+            ) : null}
+            {isCountingEditable && (
+              <Button
+                onClick={() => editor.setSubmitConfirmOpen(true)}
+                className="bg-[#f97316] hover:bg-[#ea580c] text-white h-9 px-3 sm:px-4 text-xs sm:text-sm font-semibold shrink-0"
+                disabled={!canCloudActions || items.length === 0 || submittingForReview}
+              >
+                <span className="hidden sm:inline">Submit for Review</span>
+                <span className="sm:hidden">Submit</span>
+                <span aria-hidden className="ml-0.5">→</span>
+              </Button>
             )}
           </div>
         </div>
 
-        {/* Row 2: Search + Category pills + Filters */}
-        <div className="flex items-center gap-3 pb-3 flex-wrap lg:flex-nowrap">
-          <div className="relative min-w-[180px] lg:min-w-[240px] lg:max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
+        {totalItems > 0 && (
+          <div className="h-1 bg-muted/40 w-full">
+            <div
+              className="h-full bg-[#f97316] transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 px-0 py-2 bg-[#fafafa] border-b border-border/30">
+          <div className="relative flex-1 min-w-[140px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
             <Input
               value={editor.search}
               onChange={(e) => editor.setSearch(e.target.value)}
-              placeholder="Search items…"
-              className="pl-9 h-10 text-sm bg-card border-border/50"
+              placeholder="Search items..."
+              className="pl-8 h-9 text-sm bg-white border-border/50"
             />
           </div>
 
-          {isStaffMenu && (
-            <ToggleGroup
-              type="single"
-              value={editor.categoryMode === "alphabetic" ? "alphabetic" : "list_order"}
-              onValueChange={(v) => {
-                if (v === "list_order" || v === "alphabetic") {
-                  editor.setCategoryMode(v);
-                  editor.setFilterCategory("all");
-                }
-              }}
-              className="inline-flex h-10 shrink-0 rounded-lg border border-border/50 bg-muted/40 p-0.5"
-              aria-label="Item order"
-            >
-              <ToggleGroupItem
-                value="list_order"
-                aria-label="Shelf order"
-                className="h-9 px-2.5 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm"
-              >
-                Shelf order
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="alphabetic"
-                aria-label="Alphabetical A to Z"
-                className="h-9 px-2.5 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm"
-              >
-                A–Z
-              </ToggleGroupItem>
-            </ToggleGroup>
-          )}
-
-          {showAdvancedListControls && !isStaffMenu && (
-            <Select
-              value={editor.categoryMode}
-              onValueChange={(v) => {
-                editor.setCategoryMode(v);
-                editor.setFilterCategory("all");
-              }}
-            >
-              <SelectTrigger className="h-10 w-[170px] text-xs">
-                <ListOrdered className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-                <SelectValue />
+          {allCategoryKeys.length > 1 && (
+            <Select value={editor.filterCategory} onValueChange={editor.setFilterCategory}>
+              <SelectTrigger className="h-9 w-auto min-w-[120px] text-xs rounded-full bg-white border-border/50 px-3">
+                <SelectValue placeholder="By Category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="list_order">List Order</SelectItem>
-                <SelectItem value="custom-categories">AI Categories</SelectItem>
-                <SelectItem value="my-categories">My Categories</SelectItem>
-                <SelectItem value="recently_purchased">Recently purchased</SelectItem>
-                <SelectItem value="alphabetic">Alphabetic</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-
-          {showAdvancedListControls && !isStaffMenu && allCategoryKeys.length > 1 && (
-            <Select
-              value={editor.filterCategory}
-              onValueChange={editor.setFilterCategory}
-            >
-              <SelectTrigger className="h-10 w-[150px] text-xs">
-                <Filter className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Show All</SelectItem>
+                <SelectItem value="all">By Category</SelectItem>
                 {allCategoryKeys.map((cat) => (
                   <SelectItem key={cat} value={cat}>
                     {cat.replace(/\w+/g, (w) => w.charAt(0) + w.slice(1).toLowerCase())}
@@ -744,9 +685,8 @@ export function InventorySessionEditor({
             value={editor.sortMode}
             onValueChange={(v) => editor.setSortMode(v as InventorySortMode)}
           >
-            <SelectTrigger className="h-10 w-[140px] text-xs">
-              <ListOrdered className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              <span className="truncate">Sort: {INVENTORY_SORT_LABELS[editor.sortMode]}</span>
+            <SelectTrigger className="h-9 w-auto min-w-[120px] text-xs rounded-full bg-white border-border/50 px-3">
+              <span className="truncate">{INVENTORY_SORT_LABELS[editor.sortMode]} ▼</span>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="category">By Category</SelectItem>
@@ -755,66 +695,34 @@ export function InventorySessionEditor({
             </SelectContent>
           </Select>
 
-          {/* RIGHT: Filters + Actions — desktop */}
-          <div className="hidden lg:flex items-center gap-2 ml-auto shrink-0">
-            {showAdvancedListControls && (
-              <Select
-                value={editor.statusFilter}
-                onValueChange={(v) => editor.setStatusFilter(v as typeof editor.statusFilter)}
-              >
-                <SelectTrigger className="h-9 w-[130px] text-xs">
-                  <Filter className="h-3.5 w-3.5 mr-1.5" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Show All</SelectItem>
-                  <SelectItem value="uncounted">Uncounted</SelectItem>
-                  <SelectItem value="low">Low Stock</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="h-9 w-9">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {parActionsMenu}
-                {stockFilterMenu}
-                {addItemsMenu}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <Select
+            value={editor.statusFilter}
+            onValueChange={(v) => editor.setStatusFilter(v as typeof editor.statusFilter)}
+          >
+            <SelectTrigger className="h-9 w-auto min-w-[110px] text-xs rounded-full bg-white border-border/50 px-3">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Show All</SelectItem>
+              <SelectItem value="uncounted">Uncounted Only</SelectItem>
+              <SelectItem value="below_par">Below PAR</SelectItem>
+            </SelectContent>
+          </Select>
 
-          {/* Same ⋯ actions on small screens */}
-          <div className="flex lg:hidden items-center gap-2 w-full justify-end">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="h-9 w-9">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {parActionsMenu}
-                {stockFilterMenu}
-                {addItemsMenu}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0 rounded-full bg-white">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {parActionsMenu}
+              {stockFilterMenu}
+              {addItemsMenu}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
-      )}
-
-      {isPhone && (
-        <div className="sticky top-0 z-20 flex items-center gap-2 py-2 border-b border-border/40 bg-background">
-          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={handlers.onLeave}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-sm font-semibold truncate flex-1">{activeSession.name}</h1>
-        </div>
-      )}
 
       {isCountingEditable && !networkOnline && (
         <div
@@ -843,67 +751,6 @@ export function InventorySessionEditor({
         </div>
       )}
 
-      {/* ═══ MOBILE PROGRESS BAR (tablet only — phone uses PhoneCountView) ═══ */}
-      {isTablet && totalItems > 0 && (
-        <div className="pt-2 pb-1 px-1">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-medium text-muted-foreground">{countedItems} of {totalItems} counted</span>
-            <span className="text-[10px] font-semibold text-primary">{Math.round(progressPct)}%</span>
-          </div>
-          <div className="h-2 rounded-full bg-muted/60 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-gradient-orange transition-all duration-500"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* ═══ DESKTOP STATS PANEL — single Overall Progress card ═══ */}
-      {!isPhone && !useCompactLayout && totalItems > 0 && (
-        <div className="flex flex-wrap lg:flex-nowrap items-center gap-x-6 gap-y-4 rounded-xl border border-border/40 bg-card px-6 py-4 mt-4 shadow-sm">
-          <div className="flex-1 min-w-[260px]">
-            <p className="text-xs font-medium text-muted-foreground mb-1">Overall Progress</p>
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-2xl font-bold tabular-nums text-foreground">{countedItems}</span>
-              <span className="text-sm text-muted-foreground font-medium">/ {totalItems} counted</span>
-              <span className="text-sm text-muted-foreground">·</span>
-              <span className="text-sm font-medium tabular-nums text-foreground">{remainingItems} remaining</span>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-              <div className="h-2 flex-1 rounded-full bg-muted/60 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-orange transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <span className="text-xs font-bold text-primary tabular-nums shrink-0">{progressPct}%</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 lg:ml-auto shrink-0 flex-wrap">
-            {isManagerOrOwner && isCountingEditable && (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 text-sm"
-                disabled={!canCloudActions}
-                onClick={() => canCloudActions && editor.setClearEntriesSessionId(activeSession.id)}
-              >
-                Clear All Counts
-              </Button>
-            )}
-            <Button
-              onClick={() => editor.setSubmitConfirmOpen(true)}
-              className="bg-gradient-orange text-white shadow-orange hover:opacity-90 transition-opacity gap-2 h-9 px-5 text-sm font-semibold"
-              disabled={!canCloudActions || items.length === 0 || submittingForReview}
-            >
-              <Send className="h-3.5 w-3.5" /> Submit for Review
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* ═══ MAIN CONTENT ═══ */}
       {filteredItems.length === 0 ? (
         <div className="rounded-xl border border-border/40 bg-card mt-4">
@@ -928,209 +775,61 @@ export function InventorySessionEditor({
             </Button>
           </div>
         </div>
-      ) : isPhone ? (
-        <PhoneCountView
-          filteredItems={filteredItems}
-          sortedCategoryKeys={sortedCategoryKeys}
-          groupedItems={groupedItems}
-          countedItems={countedItems}
-          totalItems={totalItems}
-          progressPct={progressPct}
-          isCountingEditable={isCountingEditable}
-          canCloudActions={canCloudActions}
-          submittingForReview={submittingForReview}
-          getApprovedPar={fns.getApprovedPar}
-          getProductNumber={fns.getProductNumber}
-          getItemCategory={fns.getItemCategory}
-          onUpdateStock={handlers.onUpdateStock}
-          onSaveStock={handlers.onSaveStock}
-          onSaveStockWithConversion={handlers.onSaveStockWithConversion}
-          onSubmitClick={() => editor.setSubmitConfirmOpen(true)}
-        />
-      ) : isTablet ? (
-        <TabletCountView
-          filteredItems={filteredItems}
-          sortedCategoryKeys={sortedCategoryKeys}
-          groupedItems={groupedItems}
-          globalIndexByItemId={globalIndexByItemId}
-          countedItems={countedItems}
-          totalItems={totalItems}
-          progressPct={progressPct}
-          sessionName={activeSession.name}
-          isCountingEditable={isCountingEditable}
-          canCloudActions={canCloudActions}
-          submittingForReview={submittingForReview}
-          simplifyCountingRow={editor.staffCountingFocus}
-          savingId={savingId}
-          savedId={savedId}
-          lastEditedId={editor.lastEditedId}
-          sessionUserId={sessionUserId}
-          catalogById={zoneCount?.catalogById ?? {}}
-          getApprovedPar={fns.getApprovedPar}
-          getProductNumber={fns.getProductNumber}
-          onUpdateStock={handlers.onUpdateStock}
-          onSaveStock={handlers.onSaveStock}
-          onSaveStockWithConversion={handlers.onSaveStockWithConversion}
-          onKeyDown={handleKeyDown}
-          inputRefs={editor.inputRefs}
-          onSubmitClick={() => editor.setSubmitConfirmOpen(true)}
-          filterBar={
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[140px]">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
-                <Input
-                  value={editor.search}
-                  onChange={(e) => editor.setSearch(e.target.value)}
-                  placeholder="Search items…"
-                  className="pl-8 h-9 text-sm"
-                />
-              </div>
-              {allCategoryKeys.length > 1 && (
-                <Select value={editor.filterCategory} onValueChange={editor.setFilterCategory}>
-                  <SelectTrigger className="h-9 w-[130px] text-xs">
-                    <Filter className="h-3 w-3 mr-1" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    {allCategoryKeys.map((cat) => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Select
-                value={editor.sortMode}
-                onValueChange={(v) => editor.setSortMode(v as InventorySortMode)}
-              >
-                <SelectTrigger className="h-9 w-[130px] text-xs">
-                  <ListOrdered className="h-3 w-3 mr-1" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="category">By Category</SelectItem>
-                  <SelectItem value="alphabetic">A → Z</SelectItem>
-                  <SelectItem value="shelf_order">Shelf Order</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          }
-        />
       ) : (
-        /* ─── TABLE LAYOUT: one unified table, or one block per large category (virtual list) ─── */
-        <div ref={editor.sessionListWidthRef} className="mt-4 space-y-6">
-          {useUnitedSessionDesktopTable ? (
-            <div className="overflow-hidden rounded-xl border border-border/40 bg-card">
-              <InventorySessionUnitedDesktopTable
-                sortedCategoryKeys={sortedCategoryKeys}
-                groupedItems={groupedItems}
-                globalIndexByItemId={globalIndexByItemId}
-                riskThresholds={riskThresholds}
-                parColumnVisible={editor.parColumnVisible}
-                simplifyCountingRow={editor.staffCountingFocus}
-                isCountingEditable={isCountingEditable}
-                zoneStripEnabled={false}
-                getZoneStripConfig={getZoneStripConfig}
-                getZoneStripDraftResetNonce={getZoneStripDraftResetNonce}
-                onCommitZoneCount={onCommitZoneCount}
-                onUpdateStock={handlers.onUpdateStock}
-                onSaveStock={handlers.onSaveStock}
-                onSaveStockWithConversion={handlers.onSaveStockWithConversion}
-                sessionUserId={sessionUserId}
-                catalogById={zoneCount?.catalogById ?? {}}
-                onKeyDown={handleKeyDown}
-                inputRefs={editor.inputRefs}
-                formatParColumnCell={formatParColumnCell}
-                getProductNumber={fns.getProductNumber}
-                getLastOrderDate={fns.getLastOrderDate}
-                renderRowActionsMenu={renderRowActionsMenu}
-                savingId={savingId}
-                savedId={savedId}
-                lastEditedId={editor.lastEditedId}
-                getApprovedPar={fns.getApprovedPar}
-                canEditPar={canEditPar}
-              />
-            </div>
-          ) : (
-            sortedCategoryKeys.map((category) => {
-              const catItems = groupedItems[category];
-              return (
-                <div key={category} className="overflow-hidden rounded-xl border border-border/40 bg-card">
-                  <InventorySessionDesktopCategoryList
-                    categoryLabel={category}
-                    catItems={catItems}
-                    globalIndexByItemId={globalIndexByItemId}
-                    riskThresholds={riskThresholds}
-                    parColumnVisible={editor.parColumnVisible}
-                    simplifyCountingRow={editor.staffCountingFocus}
-                    isCountingEditable={isCountingEditable}
-                    zoneStripEnabled={false}
-                    getZoneStripConfig={getZoneStripConfig}
-                    getZoneStripDraftResetNonce={getZoneStripDraftResetNonce}
-                    onCommitZoneCount={onCommitZoneCount}
-                    onUpdateStock={handlers.onUpdateStock}
-                    onSaveStock={handlers.onSaveStock}
-                    onSaveStockWithConversion={handlers.onSaveStockWithConversion}
-                    sessionUserId={sessionUserId}
-                    catalogById={zoneCount?.catalogById ?? {}}
-                    onKeyDown={handleKeyDown}
-                    inputRefs={editor.inputRefs}
-                    formatParColumnCell={formatParColumnCell}
-                    getProductNumber={fns.getProductNumber}
-                    getLastOrderDate={fns.getLastOrderDate}
-                    renderRowActionsMenu={renderRowActionsMenu}
-                    savingId={savingId}
-                    savedId={savedId}
-                    lastEditedId={editor.lastEditedId}
-                    getApprovedPar={fns.getApprovedPar}
-                    canEditPar={canEditPar}
-                    virtualListRef={(api) => {
-                      if (api) {
-                        editor.categoryVirtualListRefs.current[category] = api;
-                      } else {
-                        delete editor.categoryVirtualListRefs.current[category];
-                      }
-                    }}
-                  />
-                </div>
-              );
-            })
-          )}
+        <div ref={editor.sessionListWidthRef} className="mt-2 pb-20">
+          <InventorySessionUnitedDesktopTable
+            sortedCategoryKeys={sortedCategoryKeys}
+            groupedItems={groupedItems}
+            globalIndexByItemId={globalIndexByItemId}
+            riskThresholds={riskThresholds}
+            parColumnVisible={editor.parColumnVisible}
+            simplifyCountingRow={editor.staffCountingFocus}
+            isCountingEditable={isCountingEditable}
+            zoneStripEnabled={false}
+            getZoneStripConfig={getZoneStripConfig}
+            getZoneStripDraftResetNonce={getZoneStripDraftResetNonce}
+            onCommitZoneCount={onCommitZoneCount}
+            onUpdateStock={handlers.onUpdateStock}
+            onSaveStock={handlers.onSaveStock}
+            onSaveStockWithConversion={handlers.onSaveStockWithConversion}
+            sessionUserId={sessionUserId}
+            catalogById={zoneCount?.catalogById ?? {}}
+            onKeyDown={handleKeyDown}
+            inputRefs={editor.inputRefs}
+            formatParColumnCell={formatParColumnCell}
+            getProductNumber={fns.getProductNumber}
+            getLastOrderDate={fns.getLastOrderDate}
+            renderRowActionsMenu={renderRowActionsMenu}
+            savingId={savingId}
+            savedId={savedId}
+            lastEditedId={editor.lastEditedId}
+            getApprovedPar={fns.getApprovedPar}
+            canEditPar={canEditPar}
+            phoneCompact={isPhone}
+            hideCategoryHeaders={editor.sortMode === "alphabetic"}
+          />
         </div>
       )}
 
-      {/* ═══ TABLET STICKY BOTTOM BAR ═══ */}
-      {isTablet && (
-        <div className="fixed bottom-0 left-0 right-0 z-30 bg-background/95 backdrop-blur-md border-t border-border/40 safe-area-bottom">
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="h-1.5 flex-1 rounded-full bg-muted/60 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-orange transition-all"
-                    style={{ width: `${progressPct}%` }}
-                  />
-                </div>
-                <span className="text-[10px] font-medium text-muted-foreground tabular-nums shrink-0">
-                  {countedItems}/{totalItems}
-                </span>
-              </div>
+      {/* ═══ FIXED BOTTOM BAR ═══ */}
+      {totalItems > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-30 bg-[#fafafa] border-t border-border/30 px-3.5 py-2 safe-area-bottom">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-[11px] font-medium text-foreground tabular-nums">
+              {countedItems} of {totalItems} counted ·{" "}
+              <span className="font-bold text-[#f97316]">{progressPct}%</span>
+            </p>
+            <div className="flex items-center gap-3 text-[11px] font-medium shrink-0">
+              <span className="tabular-nums">
+                <span className="text-[#dc2626]">●</span> {riskDotCounts.critical} critical
+              </span>
+              <span className="tabular-nums">
+                <span className="text-[#ca8a04]">●</span> {riskDotCounts.low} low
+              </span>
+              <span className="tabular-nums">
+                <span className="text-[#16a34a]">●</span> {riskDotCounts.ok} ok
+              </span>
             </div>
-            <Button
-              variant={editor.showOnlyEmpty ? "default" : "outline"}
-              size="sm"
-              className={`h-10 text-xs shrink-0 ${editor.showOnlyEmpty ? "bg-foreground text-background" : ""}`}
-              onClick={() => editor.setShowOnlyEmpty(!editor.showOnlyEmpty)}
-            >
-              Uncounted
-            </Button>
-            <Button
-              className="bg-gradient-orange text-white shadow-orange hover:opacity-90 transition-opacity h-11 px-5 text-sm font-semibold shrink-0"
-              onClick={() => editor.setSubmitConfirmOpen(true)}
-              disabled={!canCloudActions || items.length === 0 || submittingForReview}
-            >
-              <Send className="h-4 w-4 mr-1.5" /> Submit
-            </Button>
           </div>
         </div>
       )}

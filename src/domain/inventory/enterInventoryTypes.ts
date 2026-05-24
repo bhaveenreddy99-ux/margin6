@@ -104,7 +104,7 @@ export type ApprovedParLookupArgs = {
   catalogDefaultParByName: Record<string, number>;
 };
 
-export type FilterStatus = "all" | "uncounted" | "low" | "critical";
+export type FilterStatus = "all" | "uncounted" | "below_par" | "low" | "critical";
 export type CategoryMode =
   | "list_order"
   | "custom-categories"

@@ -338,6 +338,12 @@ export function buildInventoryView(args: {
       return false;
     if (args.showOnlyEmpty && Number(item.current_stock) > 0) return false;
     if (args.statusFilter === "uncounted" && getRowState(Number(item.current_stock)) !== "uncounted") return false;
+    if (args.statusFilter === "below_par") {
+      const par = getApprovedPar(item, args.approvedParArgs);
+      const stock = Number(item.current_stock ?? 0);
+      if (getRowState(item.current_stock) === "uncounted") return false;
+      if (par <= 0 || stock >= par) return false;
+    }
     if (args.statusFilter === "low" || args.statusFilter === "critical") {
       const par = getApprovedPar(item, args.approvedParArgs);
       const level = computeRiskLevel(Number(item.current_stock ?? 0), par, args.riskThresholds);

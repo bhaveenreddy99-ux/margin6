@@ -1,6 +1,6 @@
 export type InventorySortMode = "category" | "alphabetic" | "shelf_order";
 
-export const INVENTORY_SORT_STORAGE_KEY = "inv_count_sort_mode";
+export const INVENTORY_SORT_STORAGE_KEY = "margin6_inventory_sort";
 
 export function readInventorySortMode(): InventorySortMode {
   if (typeof window === "undefined") return "category";
