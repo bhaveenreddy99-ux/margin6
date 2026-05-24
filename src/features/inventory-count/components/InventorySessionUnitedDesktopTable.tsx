@@ -105,7 +105,7 @@ export function InventorySessionUnitedDesktopTable(props: InventorySessionUnited
                   globalIndexByItemId={globalIndexByItemId}
                   riskThresholds={props.riskThresholds}
                   showParColumn={false}
-                  colSpan={6}
+                  colSpan={7}
                   simplifyCountingRow={props.simplifyCountingRow}
                   isCountingEditable={props.isCountingEditable}
                   onUpdateStock={props.onUpdateStock}

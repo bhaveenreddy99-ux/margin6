@@ -71,7 +71,7 @@ export default function InventoryCountPage() {
     items, setItemById, setItemOrder,
     staffCountingFocus,
     search, filterCategory, showOnlyEmpty, statusFilter,
-    categoryMode, setCategoryMode,
+    categoryMode, sortMode, setCategoryMode, setSortMode,
     lastEditedId, setLastEditedId,
     submitConfirmOpen,
     parColumnVisible, setParColumnVisible,
@@ -227,22 +227,24 @@ export default function InventoryCountPage() {
   const { filteredItems, globalIndexByItemId, groupedItems, sortedCategoryKeys } = useMemo(
     () => buildInventoryView({
       items, filterCategory, search, showOnlyEmpty, statusFilter, categoryMode,
+      inventorySortMode: sortMode,
       hasMappings, mappedCategories, categoryMapping,
       approvedParArgs: { countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName },
       riskThresholds,
     }),
-    [items, filterCategory, search, showOnlyEmpty, statusFilter, categoryMode, hasMappings, mappedCategories, categoryMapping, countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName, riskThresholds],
+    [items, filterCategory, search, showOnlyEmpty, statusFilter, categoryMode, sortMode, hasMappings, mappedCategories, categoryMapping, countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName, riskThresholds],
   );
 
   // Unfiltered keys so the category filter dropdown always shows all options.
   const { sortedCategoryKeys: allCategoryKeys } = useMemo(
     () => buildInventoryView({
       items, filterCategory: "all", search: "", showOnlyEmpty: false, statusFilter: "all", categoryMode,
+      inventorySortMode: sortMode,
       hasMappings, mappedCategories, categoryMapping,
       approvedParArgs: { countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName },
       riskThresholds,
     }),
-    [items, categoryMode, hasMappings, mappedCategories, categoryMapping, countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName, riskThresholds],
+    [items, categoryMode, sortMode, hasMappings, mappedCategories, categoryMapping, countingParGuideId, countingParByCatalogId, countingParByNormalizedName, approvedParMap, catalogDefaultParById, catalogDefaultParByName, riskThresholds],
   );
 
   // Counted = current_stock entered AND > 0. Matches per-category header logic so

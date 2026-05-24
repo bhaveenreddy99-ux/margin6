@@ -4,6 +4,11 @@ import type {
   InventorySessionItemRow,
   InventorySessionListRow,
 } from "@/domain/inventory/enterInventoryTypes";
+import {
+  type InventorySortMode,
+  persistInventorySortMode,
+  readInventorySortMode,
+} from "@/features/inventory-count/types/inventorySortMode";
 
 export type FilterStatus = "all" | "uncounted" | "low" | "critical";
 
@@ -38,6 +43,11 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
   const [showOnlyEmpty, setShowOnlyEmpty] = useState(false);
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
   const [categoryMode, setCategoryMode] = useState<string>("list_order");
+  const [sortMode, setSortModeState] = useState<InventorySortMode>(() => readInventorySortMode());
+  const setSortMode = useCallback((mode: InventorySortMode) => {
+    setSortModeState(mode);
+    persistInventorySortMode(mode);
+  }, []);
   const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
 
@@ -222,6 +232,8 @@ export function useSessionEditor(args: { isStaffMenu: boolean }) {
     setStatusFilter,
     categoryMode,
     setCategoryMode,
+    sortMode,
+    setSortMode,
     lastEditedId,
     setLastEditedId,
     submitConfirmOpen,

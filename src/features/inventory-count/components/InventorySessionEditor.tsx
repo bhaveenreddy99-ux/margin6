@@ -1,5 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ListImperativeAPI } from "react-window";
+import { PhoneCountView } from "@/features/inventory-count/components/PhoneCountView";
+import { TabletCountView } from "@/features/inventory-count/components/TabletCountView";
+import {
+  INVENTORY_SORT_LABELS,
+  type InventorySortMode,
+} from "@/features/inventory-count/types/inventorySortMode";
+import { useIsMobile, useIsTablet } from "@/hooks/use-mobile";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -333,7 +340,10 @@ export function InventorySessionEditor({
     if (isZoneWriteFailure(r)) toast.error(r.error);
   }, [zoneCount]);
 
-  const useCompactLayout = isCompact;
+  const isPhone = useIsMobile();
+  const isTablet = useIsTablet();
+  const isDesktop = !isPhone && !isTablet;
+  const useCompactLayout = isTablet;
   /** Single desktop table: only when no category is large enough to require react-window. */
   const VIRTUAL_LIST_ROW_THRESHOLD = 80;
   const useUnitedSessionDesktopTable = useMemo(
@@ -591,6 +601,7 @@ export function InventorySessionEditor({
   return (
     <div className="space-y-0 animate-fade-in pb-28 lg:pb-4">
       {/* ═══ STICKY TOP CONTROL BAR ═══ */}
+      {!isPhone && (
       <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm -mx-4 px-4 lg:-mx-0 lg:px-0 border-b border-border/40">
         {/* Row 1: Breadcrumb + Status Badge */}
         <div className="flex items-center gap-2 py-3">
@@ -729,6 +740,21 @@ export function InventorySessionEditor({
             </Select>
           )}
 
+          <Select
+            value={editor.sortMode}
+            onValueChange={(v) => editor.setSortMode(v as InventorySortMode)}
+          >
+            <SelectTrigger className="h-10 w-[140px] text-xs">
+              <ListOrdered className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+              <span className="truncate">Sort: {INVENTORY_SORT_LABELS[editor.sortMode]}</span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="category">By Category</SelectItem>
+              <SelectItem value="alphabetic">A → Z</SelectItem>
+              <SelectItem value="shelf_order">Shelf Order</SelectItem>
+            </SelectContent>
+          </Select>
+
           {/* RIGHT: Filters + Actions — desktop */}
           <div className="hidden lg:flex items-center gap-2 ml-auto shrink-0">
             {showAdvancedListControls && (
@@ -779,6 +805,16 @@ export function InventorySessionEditor({
           </div>
         </div>
       </div>
+      )}
+
+      {isPhone && (
+        <div className="sticky top-0 z-20 flex items-center gap-2 py-2 border-b border-border/40 bg-background">
+          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={handlers.onLeave}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-sm font-semibold truncate flex-1">{activeSession.name}</h1>
+        </div>
+      )}
 
       {isCountingEditable && !networkOnline && (
         <div
@@ -807,8 +843,8 @@ export function InventorySessionEditor({
         </div>
       )}
 
-      {/* ═══ MOBILE PROGRESS BAR ═══ */}
-      {isCompact && totalItems > 0 && (
+      {/* ═══ MOBILE PROGRESS BAR (tablet only — phone uses PhoneCountView) ═══ */}
+      {isTablet && totalItems > 0 && (
         <div className="pt-2 pb-1 px-1">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-medium text-muted-foreground">{countedItems} of {totalItems} counted</span>
@@ -824,7 +860,7 @@ export function InventorySessionEditor({
       )}
 
       {/* ═══ DESKTOP STATS PANEL — single Overall Progress card ═══ */}
-      {!useCompactLayout && totalItems > 0 && (
+      {!isPhone && !useCompactLayout && totalItems > 0 && (
         <div className="flex flex-wrap lg:flex-nowrap items-center gap-x-6 gap-y-4 rounded-xl border border-border/40 bg-card px-6 py-4 mt-4 shadow-sm">
           <div className="flex-1 min-w-[260px]">
             <p className="text-xs font-medium text-muted-foreground mb-1">Overall Progress</p>
@@ -892,248 +928,94 @@ export function InventorySessionEditor({
             </Button>
           </div>
         </div>
-      ) : useCompactLayout ? (
-        /* ─── CARD LAYOUT (mobile/tablet) ─── */
-        <div className="space-y-6 mt-2">
-          {sortedCategoryKeys.map((category) => {
-            const catItems = groupedItems[category];
-            const countedMobile = catItems.filter(
-              (i) => i.current_stock != null && Number(i.current_stock) > 0,
-            ).length;
-            return (
-              <div key={category}>
-                <div className="sticky top-24 z-10 -mx-1 mb-3 flex flex-wrap items-center justify-between gap-2 bg-background/95 px-1 py-1.5 backdrop-blur-sm">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
-                      {category}
-                    </p>
-                    <span className="text-[10px] text-muted-foreground/40 tabular-nums">
-                      ({catItems.length})
-                    </span>
-                  </div>
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-                    {countedMobile}/{catItems.length} counted
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-4">
-                  {catItems.map((item) => {
-                    const globalIdx = filteredItems.indexOf(item);
-                    const onHandLineDual = parseUnitsPerPlanningUnitFromPackSize(item.pack_size) != null;
-                    const stripCfg = getZoneStripConfig(item);
-                    const zoneLine =
-                      stripCfg &&
-                      item.inventory_session_item_zones?.find(
-                        (z) => z.list_category_id === stripCfg.listCategoryId,
-                      );
-                    const rowPar = fns.getApprovedPar(item);
-                    const needQty =
-                      rowPar > 0
-                        ? computeOrderQty(item.current_stock, rowPar, item.unit, item.pack_size)
-                        : null;
-                    const risk = getRisk(item.current_stock, rowPar, riskThresholds);
-                    const rowState = getRowState(item.current_stock);
-                    const isRecentlyEdited = editor.lastEditedId === item.id;
-                    const packRaw = item.pack_size?.trim();
-                    const cid = catalogIdFromSessionItem(item);
-                    const cat = cid ? (zoneCount?.catalogById[cid] ?? null) : null;
-                    const unitPrice = resolveSessionItemUnitPrice(item, cat);
-
-                    return (
-                      <div
-                        key={item.id}
-                        className={`relative rounded-xl border transition-all duration-200 ${
-                          rowState === "counted"
-                            ? "border-success/20 bg-success/[0.03]"
-                            : rowState === "zero"
-                            ? "border-border/30 bg-muted/10"
-                            : "border-border/40 bg-card"
-                        } ${isRecentlyEdited ? "ring-2 ring-primary/20" : ""}`}
-                      >
-                        <div className="space-y-4 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-base font-bold leading-tight text-foreground">{item.item_name}</p>
-                              <ItemIdentityBlock brandName={item.brand_name} className="block mt-0.5" />
-                              {unitPrice != null ? (
-                                <p className="text-sm font-medium text-gray-600 tabular-nums dark:text-gray-300 mt-1">
-                                  {formatCurrency(unitPrice)}
-                                </p>
-                              ) : null}
-                              <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
-                                {fns.getProductNumber(item) && (
-                                  <span className="text-[10px] text-muted-foreground/50">
-                                    #{fns.getProductNumber(item)}
-                                  </span>
-                                )}
-                                {packRaw ? (
-                                  <span className="font-mono text-[10px] text-muted-foreground/50">{packRaw}</span>
-                                ) : null}
-                                {!(isStaffMenu && isCountingEditable) && (
-                                  <span className="text-[10px] text-muted-foreground/50">
-                                    Last: {formatLastOrderedHelper(fns.getLastOrderDate(item.item_name))}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {renderRowActionsMenu(item)}
-                              {risk.level === "NO_PAR" ? (
-                                <span className="text-[10px] text-muted-foreground/40">—</span>
-                              ) : (
-                                <Badge
-                                  className={`${risk.bgClass} ${risk.textClass} border-0 text-[10px] font-medium shrink-0`}
-                                >
-                                  {risk.level === "RED"
-                                    ? (needQty != null && needQty > 0 ? `Need ${needQty}` : "Critical")
-                                    : risk.level === "YELLOW"
-                                      ? "Low"
-                                      : "OK"}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-end gap-4">
-                            <div className="min-w-0 flex-1">
-                              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Count on hand
-                              </label>
-                              {onHandLineDual ? (
-                                <CountSheetItemStockField
-                                  item={item}
-                                  variant="card"
-                                  isCountingEditable={isCountingEditable}
-                                  simplifyCountingRow={false}
-                                  onUpdateStock={handlers.onUpdateStock}
-                                  onSaveStock={async (id, v) => {
-                                    await handlers.onSaveStock(id, v);
-                                  }}
-                                  onKeyDown={(e) => handleKeyDown(e, globalIdx, "stock")}
-                                  globalIndex={globalIdx}
-                                  inputRef={(el) => {
-                                    editor.inputRefs.current[item.id] = el;
-                                  }}
-                                  savingId={savingId}
-                                  savedId={savedId}
-                                  userId={sessionUserId}
-                                  categoryKey={category}
-                                  catalogItem={cat}
-                                  zoneCountingActive={false}
-                                  onSaveStockWithConversion={handlers.onSaveStockWithConversion}
-                                  rowPar={rowPar}
-                                />
-                              ) : (
-                                <div className="flex items-center gap-1.5">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-16 w-12 shrink-0 rounded-lg text-lg"
-                                    disabled={!isCountingEditable}
-                                    onClick={() => {
-                                      const newVal = Math.max(0, Number(item.current_stock ?? 0) - 1);
-                                      handlers.onUpdateStock(item.id, String(newVal));
-                                      void handlers.onSaveStock(item.id, newVal);
-                                    }}
-                                  >
-                                    –
-                                  </Button>
-                                  <CountSheetItemStockField
-                                    item={item}
-                                    variant="card"
-                                    isCountingEditable={isCountingEditable}
-                                    simplifyCountingRow={false}
-                                    onUpdateStock={handlers.onUpdateStock}
-                                    onSaveStock={async (id, v) => {
-                                      await handlers.onSaveStock(id, v);
-                                      jumpToNextEmpty();
-                                    }}
-                                    onKeyDown={(e) => handleKeyDown(e, globalIdx, "stock")}
-                                    globalIndex={globalIdx}
-                                    inputRef={(el) => {
-                                      editor.inputRefs.current[item.id] = el;
-                                    }}
-                                    savingId={savingId}
-                                    savedId={savedId}
-                                    userId={sessionUserId}
-                                    categoryKey={category}
-                                    catalogItem={cat}
-                                    zoneCountingActive={false}
-                                    onSaveStockWithConversion={async (id, p) => {
-                                      await handlers.onSaveStockWithConversion(id, p);
-                                    }}
-                                    rowPar={rowPar}
-                                  />
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-16 w-12 shrink-0 rounded-lg text-lg"
-                                    disabled={!isCountingEditable}
-                                    onClick={() => {
-                                      const newVal = Number(item.current_stock ?? 0) + 1;
-                                      handlers.onUpdateStock(item.id, String(newVal));
-                                      void handlers.onSaveStock(item.id, newVal);
-                                    }}
-                                  >
-                                    +
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                            {editor.parColumnVisible && (
-                              <div className="shrink-0 text-center w-16">
-                                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                                  PAR
-                                </label>
-                                <p className="h-16 flex items-center justify-center gap-1 text-lg font-mono text-muted-foreground/70">
-                                  {formatParColumnCell(item)}
-                                  {!canEditPar ? (
-                                    <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="PAR locked by owner" />
-                                  ) : null}
-                                </p>
-                              </div>
-                            )}
-                            {needQty !== null && (
-                              <div className="shrink-0 text-center w-16">
-                                <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                                  Need
-                                </label>
-                                <p
-                                  className={`h-16 flex items-center justify-center text-lg font-mono font-bold ${
-                                    needQty > 0 ? "text-blue-800 dark:text-blue-300" : "text-muted-foreground/60"
-                                  }`}
-                                >
-                                  {formatNum(needQty)}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-
-
-                          {(savingId === item.id || savedId === item.id) && (
-                            <div className="flex items-center gap-1.5">
-                              {savingId === item.id && (
-                                <span className="text-[10px] text-muted-foreground animate-pulse">
-                                  Saving…
-                                </span>
-                              )}
-                              {savedId === item.id && (
-                                <span className="text-[10px] text-success flex items-center gap-0.5">
-                                  <Check className="h-3 w-3" /> Saved
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+      ) : isPhone ? (
+        <PhoneCountView
+          filteredItems={filteredItems}
+          sortedCategoryKeys={sortedCategoryKeys}
+          groupedItems={groupedItems}
+          countedItems={countedItems}
+          totalItems={totalItems}
+          progressPct={progressPct}
+          isCountingEditable={isCountingEditable}
+          canCloudActions={canCloudActions}
+          submittingForReview={submittingForReview}
+          getApprovedPar={fns.getApprovedPar}
+          getProductNumber={fns.getProductNumber}
+          getItemCategory={fns.getItemCategory}
+          onUpdateStock={handlers.onUpdateStock}
+          onSaveStock={handlers.onSaveStock}
+          onSaveStockWithConversion={handlers.onSaveStockWithConversion}
+          onSubmitClick={() => editor.setSubmitConfirmOpen(true)}
+        />
+      ) : isTablet ? (
+        <TabletCountView
+          filteredItems={filteredItems}
+          sortedCategoryKeys={sortedCategoryKeys}
+          groupedItems={groupedItems}
+          globalIndexByItemId={globalIndexByItemId}
+          countedItems={countedItems}
+          totalItems={totalItems}
+          progressPct={progressPct}
+          sessionName={activeSession.name}
+          isCountingEditable={isCountingEditable}
+          canCloudActions={canCloudActions}
+          submittingForReview={submittingForReview}
+          simplifyCountingRow={editor.staffCountingFocus}
+          savingId={savingId}
+          savedId={savedId}
+          lastEditedId={editor.lastEditedId}
+          sessionUserId={sessionUserId}
+          catalogById={zoneCount?.catalogById ?? {}}
+          getApprovedPar={fns.getApprovedPar}
+          getProductNumber={fns.getProductNumber}
+          onUpdateStock={handlers.onUpdateStock}
+          onSaveStock={handlers.onSaveStock}
+          onSaveStockWithConversion={handlers.onSaveStockWithConversion}
+          onKeyDown={handleKeyDown}
+          inputRefs={editor.inputRefs}
+          onSubmitClick={() => editor.setSubmitConfirmOpen(true)}
+          filterBar={
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[140px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+                <Input
+                  value={editor.search}
+                  onChange={(e) => editor.setSearch(e.target.value)}
+                  placeholder="Search items…"
+                  className="pl-8 h-9 text-sm"
+                />
               </div>
-            );
-          })}
-        </div>
+              {allCategoryKeys.length > 1 && (
+                <Select value={editor.filterCategory} onValueChange={editor.setFilterCategory}>
+                  <SelectTrigger className="h-9 w-[130px] text-xs">
+                    <Filter className="h-3 w-3 mr-1" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    {allCategoryKeys.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select
+                value={editor.sortMode}
+                onValueChange={(v) => editor.setSortMode(v as InventorySortMode)}
+              >
+                <SelectTrigger className="h-9 w-[130px] text-xs">
+                  <ListOrdered className="h-3 w-3 mr-1" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="category">By Category</SelectItem>
+                  <SelectItem value="alphabetic">A → Z</SelectItem>
+                  <SelectItem value="shelf_order">Shelf Order</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          }
+        />
       ) : (
         /* ─── TABLE LAYOUT: one unified table, or one block per large category (virtual list) ─── */
         <div ref={editor.sessionListWidthRef} className="mt-4 space-y-6">
@@ -1217,8 +1099,8 @@ export function InventorySessionEditor({
         </div>
       )}
 
-      {/* ═══ TABLET/MOBILE STICKY BOTTOM BAR ═══ */}
-      {isCompact && (
+      {/* ═══ TABLET STICKY BOTTOM BAR ═══ */}
+      {isTablet && (
         <div className="fixed bottom-0 left-0 right-0 z-30 bg-background/95 backdrop-blur-md border-t border-border/40 safe-area-bottom">
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="flex-1 min-w-0">

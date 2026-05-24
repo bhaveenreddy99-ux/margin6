@@ -22,6 +22,7 @@ import {
   resolveItemCategoryEntry,
   type CategoryMappingResult,
 } from "@/hooks/useCategoryMapping";
+import type { InventorySortMode } from "@/features/inventory-count/types/inventorySortMode";
 import type {
   ApprovedParLookupArgs,
   CatalogLookupEntry,
@@ -50,32 +51,75 @@ export function normalizeInventoryCategoryKey(name: string | null | undefined): 
 }
 
 /**
- * Collapses duplicate session lines that share the same catalog item or normalized name
- * (first row wins — matches how operators expect one row per product on the count sheet).
+ * Collapses duplicate session lines that share the same catalog item or normalized name.
+ * On collision: prefer linked catalog row; if tie, keep most recently updated.
  */
+function dedupeKeyForRow(row: InventorySessionItemRow): string {
+  const cid = row.catalog_item_id?.trim();
+  if (cid) return `c:${cid}`;
+  const name = row.item_name?.trim();
+  if (name) return `n:${normalizeItemName(name)}`;
+  return `id:${row.id}`;
+}
+
+function rowRecencyScore(row: InventorySessionItemRow): number {
+  const ts = row.updated_at ?? row.created_at;
+  if (ts) {
+    const ms = new Date(ts).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  return Number(row.version ?? 0);
+}
+
+function isRowLinked(row: InventorySessionItemRow): boolean {
+  return !!row.catalog_item_id?.trim();
+}
+
+function pickDedupeWinner(
+  existing: InventorySessionItemRow,
+  candidate: InventorySessionItemRow,
+): InventorySessionItemRow {
+  const existingLinked = isRowLinked(existing);
+  const candidateLinked = isRowLinked(candidate);
+  if (existingLinked && !candidateLinked) return existing;
+  if (!existingLinked && candidateLinked) return candidate;
+  return rowRecencyScore(candidate) >= rowRecencyScore(existing) ? candidate : existing;
+}
+
 export function dedupeSessionItemsByCatalogOrName(
   rows: InventorySessionItemRow[],
 ): InventorySessionItemRow[] {
-  const seen = new Set<string>();
-  const out: InventorySessionItemRow[] = [];
+  const bestByKey = new Map<string, InventorySessionItemRow>();
+
   for (const row of rows) {
-    const cid = row.catalog_item_id?.trim();
-    const key = cid
-      ? `c:${cid}`
-      : row.item_name?.trim()
-        ? `n:${normalizeItemName(row.item_name)}`
-        : `id:${row.id}`;
-    if (seen.has(key)) {
-      if (key.startsWith("n:")) {
-        console.warn(
-          "[dedupeSessionItems] Name collision — dropping duplicate unlinked row.",
-          { dropped_id: row.id, item_name: row.item_name, key },
-        );
-      }
+    const key = dedupeKeyForRow(row);
+    const existing = bestByKey.get(key);
+    if (!existing) {
+      bestByKey.set(key, row);
       continue;
     }
-    seen.add(key);
-    out.push(row);
+    const winner = pickDedupeWinner(existing, row);
+    const dropped = winner.id === existing.id ? row : existing;
+    if (dropped.id !== winner.id) {
+      console.warn("[dedupeSessionItems] Duplicate row resolved — dropping:", {
+        dropped_id: dropped.id,
+        kept_id: winner.id,
+        item_name: dropped.item_name,
+        key,
+      });
+    }
+    bestByKey.set(key, winner);
+  }
+
+  const emitted = new Set<string>();
+  const out: InventorySessionItemRow[] = [];
+  for (const row of rows) {
+    const key = dedupeKeyForRow(row);
+    if (emitted.has(key)) continue;
+    const winner = bestByKey.get(key);
+    if (!winner) continue;
+    out.push(winner);
+    emitted.add(key);
   }
   return out;
 }
@@ -272,12 +316,14 @@ export function buildInventoryView(args: {
   showOnlyEmpty: boolean;
   statusFilter: FilterStatus;
   categoryMode: string;
+  inventorySortMode?: InventorySortMode;
   hasMappings: boolean;
   mappedCategories: MappedCategory[];
   categoryMapping: CategoryMappingResult;
   approvedParArgs: ApprovedParLookupArgs;
   riskThresholds: RiskThresholds;
 }) {
+  const sortMode = args.inventorySortMode ?? "category";
   const filteredItems = args.items.filter((item) => {
     const category = getItemCategory({
       item,
@@ -301,7 +347,27 @@ export function buildInventoryView(args: {
     return true;
   });
 
-  if (args.hasMappings) {
+  if (sortMode === "alphabetic") {
+    filteredItems.sort((left, right) => left.item_name.localeCompare(right.item_name));
+  } else if (sortMode === "shelf_order") {
+    filteredItems.sort((left, right) => {
+      const leftSort = getItemSortOrder({
+        item: left,
+        hasMappings: args.hasMappings,
+        categoryMapping: args.categoryMapping,
+      });
+      const rightSort = getItemSortOrder({
+        item: right,
+        hasMappings: args.hasMappings,
+        categoryMapping: args.categoryMapping,
+      });
+      if (leftSort !== rightSort) return leftSort - rightSort;
+      const leftDisp = left.display_order ?? 999999;
+      const rightDisp = right.display_order ?? 999999;
+      if (leftDisp !== rightDisp) return leftDisp - rightDisp;
+      return left.item_name.localeCompare(right.item_name);
+    });
+  } else if (args.hasMappings) {
     filteredItems.sort((left, right) => {
       const leftCategory = getItemCategory({
         item: left,
@@ -339,12 +405,25 @@ export function buildInventoryView(args: {
     });
   }
 
-  if (args.categoryMode === "alphabetic") {
+  if (args.categoryMode === "alphabetic" && sortMode === "category") {
     filteredItems.sort((left, right) => left.item_name.localeCompare(right.item_name));
   }
 
   const globalIndexByItemId = new Map<string, number>();
   filteredItems.forEach((item, index) => globalIndexByItemId.set(item.id, index));
+
+  if (sortMode === "alphabetic") {
+    const flatKey = "ALL ITEMS";
+    return {
+      filteredItems,
+      globalIndexByItemId,
+      categories: args.hasMappings
+        ? args.mappedCategories.map((c) => normalizeInventoryCategoryKey(c.name))
+        : [...new Set(args.items.map((item) => normalizeInventoryCategoryKey(item.category)))],
+      groupedItems: { [flatKey]: filteredItems },
+      sortedCategoryKeys: filteredItems.length > 0 ? [flatKey] : [],
+    };
+  }
 
   const groupedItems = filteredItems.reduce<Record<string, InventorySessionItemRow[]>>(
     (acc, item) => {
@@ -360,6 +439,28 @@ export function buildInventoryView(args: {
     },
     {},
   );
+
+  if (sortMode === "shelf_order") {
+    for (const key of Object.keys(groupedItems)) {
+      groupedItems[key].sort((left, right) => {
+        const leftSort = getItemSortOrder({
+          item: left,
+          hasMappings: args.hasMappings,
+          categoryMapping: args.categoryMapping,
+        });
+        const rightSort = getItemSortOrder({
+          item: right,
+          hasMappings: args.hasMappings,
+          categoryMapping: args.categoryMapping,
+        });
+        if (leftSort !== rightSort) return leftSort - rightSort;
+        const leftDisp = left.display_order ?? 999999;
+        const rightDisp = right.display_order ?? 999999;
+        if (leftDisp !== rightDisp) return leftDisp - rightDisp;
+        return left.item_name.localeCompare(right.item_name);
+      });
+    }
+  }
 
   const sortOrderForCategoryKey = (key: string) =>
     args.mappedCategories.find((c) => normalizeInventoryCategoryKey(c.name) === key)?.sort_order ??

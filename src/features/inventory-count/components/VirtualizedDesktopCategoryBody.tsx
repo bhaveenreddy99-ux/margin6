@@ -2,21 +2,24 @@ import { useCallback, type KeyboardEvent, type MutableRefObject, type ReactNode,
 import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
 import { CountSheetItemStockField } from "@/features/inventory-count/components/CountSheetItemStockField";
 import {
-  StatusPill,
   COUNT_CELL_ITEM,
   COUNT_CELL_PACK,
   COUNT_CELL_PAR,
+  COUNT_CELL_UNIT,
   COUNT_CELL_COUNT,
-  COUNT_CELL_PRICE,
-  COUNT_CELL_STATUS,
+  COUNT_CELL_NEED,
   COUNT_CELL_ACTIONS,
   formatParCell,
 } from "@/features/inventory-count/components/InventorySessionDesktopItemRows";
+import {
+  countRowBorderClass,
+  countRowNeedLabel,
+  getCountRowVisualState,
+} from "@/features/inventory-count/utils/countRowState";
 import type {
   InventorySessionDesktopCategoryListProps,
   ZoneStripConfig,
 } from "@/features/inventory-count/types/inventorySessionDesktopCategoryListTypes";
-import { resolveSessionItemUnitPrice } from "@/domain/inventory/display/itemUnitPrice";
 import {
   DESKTOP_CATEGORY_LIST_MAX_HEIGHT,
   INVENTORY_COUNT_GRID_TEMPLATE,
@@ -24,13 +27,7 @@ import {
 } from "@/domain/inventory/display/sessionDisplayHelpers";
 import type { InventoryCatalogItemRow, InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
 import type { SaveStockWithConversionPayload } from "@/features/inventory-count/hooks/useItemCommands";
-import {
-  computeOrderQty,
-  formatCurrency,
-  getRisk,
-  getRowBgClass,
-  type RiskThresholds,
-} from "@/lib/inventory-utils";
+import type { RiskThresholds } from "@/lib/inventory-utils";
 import { cn } from "@/lib/utils";
 
 type RowContext = {
@@ -97,23 +94,28 @@ function VirtualRow({
   if (!item) return null;
   const globalIdx = globalIndexByItemId.get(item.id) ?? 0;
   const rowPar = getApprovedPar(item);
-  const needQty =
-    rowPar > 0 ? computeOrderQty(item.current_stock, rowPar, item.unit, item.pack_size) : null;
-  const risk = getRisk(item.current_stock, rowPar, riskThresholds);
-  const rowBg = getRowBgClass(item.current_stock);
-  const isRecentlyEdited = lastEditedId === item.id;
+  const need = countRowNeedLabel({
+    currentStock: item.current_stock,
+    par: rowPar,
+    unit: item.unit,
+    packSize: item.pack_size,
+  });
+  const visual = getCountRowVisualState({
+    currentStock: item.current_stock,
+    par: rowPar,
+    focused: lastEditedId === item.id,
+  });
+  const unitLabel = (item.unit || "Cases").trim();
   const strip = zoneStripEnabled ? getZoneStripConfig(item) : null;
   const sku = item.vendor_sku?.trim() || getProductNumber(item);
   const cat = item.catalog_item_id ? (catalogById[item.catalog_item_id] ?? null) : null;
-  const unitPrice = resolveSessionItemUnitPrice(item, cat);
 
   return (
     <div style={{ ...style, overflow: "hidden" }} className="box-border" role="row">
       <div
         className={cn(
-          "grid items-center border-b border-border/30 transition-colors hover:bg-muted/[0.18]",
-          rowBg,
-          isRecentlyEdited && "bg-blue-50/90 dark:bg-blue-950/25",
+          "grid items-center border-b border-border/30 transition-colors hover:bg-muted/[0.12]",
+          countRowBorderClass(visual),
         )}
         style={{ gridTemplateColumns: INVENTORY_COUNT_GRID_TEMPLATE, height: "100%" }}
       >
@@ -149,6 +151,12 @@ function VirtualRow({
           </span>
         </div>
 
+        <div role="cell" className={COUNT_CELL_UNIT}>
+          <span className="rounded-full border border-input bg-muted/40 px-2 py-1 text-[10px] font-semibold uppercase">
+            {unitLabel}
+          </span>
+        </div>
+
         {/* COUNT */}
         <div role="cell" className={COUNT_CELL_COUNT}>
           <CountSheetItemStockField
@@ -176,16 +184,8 @@ function VirtualRow({
           />
         </div>
 
-        {/* PRICE */}
-        <div role="cell" className={COUNT_CELL_PRICE}>
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
-            {unitPrice != null ? formatCurrency(unitPrice) : "—"}
-          </span>
-        </div>
-
-        {/* STATUS */}
-        <div role="cell" className={COUNT_CELL_STATUS}>
-          <StatusPill risk={risk} needQty={needQty} />
+        <div role="cell" className={COUNT_CELL_NEED}>
+          <span className={need.className}>{need.text}</span>
         </div>
 
         {/* ACTIONS */}

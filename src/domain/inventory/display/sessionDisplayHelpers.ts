@@ -27,13 +27,13 @@ export const MOBILE_COUNT_CARD_HEIGHT = 268;
  *   - the normal item rows (InventorySessionDesktopItemRows)
  *   - the virtualized item rows (VirtualizedDesktopCategoryBody)
  *
- * Columns:  ITEM | PACK / SIZE | PAR | COUNT | PRICE | STATUS | ACTIONS
+ * Columns:  ITEM | PACK / SIZE | PAR | UNIT | COUNT | NEED | ACTIONS
  */
 export const INVENTORY_COUNT_GRID_TEMPLATE =
-  "minmax(300px, 3fr) minmax(120px, 1fr) 80px minmax(260px, 1.8fr) minmax(100px, 0.8fr) minmax(120px, 0.8fr) 48px";
+  "minmax(260px, 3fr) minmax(100px, 0.9fr) 72px minmax(110px, 1fr) minmax(200px, 1.6fr) 88px 48px";
 
-/** Sum of column minimums — applied as min-width on the row container so narrow viewports scroll horizontally instead of squashing cells. */
-export const INVENTORY_COUNT_MIN_WIDTH = 1028;
+/** Sum of column minimums */
+export const INVENTORY_COUNT_MIN_WIDTH = 978;
 
 /**
  * @deprecated Kept only to avoid touching legacy callers in one shot —
