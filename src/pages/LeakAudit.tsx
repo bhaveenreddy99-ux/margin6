@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import {
   ArrowRight,
+  BarChart3,
   ChefHat,
   CheckCircle2,
+  ClipboardList,
   Download,
   FileText,
+  Info,
   Loader2,
   TrendingDown,
   Upload,
@@ -398,6 +401,33 @@ function ProcessingScreen({ message }: { message: string }) {
   );
 }
 
+function itemEstimatedWeeklyLoss(lineTotal: number, lossRate: number): number {
+  return lineTotal * lossRate;
+}
+
+function realNumberSteps() {
+  return [
+    {
+      icon: FileText,
+      label: "Step 1",
+      title: "All your invoices",
+      desc: "Forward every vendor invoice to your unique Margin6 email address. We parse them automatically.",
+    },
+    {
+      icon: ClipboardList,
+      label: "Step 2",
+      title: "One inventory count",
+      desc: "Count your stock once. Takes 15 minutes. Shows exactly what you have vs what you should have.",
+    },
+    {
+      icon: BarChart3,
+      label: "Step 3",
+      title: "This week's sales",
+      desc: "Enter your gross sales for the week. Takes 2 minutes. Unlocks your real food cost percentage.",
+    },
+  ] as const;
+}
+
 // ── Results screen ────────────────────────────────────────────────────────
 function ResultsScreen({
   result,
@@ -409,6 +439,7 @@ function ResultsScreen({
   onReset: () => void;
 }) {
   const lossRatePct = Math.round(result.loss_rate * 1000) / 10;
+  const steps = realNumberSteps();
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -419,6 +450,15 @@ function ResultsScreen({
         <h1 className="mt-1 text-2xl sm:text-3xl font-extrabold tracking-tight">
           Your Leak Report
         </h1>
+      </div>
+
+      <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
+        <Info className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+        <p className="text-sm text-amber-800">
+          This is an estimate based on industry averages — not your real loss number. Upload all
+          your invoices, do one inventory count, and enter your weekly sales to see your exact
+          number.
+        </p>
       </div>
 
       <div className="rounded-2xl border border-destructive/20 bg-gradient-to-br from-destructive/5 to-transparent p-7 text-center">
@@ -457,35 +497,104 @@ function ResultsScreen({
 
       <div className="rounded-xl border border-border/50 p-5">
         <h2 className="text-sm font-bold tracking-tight">
-          Your highest-cost items this week
+          Estimated loss by item
         </h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Each item&apos;s share of your {lossRatePct.toFixed(0)}% estimated weekly leak
+        </p>
         {result.top_items.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            We couldn't extract individual line items from that invoice.
+            We couldn&apos;t extract individual line items from that invoice.
           </p>
         ) : (
-          <ol className="mt-3 space-y-1.5">
-            {result.top_items.map((it, i) => (
-              <li
-                key={`${it.item_name}-${i}`}
-                className="flex items-center gap-3 rounded-lg border border-border/40 px-3 py-2"
-              >
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[11px] font-bold text-muted-foreground tabular-nums">
-                  {i + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{it.item_name}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    {it.vendor_name}
-                  </p>
-                </div>
-                <span className="text-sm font-bold font-mono tabular-nums shrink-0">
-                  {fmtUsd(it.line_total, 2)}
-                </span>
-              </li>
-            ))}
+          <ol className="mt-4 space-y-4">
+            {result.top_items.map((it, i) => {
+              const estLoss = itemEstimatedWeeklyLoss(it.line_total, result.loss_rate);
+              const barWidth =
+                result.total_spend > 0
+                  ? Math.min(100, (it.line_total / result.total_spend) * 100)
+                  : 0;
+
+              return (
+                <li key={`${it.item_name}-${i}`} className="space-y-2">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[11px] font-bold text-muted-foreground tabular-nums shrink-0 mt-0.5">
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{it.item_name}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {it.vendor_name}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 space-y-0.5">
+                      <p className="text-[11px] text-muted-foreground tabular-nums">
+                        Spend: {fmtUsd(it.line_total, 0)}
+                      </p>
+                      <p className="text-xs font-semibold tabular-nums text-[hsl(25,95%,53%)]">
+                        Loss est: ~{fmtUsd(estLoss, 0)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="ml-9 h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-[hsl(25,95%,53%)]"
+                      style={{ width: `${barWidth}%` }}
+                    />
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         )}
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-lg font-bold tracking-tight text-center">
+          Want your real number?
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {steps.map((step) => (
+            <div
+              key={step.label}
+              className="rounded-xl border border-border/50 p-4 space-y-2"
+            >
+              <step.icon className="h-5 w-5 text-[hsl(25,95%,53%)]" />
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {step.label}
+              </p>
+              <p className="text-sm font-bold">{step.title}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{step.desc}</p>
+            </div>
+          ))}
+        </div>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+          <p className="text-sm font-semibold text-emerald-900 mb-2">
+            After these 3 steps Margin6 shows you:
+          </p>
+          <ul className="space-y-1.5 text-sm text-emerald-800">
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+              Exact dollar amount lost — not an estimate
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+              Which vendor raised prices on you
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+              Which items are bleeding money
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+              Your real food cost percentage
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+              What to fix first this week
+            </li>
+          </ul>
+        </div>
       </div>
 
       <div className="rounded-xl border border-amber-200/70 bg-amber-50/80 p-4 dark:border-amber-800/50 dark:bg-amber-950/30">
@@ -498,20 +607,27 @@ function ResultsScreen({
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Button
-          size="lg"
-          onClick={onDownloadPdf}
-          className="bg-gradient-orange shadow-orange text-white gap-2 hover:opacity-90 flex-1"
-        >
-          <Download className="h-4 w-4" />
-          Download My Free Report (PDF)
-        </Button>
-        <Link to="/signup" className="flex-1">
-          <Button size="lg" variant="outline" className="w-full gap-2">
-            Start Tracking Free → Create Account
+      <div className="flex flex-col gap-3">
+        <Link to="/signup">
+          <Button
+            size="lg"
+            className="w-full bg-gradient-orange shadow-orange text-white gap-2 hover:opacity-90"
+          >
+            Get My Real Number Free <ArrowRight className="h-4 w-4" />
           </Button>
         </Link>
+        <p className="text-[11px] text-muted-foreground text-center">
+          14-day free trial · No credit card
+        </p>
+        <Button
+          size="lg"
+          variant="outline"
+          onClick={onDownloadPdf}
+          className="w-full gap-2"
+        >
+          <Download className="h-4 w-4" />
+          Download This Estimate (PDF)
+        </Button>
       </div>
 
       <button
@@ -575,7 +691,22 @@ function generateLeakAuditPdf(result: AuditResult) {
   doc.setFontSize(34);
   doc.text(fmtUsd(result.estimated_weekly_leak), margin, y);
 
-  y += 36;
+  y += 22;
+
+  // Estimate disclaimer
+  doc.setFillColor(254, 243, 199);
+  doc.setDrawColor(253, 230, 138);
+  const disclaimerLines = doc.splitTextToSize(
+    "⚠ ESTIMATE ONLY: This figure is based on the industry-average 8% food cost loss rate applied to your invoice spend. Your actual losses may be significantly higher or lower. To find your real number, sign up free at margin6.com",
+    pageWidth - margin * 2 - 20,
+  );
+  const disclaimerHeight = disclaimerLines.length * 12 + 16;
+  doc.roundedRect(margin, y, pageWidth - margin * 2, disclaimerHeight, 6, 6, "FD");
+  doc.setTextColor(146, 64, 14);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(disclaimerLines, margin + 10, y + 14);
+  y += disclaimerHeight + 16;
 
   // Breakdown table
   doc.setTextColor(...dark);
@@ -611,7 +742,7 @@ function generateLeakAuditPdf(result: AuditResult) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(...dark);
-  doc.text("Top 5 items by cost", margin, y);
+  doc.text("Top 5 items — estimated weekly loss", margin, y);
   y += 14;
 
   if (result.top_items.length === 0) {
@@ -625,8 +756,8 @@ function generateLeakAuditPdf(result: AuditResult) {
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...muted);
     doc.text("ITEM", margin, y);
-    doc.text("VENDOR", margin + 220, y);
-    doc.text("COST", pageWidth - margin, y, { align: "right" });
+    doc.text("SPEND", pageWidth - margin - 120, y, { align: "right" });
+    doc.text("EST. LOSS", pageWidth - margin, y, { align: "right" });
     y += 12;
 
     doc.setFont("helvetica", "normal");
@@ -635,18 +766,34 @@ function generateLeakAuditPdf(result: AuditResult) {
     for (const it of result.top_items) {
       doc.setDrawColor(229, 231, 235);
       doc.line(margin, y + 6, pageWidth - margin, y + 6);
-      const name = it.item_name.length > 36 ? `${it.item_name.slice(0, 33)}…` : it.item_name;
-      const vendor = it.vendor_name.length > 22 ? `${it.vendor_name.slice(0, 19)}…` : it.vendor_name;
+      const name = it.item_name.length > 32 ? `${it.item_name.slice(0, 29)}…` : it.item_name;
+      const vendor = it.vendor_name.length > 28 ? `${it.vendor_name.slice(0, 25)}…` : it.vendor_name;
+      const estLoss = itemEstimatedWeeklyLoss(it.line_total, result.loss_rate);
       doc.text(name, margin, y);
       doc.setTextColor(...muted);
-      doc.text(vendor, margin + 220, y);
+      doc.setFontSize(8);
+      doc.text(vendor, margin, y + 10);
+      doc.setFontSize(10);
       doc.setTextColor(...dark);
-      doc.text(fmtUsd(it.line_total, 2), pageWidth - margin, y, { align: "right" });
-      y += 20;
+      doc.text(fmtUsd(it.line_total, 2), pageWidth - margin - 120, y, { align: "right" });
+      doc.setTextColor(...accent);
+      doc.text(`~${fmtUsd(estLoss, 2)}`, pageWidth - margin, y, { align: "right" });
+      doc.setTextColor(...dark);
+      y += 24;
     }
   }
 
-  y += 8;
+  y += 10;
+
+  doc.setTextColor(...muted);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  const exactLossLines = doc.splitTextToSize(
+    "To find your exact loss: upload all invoices + complete one inventory count + enter weekly sales at margin6.com — takes under 10 minutes.",
+    pageWidth - margin * 2,
+  );
+  doc.text(exactLossLines, margin, y);
+  y += exactLossLines.length * 12 + 8;
 
   // Insight callout
   doc.setFillColor(254, 243, 199);
