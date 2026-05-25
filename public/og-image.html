@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1200px;
+    height: 630px;
+    background: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 80px;
+    position: relative;
+    overflow: hidden;
+  }
+  .accent {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: #f97316;
+  }
+  .logo {
+    font-size: 32px;
+    font-weight: 700;
+    color: #111;
+    margin-bottom: 24px;
+  }
+  .logo span { color: #f97316; }
+  .headline {
+    font-size: 56px;
+    font-weight: 700;
+    color: #111;
+    line-height: 1.1;
+    margin-bottom: 20px;
+    max-width: 700px;
+  }
+  .sub {
+    font-size: 24px;
+    color: #666;
+    max-width: 600px;
+    line-height: 1.4;
+    margin-bottom: 40px;
+  }
+  .pills {
+    display: flex;
+    gap: 12px;
+  }
+  .pill {
+    background: #fff7ed;
+    border: 1.5px solid #fed7aa;
+    color: #c2410c;
+    padding: 8px 18px;
+    border-radius: 100px;
+    font-size: 16px;
+    font-weight: 500;
+  }
+  .widget {
+    position: absolute;
+    right: 80px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #fff;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 28px;
+    width: 300px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  }
+  .widget-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #dc2626;
+    margin-bottom: 8px;
+  }
+  .widget-number {
+    font-size: 52px;
+    font-weight: 700;
+    color: #dc2626;
+    line-height: 1;
+    margin-bottom: 16px;
+  }
+  .widget-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 0.5px solid #f3f4f6;
+    font-size: 13px;
+  }
+  .widget-row:last-child { border-bottom: none; }
+  .widget-row span:first-child { color: #6b7280; }
+  .widget-row span:last-child { color: #f97316; font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="accent"></div>
+
+  <div class="logo">Margin<span>6</span></div>
+
+  <div class="headline">Know exactly what your restaurant lost this week.</div>
+
+  <div class="sub">No POS required. Live in 10 minutes.</div>
+
+  <div class="pills">
+    <div class="pill">Free 14-day trial</div>
+    <div class="pill">No credit card</div>
+  </div>
+
+  <div class="widget">
+    <div class="widget-label">Money Lost This Period</div>
+    <div class="widget-number">$342</div>
+    <div class="widget-row">
+      <span>Waste</span><span>$32 →</span>
+    </div>
+    <div class="widget-row">
+      <span>Price hikes</span><span>$43 →</span>
+    </div>
+    <div class="widget-row">
+      <span>Overstock</span><span>$0 →</span>
+    </div>
+    <div class="widget-row">
+      <span>Shrinkage</span><span>$85 →</span>
+    </div>
+  </div>
+</body>
+</html>
