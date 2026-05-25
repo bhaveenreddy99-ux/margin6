@@ -393,9 +393,16 @@ export function getCurrentMappings(args: {
 }
 
 export function filterCatalogItems(items: CatalogItem[], detailSearch: string): CatalogItem[] {
-  if (!detailSearch) return items;
-  const normalizedSearch = detailSearch.toLowerCase();
-  return items.filter((item) => item.item_name.toLowerCase().includes(normalizedSearch));
+  if (!detailSearch.trim()) return items;
+  const q = detailSearch.toLowerCase().trim();
+  return items.filter((item) =>
+    (item.item_name ?? "").toLowerCase().includes(q) ||
+    (item.vendor_sku ?? "").toLowerCase().includes(q) ||
+    (item.brand_name ?? "").toLowerCase().includes(q) ||
+    (item.vendor_name ?? "").toLowerCase().includes(q) ||
+    (item.pack_size ?? "").toLowerCase().includes(q) ||
+    (item.category ?? "").toLowerCase().includes(q)
+  );
 }
 
 function groupByCategoryMaps(args: {
