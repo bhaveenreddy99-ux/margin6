@@ -2,6 +2,9 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import Sitemap from "vite-plugin-sitemap";
+
+const publicSitemapRoutes = ["/pricing", "/audit", "/login", "/signup", "/demo-live"];
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -18,7 +21,15 @@ export default defineConfig(({ mode }) => {
       },
     },
     // lovable-tagger can break HMR; opt in via VITE_LOVABLE_TAGGER=true in .env
-    plugins: [react(), useLovableTagger && componentTagger()].filter(Boolean),
+    plugins: [
+      react(),
+      useLovableTagger && componentTagger(),
+      Sitemap({
+        hostname: "https://margin6.com",
+        dynamicRoutes: publicSitemapRoutes,
+        generateRobotsTxt: false,
+      }),
+    ].filter(Boolean),
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
