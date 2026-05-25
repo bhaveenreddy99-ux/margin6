@@ -1,5 +1,6 @@
 import { useCallback, type KeyboardEvent, type MutableRefObject, type ReactNode, type Ref } from "react";
 import { List, type ListImperativeAPI, type RowComponentProps } from "react-window";
+import { CountItemIdentityLines } from "@/features/inventory-count/components/CountItemIdentityLines";
 import { CountSpeedCell } from "@/features/inventory-count/components/CountSpeedCell";
 import {
   formatParCell,
@@ -18,7 +19,6 @@ import {
   DESKTOP_CATEGORY_LIST_MAX_HEIGHT,
   INVENTORY_COUNT_GRID_TEMPLATE,
   desktopSessionRowHeight,
-  formatLastOrdered,
 } from "@/domain/inventory/display/sessionDisplayHelpers";
 import { resolveSessionItemUnitPrice } from "@/domain/inventory/display/itemUnitPrice";
 import type { InventoryCatalogItemRow, InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
@@ -83,7 +83,6 @@ function VirtualRow({
     unit: item.unit,
     packSize: item.pack_size,
   });
-  const sku = item.vendor_sku?.trim() || getProductNumber(item);
   const cat = item.catalog_item_id ? (catalogById[item.catalog_item_id] ?? null) : null;
   const unitPrice = resolveSessionItemUnitPrice(item, cat);
   const lastIso = getLastOrderDate(item.item_name);
@@ -102,20 +101,14 @@ function VirtualRow({
       >
         <div role="cell" className="pl-3 pr-2 py-2 min-w-0 flex items-center gap-1">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium truncate max-w-[180px] text-foreground">
-              {item.item_name}
-            </p>
-            {sku ? (
-              <p className="text-[10px] text-muted-foreground mt-px">#{sku}</p>
-            ) : null}
-            <p
-              className={cn(
-                "text-[10px] mt-px",
-                lastRecent ? "text-[#f97316]" : "text-muted-foreground",
-              )}
-            >
-              Last: {formatLastOrdered(lastIso)}
-            </p>
+            <CountItemIdentityLines
+              item={item}
+              catalog={cat}
+              getProductNumber={getProductNumber}
+              showLastOrdered
+              lastIso={lastIso}
+              lastRecent={lastRecent}
+            />
           </div>
           <div className="opacity-0 group-hover:opacity-100 shrink-0" onClick={(e) => e.stopPropagation()}>
             {renderRowActionsMenu(item)}

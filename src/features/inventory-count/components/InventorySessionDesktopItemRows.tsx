@@ -1,10 +1,10 @@
 import { type ReactNode } from "react";
+import { CountItemIdentityLines } from "@/features/inventory-count/components/CountItemIdentityLines";
 import { CountSpeedCell } from "@/features/inventory-count/components/CountSpeedCell";
 import { resolveSessionItemUnitPrice } from "@/domain/inventory/display/itemUnitPrice";
 import {
   INVENTORY_COUNT_GRID_TEMPLATE,
   INVENTORY_COUNT_PHONE_GRID_TEMPLATE,
-  formatLastOrdered,
 } from "@/domain/inventory/display/sessionDisplayHelpers";
 import type { InventoryCatalogItemRow, InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
 import type { ZoneStripConfig } from "@/features/inventory-count/types/inventorySessionDesktopCategoryListTypes";
@@ -159,7 +159,6 @@ export function InventorySessionDesktopItemRows(p: InventorySessionDesktopItemRo
           unit: item.unit,
           packSize: item.pack_size,
         });
-        const sku = item.vendor_sku?.trim() || getProductNumber(item);
         const cat = item.catalog_item_id ? (catalogById[item.catalog_item_id] ?? null) : null;
         const unitPrice = resolveSessionItemUnitPrice(item, cat);
         const lastIso = getLastOrderDate(item.item_name);
@@ -179,12 +178,11 @@ export function InventorySessionDesktopItemRows(p: InventorySessionDesktopItemRo
               style={{ gridTemplateColumns: INVENTORY_COUNT_PHONE_GRID_TEMPLATE }}
             >
               <div role="cell" className="pl-3 pr-2 py-2 min-w-0">
-                <p className="text-xs font-medium truncate max-w-[180px] text-foreground">
-                  {item.item_name}
-                </p>
-                {sku ? (
-                  <p className="text-[10px] text-muted-foreground mt-px">#{sku}</p>
-                ) : null}
+                <CountItemIdentityLines
+                  item={item}
+                  catalog={cat}
+                  getProductNumber={getProductNumber}
+                />
               </div>
               <div role="cell" className="flex justify-center py-1">
                 <CountSpeedCell
@@ -218,20 +216,14 @@ export function InventorySessionDesktopItemRows(p: InventorySessionDesktopItemRo
           >
             <div role="cell" className="pl-3 pr-2 py-2 min-w-0 flex items-center gap-1">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium truncate max-w-[180px] text-foreground">
-                  {item.item_name}
-                </p>
-                {sku ? (
-                  <p className="text-[10px] text-muted-foreground mt-px">#{sku}</p>
-                ) : null}
-                <p
-                  className={cn(
-                    "text-[10px] mt-px",
-                    lastRecent ? "text-[#f97316]" : "text-muted-foreground",
-                  )}
-                >
-                  Last: {formatLastOrdered(lastIso)}
-                </p>
+                <CountItemIdentityLines
+                  item={item}
+                  catalog={cat}
+                  getProductNumber={getProductNumber}
+                  showLastOrdered
+                  lastIso={lastIso}
+                  lastRecent={lastRecent}
+                />
               </div>
               {renderRowActionsMenu ? (
                 <div className="opacity-0 group-hover:opacity-100 shrink-0">

@@ -1,4 +1,5 @@
 import { computeOrderQty, formatCurrency, formatNum, getRisk, type RiskThresholds } from "@/lib/inventory-utils";
+import { CountItemIdentityLines } from "@/features/inventory-count/components/CountItemIdentityLines";
 import { resolveSessionItemUnitPrice } from "@/domain/inventory/display/itemUnitPrice";
 import { CountSheetItemStockField } from "@/features/inventory-count/components/CountSheetItemStockField";
 import type { InventoryCatalogItemRow, InventorySessionItemRow } from "@/domain/inventory/enterInventoryTypes";
@@ -102,7 +103,6 @@ function PhoneFastRow({
   const risk = getRisk(item.current_stock, rowPar, riskThresholds);
   const isCounted = item.current_stock != null && Number(item.current_stock) > 0;
   const cat = item.catalog_item_id ? (catalogById[item.catalog_item_id] ?? null) : null;
-  const sku = item.vendor_sku?.trim() || getProductNumber(item);
   const isRecentlyEdited = lastEditedId === item.id;
 
   return (
@@ -117,11 +117,11 @@ function PhoneFastRow({
       {/* Row 1: item info + status badge */}
       <div className="flex items-start justify-between gap-3 mb-2.5">
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold leading-snug text-foreground truncate">{item.item_name}</p>
-          <p className="text-[11px] text-muted-foreground/70 mt-0.5 truncate">
-            {[item.vendor_name?.trim(), item.pack_size?.trim(), sku ? `#${sku}` : null]
-              .filter(Boolean).join(" · ")}
-          </p>
+          <CountItemIdentityLines
+            item={item}
+            catalog={cat}
+            getProductNumber={getProductNumber}
+          />
           {showParColumn && rowPar > 0 && (
             <p className="text-[11px] text-muted-foreground mt-0.5">
               PAR: <span className="font-mono font-semibold text-foreground">{formatParColumnCell(item)}</span>
