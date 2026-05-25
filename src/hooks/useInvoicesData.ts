@@ -17,6 +17,7 @@ import type {
   SmartOrderRunOption,
 } from "@/domain/invoices/invoicesPageTypes";
 import type { LinkedSmartOrderLine } from "@/components/invoices/types";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 type UseInvoicesDataArgs = {
   currentRestaurantId: string | null | undefined;
@@ -62,7 +63,7 @@ export function useInvoicesData({
       .order("created_at", { ascending: false });
 
     if (currentLocationId) {
-      query = query.eq("location_id", currentLocationId);
+      query = withLocationOrNull(query, currentLocationId);
     }
 
     if (dateRange !== "all") {
@@ -160,7 +161,7 @@ export function useInvoicesData({
       .eq("restaurant_id", currentRestaurantId)
       .eq("status", "APPROVED");
     if (currentLocationId) {
-      sessionQuery = sessionQuery.eq("location_id", currentLocationId);
+      sessionQuery = withLocationOrNull(sessionQuery, currentLocationId);
     }
     sessionQuery
       .order("approved_at", { ascending: false })

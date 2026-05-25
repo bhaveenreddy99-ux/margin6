@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useLocationPermissions } from "@/hooks/useLocationPermissions";
 import { useAuth } from "@/contexts/AuthContext";
@@ -315,7 +316,7 @@ export default function SmartOrderPage() {
         .order("created_at", { ascending: false });
 
       if (currentLocation?.id) {
-        query = query.eq("location_id", currentLocation.id);
+        query = withLocationOrNull(query, currentLocation.id);
       }
 
       if (listFilter !== "all") {

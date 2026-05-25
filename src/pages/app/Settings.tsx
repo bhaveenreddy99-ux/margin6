@@ -180,7 +180,8 @@ function ProfileSection() {
     setSavingProfile(true);
     const { error } = await supabase
       .from("profiles")
-      .upsert({ id: user.id, full_name: fullName.trim() }, { onConflict: "id" });
+      .update({ full_name: fullName.trim() })
+      .eq("id", user.id);
     setSavingProfile(false);
     if (error) toast.error("Could not save");
     else toast.success("Profile updated");

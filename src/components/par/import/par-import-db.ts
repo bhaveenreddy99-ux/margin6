@@ -80,25 +80,6 @@ export async function importIntoGuide(
   let updated = 0;
 
   for (const row of rowsToProcess) {
-    if (row.action === "create_catalog" && row.matchType === "unmatched" && listId) {
-      const { data: newCatalog } = await supabase
-        .from("inventory_catalog_items")
-        .insert({
-          restaurant_id: ctx.restaurantId,
-          inventory_list_id: listId,
-          item_name: row.itemName,
-          category: row.category,
-          unit: row.unit,
-          pack_size: row.packSize,
-          vendor_sku: row.vendorSku,
-          product_number: row.vendorSku,
-          brand_name: row.brand,
-        })
-        .select("id")
-        .single();
-      if (newCatalog) row.catalogItemId = newCatalog.id;
-    }
-
     if (row.action === "map_to_catalog" && row.manualCatalogId) {
       row.catalogItemId = row.manualCatalogId;
     }

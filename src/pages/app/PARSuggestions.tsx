@@ -105,9 +105,8 @@ export default function PARSuggestionsPage() {
     if (!currentRestaurant || selectedList === "all") { setParGuides([]); setSelectedGuide("all"); return; }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let guideQ: any = supabase.from("par_guides").select("id, name").eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", selectedList);
-    if (currentLocation?.id) guideQ = guideQ.eq("location_id", currentLocation.id);
     guideQ.then(({ data }: { data: { id: string; name: string }[] | null }) => { if (data) setParGuides(data); setSelectedGuide("all"); });
-  }, [selectedList, currentRestaurant, currentLocation?.id]);
+  }, [selectedList, currentRestaurant?.id]);
 
   // ─── Shared PAR computation ──────────────────────────────────────────────
   const generateSuggestions = useCallback(async () => {
@@ -180,7 +179,6 @@ export default function PARSuggestionsPage() {
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let existingGuideQ: any = supabase.from("par_guides").select("id").eq("restaurant_id", currentRestaurant.id).eq("inventory_list_id", listId);
-      if (currentLocation?.id) existingGuideQ = existingGuideQ.eq("location_id", currentLocation.id);
       const { data: guides } = await existingGuideQ.limit(1);
       targetGuideId = guides?.[0]?.id;
 

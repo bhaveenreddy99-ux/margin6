@@ -1,5 +1,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeRiskLevel } from "../../../src/lib/inventory-utils.ts";
+
+type RiskLevel = "NO_PAR" | "RED" | "YELLOW" | "GREEN";
+
+function computeRiskLevel(
+  currentStock: number | null | undefined,
+  parLevel: number | null | undefined,
+  thresholds?: { redThresholdPercent?: number; yellowThresholdPercent?: number },
+): RiskLevel {
+  const stock = currentStock ?? 0;
+  if (parLevel == null || parLevel <= 0) return "NO_PAR";
+  const red = thresholds?.redThresholdPercent ?? 50;
+  const yellow = thresholds?.yellowThresholdPercent ?? 100;
+  const percent = Math.round((stock / parLevel) * 100);
+  if (stock <= 0 || percent <= red) return "RED";
+  if (percent <= yellow) return "YELLOW";
+  return "GREEN";
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

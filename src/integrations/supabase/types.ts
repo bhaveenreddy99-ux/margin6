@@ -3170,6 +3170,7 @@ export type Database = {
       }
       waste_log: {
         Row: {
+          catalog_item_id: string | null
           created_at: string
           id: string
           item_name: string
@@ -3181,8 +3182,11 @@ export type Database = {
           quantity_unit: string | null
           reason: string
           restaurant_id: string
+          total_cost: number | null
+          unit_cost: number | null
         }
         Insert: {
+          catalog_item_id?: string | null
           created_at?: string
           id?: string
           item_name: string
@@ -3194,8 +3198,11 @@ export type Database = {
           quantity_unit?: string | null
           reason: string
           restaurant_id: string
+          total_cost?: number | null
+          unit_cost?: number | null
         }
         Update: {
+          catalog_item_id?: string | null
           created_at?: string
           id?: string
           item_name?: string
@@ -3207,8 +3214,17 @@ export type Database = {
           quantity_unit?: string | null
           reason?: string
           restaurant_id?: string
+          total_cost?: number | null
+          unit_cost?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "waste_log_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "waste_log_location_id_fkey"
             columns: ["location_id"]

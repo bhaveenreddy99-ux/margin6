@@ -270,7 +270,7 @@ Deno.serve(async (req) => {
             invoice_id:      invoiceId,
             item_name:       String(r.item_name ?? "").trim(),
             product_number:  r.product_number ? String(r.product_number).trim() : null,
-            quantity:        qty,
+            quantity_invoiced: qty,
             unit_cost:       unitCost,
             total_cost:      totalCost,
             unit:            r.unit       ? String(r.unit).trim()       : null,

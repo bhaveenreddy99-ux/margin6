@@ -19,6 +19,7 @@ import type {
   ParGuidePickerOption,
   SessionMetaRow,
 } from "@/features/inventory-count/types";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import { loadSessionItemsWithZones } from "@/domain/inventory/loadSessionItemsWithZones";
 
 export async function fetchInventoryLists(currentRestaurantId: string) {
@@ -56,7 +57,7 @@ export async function fetchApprovedSessionDates(currentRestaurantId: string, loc
     .eq("status", "APPROVED")
     .not("approved_at", "is", null)
     .order("approved_at", { ascending: false });
-  if (locationId) query = query.eq("location_id", locationId);
+  if (locationId) query = withLocationOrNull(query, locationId);
   return query as unknown as Promise<{
     data: Array<Pick<InventorySessionListRow, "inventory_list_id" | "approved_at">> | null;
   }>;
@@ -116,8 +117,7 @@ export async function fetchLatestParGuide(
   const client = supabaseClient ?? supabase;
   const baseQuery = client.from("par_guides").select("id").eq("inventory_list_id", inventoryListId);
   const withRestaurant = restaurantId ? baseQuery.eq("restaurant_id", restaurantId) : baseQuery;
-  const withLocation = locationId ? withRestaurant.eq("location_id", locationId) : withRestaurant;
-  return withLocation.order("created_at", { ascending: false }).limit(1).maybeSingle() as unknown as {
+  return withRestaurant.order("created_at", { ascending: false }).limit(1).maybeSingle() as unknown as {
     data: Pick<ParGuideRow, "id"> | null;
     error: { message: string } | null;
   };
@@ -252,13 +252,12 @@ export async function fetchSmartOrderSettings(currentRestaurantId: string) {
 export async function fetchParGuidesForSelectedList(
   currentRestaurantId: string,
   inventoryListId: string,
-  locationId?: string | null,
+  _locationId?: string | null,
 ) {
-  const baseQuery = supabase
+  return supabase
     .from("par_guides")
     .select("*")
     .eq("restaurant_id", currentRestaurantId)
-    .eq("inventory_list_id", inventoryListId);
-  return (locationId ? baseQuery.eq("location_id", locationId) : baseQuery)
+    .eq("inventory_list_id", inventoryListId)
     .order("updated_at", { ascending: false });
 }

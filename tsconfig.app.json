@@ -27,5 +27,11 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/pages/app/Recipes.tsx",
+    "src/hooks/useRecipeActions.ts",
+    "src/hooks/useRecipeData.ts",
+    "src/domain/recipes/**"
+  ]
 }

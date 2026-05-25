@@ -15,6 +15,7 @@ function catalog(overrides: Partial<InventoryCatalogItemRow> = {}): InventoryCat
     category: null,
     cost_unit: null,
     created_at: "",
+    current_stock: null,
     default_par_level: null,
     default_unit_cost: null,
     inventory_list_id: "list-1",
