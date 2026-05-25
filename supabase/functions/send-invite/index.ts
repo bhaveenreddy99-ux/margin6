@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
     }
 
     // Build signup URL with invitation token
-    const signupUrl = `${app_url || "https://id-preview--becfa30f-14a6-440a-b0ac-ad6fd5044b5b.lovable.app"}/signup?invite=${invitation.token}`;
+    const signupUrl = `${app_url || "https://margin6.com"}/signup?invite=${invitation.token}`;
 
     // Send email via Resend
     const emailHtml = `
