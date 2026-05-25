@@ -34,7 +34,7 @@ function isParMissing(parLevel: number | null | undefined): boolean {
 type ParFilterMode = "all" | "missing" | "set";
 
 export default function PARManagementPage() {
-  const { currentRestaurant, currentLocation, locations } = useRestaurant();
+  const { currentRestaurant, currentLocation, locations, loading: restaurantLoading } = useRestaurant();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -72,7 +72,7 @@ export default function PARManagementPage() {
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
-    if (!currentRestaurant) return;
+    if (restaurantLoading || !currentRestaurant) return;
     let cancelled = false;
     parDeepLinkAppliedRef.current = null;
     setSelectedList("");
@@ -89,13 +89,11 @@ export default function PARManagementPage() {
         if (cancelled) return;
         if (listErr) toast.error(`Could not load inventory lists: ${listErr.message}`);
         else if (listData) setLists(listData);
-        let guideQuery = supabase
+        const { data: guideData, error: guideErr } = await supabase
           .from("par_guides")
           .select("*")
           .eq("restaurant_id", currentRestaurant.id)
           .order("created_at", { ascending: false });
-        if (currentLocation?.id) guideQuery = guideQuery.eq("location_id", currentLocation.id);
-        const { data: guideData, error: guideErr } = await guideQuery;
         if (cancelled) return;
         if (guideErr) {
           toast.error(`Could not load PAR guides: ${guideErr.message}`);
@@ -113,7 +111,7 @@ export default function PARManagementPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [currentRestaurant, currentLocation?.id]);
+  }, [restaurantLoading, currentRestaurant?.id]);
 
   useEffect(() => {
     if (!guideOpen) {
@@ -675,7 +673,7 @@ export default function PARManagementPage() {
     return locations.find(l => l.id === locId)?.name || null;
   };
 
-  if (loading) {
+  if (restaurantLoading || !currentRestaurant || loading) {
     return (
       <div className="space-y-6 animate-fade-in">
         <Skeleton className="h-6 w-40" />
