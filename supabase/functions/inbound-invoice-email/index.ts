@@ -25,6 +25,15 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  APP_BASE_URL,
+  emailWrapper,
+  formatUsd,
+  invoiceEmailAlreadySent,
+  normalizeItemName,
+  resolveOwnerManagerMembers,
+  sendMargin6Email,
+} from "../_shared/margin6Email.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -325,34 +334,241 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── 9. Notify OWNER + MANAGER ───────────────────────────────────────────
-  const { data: members } = await supabase
-    .from("restaurant_members")
-    .select("user_id")
-    .eq("restaurant_id", restaurantId)
-    .in("role", ["OWNER", "MANAGER"]);
-
-  const vendorLabel = (parseResult as Record<string, unknown> | null)?.vendor_name
-    ? String((parseResult as Record<string, unknown>).vendor_name)
+  // ── 9. Notify OWNER + MANAGER (in-app + email) ─────────────────────────
+  const parseOk = parseResult != null && typeof parseResult === "object" && !parseResult.error;
+  const vendorName = parseOk && parseResult?.vendor_name
+    ? String(parseResult.vendor_name).trim()
     : payload.from ?? "a vendor";
 
-  const notifRows = (members ?? []).map((m: { user_id: string }) => ({
+  const { data: restaurant } = await supabase
+    .from("restaurants")
+    .select("name")
+    .eq("id", restaurantId)
+    .maybeSingle();
+
+  const restaurantName = restaurant?.name ?? "Your restaurant";
+  const members = await resolveOwnerManagerMembers(supabase, restaurantId);
+  const notifType = parseOk ? "INVOICE_PARSED" : "INVOICE_PARSE_FAILED";
+  const alreadyEmailed = await invoiceEmailAlreadySent(supabase, restaurantId, invoiceId);
+
+  const { data: invoiceRow } = await supabase
+    .from("invoices")
+    .select("vendor_name, invoice_number, invoice_date, invoice_total")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  const parsedItems = parseOk && Array.isArray(parseResult?.items) ? parseResult.items as Array<Record<string, unknown>> : [];
+  const itemCount = parsedItems.length;
+  const invoiceTotal = Number(invoiceRow?.invoice_total ?? parseResult?.total ?? 0);
+  const invoiceNumber = invoiceRow?.invoice_number ?? parseResult?.invoice_number ?? "—";
+  const invoiceDate = invoiceRow?.invoice_date ?? parseResult?.invoice_date ?? "—";
+
+  const notifRows = members.map((member) => ({
     restaurant_id: restaurantId!,
-    user_id:       m.user_id,
-    type:          "INVOICE_EMAIL_RECEIVED",
-    title:         `New invoice received from ${vendorLabel}`,
-    message:       `An invoice was emailed to ${matchedAddress} — open Invoices to review and post it.`,
-    severity:      "INFO",
+    user_id: member.user_id,
+    type: notifType,
+    title: parseOk
+      ? `Invoice parsed from ${vendorName}`
+      : `Invoice received but could not be parsed`,
+    message: parseOk
+      ? `${itemCount} items · ${formatUsd(invoiceTotal)} total — review in Invoices`
+      : `Email from ${payload.from} needs manual review`,
+    severity: parseOk ? "INFO" : "WARNING",
     data: {
       invoice_id: invoiceId,
-      from:       payload.from,
-      subject:    payload.subject,
-      parsed:     parseResult != null && !parseResult.error,
+      from: payload.from,
+      subject: payload.subject,
+      parsed: parseOk,
+      email_sent: false,
     },
   }));
 
   if (notifRows.length > 0) {
     await supabase.from("notifications").insert(notifRows);
+  }
+
+  if (!alreadyEmailed) {
+    let emailSent = false;
+
+    if (parseOk) {
+      const topLines = parsedItems
+        .slice()
+        .sort((a, b) => Number(b.line_total ?? 0) - Number(a.line_total ?? 0))
+        .slice(0, 5)
+        .map((row) => {
+          const name = String(row.item_name ?? "").trim();
+          const total = Number(row.line_total ?? 0) || (Number(row.unit_cost ?? 0) * Number(row.quantity ?? 0));
+          return `<tr>
+            <td style="padding:6px 0;font-size:14px">${name}</td>
+            <td style="padding:6px 0;text-align:right;font-size:14px;font-weight:600">${formatUsd(total)}</td>
+          </tr>`;
+        })
+        .join("");
+
+      const bodyHtml = `
+        <p style="margin:0 0 12px">New invoice from <strong>${vendorName}</strong></p>
+        <p style="margin:0 0 16px;color:#6B7280">Invoice #${invoiceNumber} · ${invoiceDate}</p>
+        <p style="margin:0 0 8px;font-size:22px;font-weight:700">Total: ${formatUsd(invoiceTotal)}</p>
+        <p style="margin:0 0 16px;color:#6B7280">Items parsed: ${itemCount}</p>
+        ${topLines ? `<p style="margin:16px 0 8px;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6B7280">Top line items</p><table style="width:100%;border-collapse:collapse">${topLines}</table>` : ""}
+      `;
+
+      const html = emailWrapper(
+        "Invoice Received",
+        restaurantName,
+        bodyHtml,
+        "Review Invoice →",
+        `${APP_BASE_URL}/app/invoices`,
+        restaurantName,
+      );
+
+      for (const member of members) {
+        if (!member.email?.includes("@")) continue;
+        try {
+          const sent = await sendMargin6Email({
+            supabaseUrl,
+            serviceKey,
+            to: member.email,
+            subject: `New invoice from ${vendorName} — ${formatUsd(invoiceTotal)}`,
+            html,
+          });
+          if (sent) emailSent = true;
+        } catch (emailErr) {
+          console.error("[inbound-invoice-email] parsed invoice email failed:", emailErr);
+        }
+      }
+    } else {
+      const bodyHtml = `
+        <p style="margin:0 0 12px">An invoice was received from <strong>${payload.from}</strong> but we could not read it automatically.</p>
+        <p style="margin:0;color:#6B7280">Please review it manually. This usually happens with scanned/image PDFs.</p>
+      `;
+
+      const html = emailWrapper(
+        "Invoice Parse Failed",
+        restaurantName,
+        bodyHtml,
+        "Review Invoice →",
+        `${APP_BASE_URL}/app/invoices`,
+        restaurantName,
+      );
+
+      for (const member of members) {
+        if (!member.email?.includes("@")) continue;
+        try {
+          const sent = await sendMargin6Email({
+            supabaseUrl,
+            serviceKey,
+            to: member.email,
+            subject: "Invoice received but could not be parsed — action needed",
+            html,
+          });
+          if (sent) emailSent = true;
+        } catch (emailErr) {
+          console.error("[inbound-invoice-email] parse failed email failed:", emailErr);
+        }
+      }
+    }
+
+    if (emailSent) {
+      await supabase
+        .from("notifications")
+        .update({ data: { invoice_id: invoiceId, email_sent: true, parsed: parseOk } })
+        .eq("restaurant_id", restaurantId)
+        .eq("type", notifType)
+        .contains("data", { invoice_id: invoiceId });
+    }
+  }
+
+  // ── 10. Missing items vs last PO ────────────────────────────────────────
+  if (parseOk && vendorName) {
+    try {
+      const { data: lastPo } = await supabase
+        .from("purchase_orders")
+        .select("id, vendor_name")
+        .eq("restaurant_id", restaurantId)
+        .ilike("vendor_name", vendorName)
+        .order("submitted_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastPo?.id) {
+        const { data: poItems } = await supabase
+          .from("purchase_order_items")
+          .select("item_name, quantity_ordered")
+          .eq("purchase_order_id", lastPo.id);
+
+        const invoiceNames = new Set(
+          parsedItems.map((row) => normalizeItemName(String(row.item_name ?? ""))).filter(Boolean),
+        );
+
+        const missingItems = (poItems ?? [])
+          .filter((poRow) => {
+            const name = normalizeItemName(poRow.item_name);
+            if (!name) return false;
+            return ![...invoiceNames].some((invName) => invName.includes(name) || name.includes(invName));
+          })
+          .map((poRow) => ({
+            item_name: poRow.item_name,
+            qty: Number(poRow.quantity_ordered) || 0,
+          }));
+
+        if (missingItems.length > 0) {
+          const missingNotifRows = members.map((member) => ({
+            restaurant_id: restaurantId!,
+            user_id: member.user_id,
+            type: "MISSING_ITEMS",
+            title: `Missing items on ${vendorName} invoice`,
+            message: `${missingItems.length} items ordered but not on invoice`,
+            severity: "WARNING",
+            data: {
+              invoice_id: invoiceId,
+              missing_items: missingItems,
+            },
+          }));
+
+          await supabase.from("notifications").insert(missingNotifRows);
+
+          const listHtml = missingItems
+            .slice(0, 10)
+            .map((item) => `<li style="margin:6px 0">${item.item_name} (ordered ${item.qty})</li>`)
+            .join("");
+
+          const bodyHtml = `
+            <p style="margin:0 0 12px"><strong>${vendorName}</strong> invoice is missing items you ordered.</p>
+            <p style="margin:0 0 8px;font-weight:700;font-size:12px;text-transform:uppercase;color:#D97706">Missing from invoice</p>
+            <ul style="margin:0;padding-left:20px">${listHtml}</ul>
+            <p style="margin:16px 0 0;color:#6B7280">Check your delivery or contact your vendor rep.</p>
+          `;
+
+          const html = emailWrapper(
+            "Invoice Discrepancy",
+            restaurantName,
+            bodyHtml,
+            "Review Invoice →",
+            `${APP_BASE_URL}/app/invoices`,
+            restaurantName,
+          );
+
+          for (const member of members) {
+            if (!member.email?.includes("@")) continue;
+            try {
+              await sendMargin6Email({
+                supabaseUrl,
+                serviceKey,
+                to: member.email,
+                subject: `⚠️ Missing items — ${vendorName} invoice incomplete`,
+                html,
+              });
+            } catch (missingEmailErr) {
+              console.error("[inbound-invoice-email] missing items email failed:", missingEmailErr);
+            }
+          }
+        }
+      }
+    } catch (missingErr) {
+      console.warn("[inbound-invoice-email] missing items check failed:", missingErr);
+    }
   }
 
   console.log(`[inbound-invoice-email] processed invoice ${invoiceId} for restaurant ${restaurantId}`);

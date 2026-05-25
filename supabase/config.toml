@@ -21,6 +21,9 @@ verify_jwt = false
 [functions.inbound-invoice-email]
 verify_jwt = false
 
+[functions.dispatch-app-notifications]
+verify_jwt = true
+
 [functions.vendor-import-invoices]
 verify_jwt = false
 

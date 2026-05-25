@@ -1,4 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  APP_BASE_URL,
+  emailWrapper,
+  formatUsd,
+  sendMargin6Email,
+  userWantsEmail,
+} from "../_shared/margin6Email.ts";
 
 type RiskLevel = "NO_PAR" | "RED" | "YELLOW" | "GREEN";
 
@@ -736,9 +743,6 @@ Deno.serve(async (req) => {
       const lastWeekEndDate = lastWeekEndIso.slice(0, 10);
       const dedupeWindowIso = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString();
 
-      const formatUsd = (n: number) =>
-        `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-
       for (const restaurant of restaurants || []) {
         const restaurantId = restaurant.id as string;
         const restaurantName = (restaurant.name as string) || "Your restaurant";
@@ -914,33 +918,190 @@ Deno.serve(async (req) => {
           ? `<div style="margin-top:24px;padding:14px 16px;background:#FFF7ED;border-left:3px solid #F97316;border-radius:6px;font-size:14px;color:#7C2D12"><strong>Your biggest leak:</strong> ${topLeakItem}</div>`
           : "";
 
-        const html = `
-          <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#FAFAFA">
-            <div style="background:#0F172A;padding:22px 24px;border-radius:12px 12px 0 0">
-              <h1 style="color:#FFFFFF;margin:0;font-size:18px;font-weight:700;letter-spacing:-0.01em">Margin6 <span style="color:#F97316">·</span> Weekly Loss Report</h1>
-            </div>
-            <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-top:none;padding:28px;border-radius:0 0 12px 12px">
-              <p style="color:#6B7280;font-size:12px;margin:0;text-transform:uppercase;letter-spacing:0.04em;font-weight:600">Week of ${weekStartLabel} – ${weekEndLabel}</p>
-              <p style="color:#DC2626;font-size:36px;font-weight:800;margin:6px 0 0;line-height:1.1;letter-spacing:-0.02em">${formatUsd(totalLost)} lost last week</p>
+        // ── Food cost % (purchases / sales) ────────────────────────────────
+        let foodCostPct: number | null = null;
+        let foodCostTarget = 30;
+        {
+          const { data: salesRows } = await supabase
+            .from("daily_sales")
+            .select("net_sales, gross_sales")
+            .eq("restaurant_id", restaurantId)
+            .gte("sale_date", lastWeekStartDate)
+            .lte("sale_date", lastWeekEndDate);
 
-              <table style="width:100%;border-collapse:collapse;margin-top:24px">
-                ${breakdownRow("Food waste", wasteTotal)}
-                ${breakdownRow("Price hikes", priceHikeTotal)}
-                ${breakdownRow("Overstock", overstockTotal)}
-                ${breakdownRow("Shrinkage", shrinkageTotal, true)}
-              </table>
+          const salesTotal = (salesRows ?? []).reduce((sum: number, row: any) => {
+            const net = Number(row.net_sales ?? row.gross_sales ?? 0);
+            return sum + (Number.isFinite(net) ? net : 0);
+          }, 0);
 
-              ${topLeakSection}
+          const { data: purchaseInvoices } = await supabase
+            .from("invoices")
+            .select("invoice_total")
+            .eq("restaurant_id", restaurantId)
+            .eq("status", "confirmed")
+            .gte("invoice_date", lastWeekStartDate)
+            .lte("invoice_date", lastWeekEndDate);
 
-              <div style="margin-top:28px">
-                <a href="https://margin6.com/app/dashboard" style="display:inline-block;background:#F97316;color:#FFFFFF;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">See the full breakdown →</a>
-              </div>
-            </div>
-            <p style="text-align:center;color:#9CA3AF;font-size:11px;margin-top:18px;line-height:1.6">You're receiving this because you're an owner/manager at ${restaurantName}.<br/>Unsubscribe in Settings.</p>
-          </div>
+          const purchaseTotal = (purchaseInvoices ?? []).reduce((sum: number, row: any) => {
+            const total = Number(row.invoice_total ?? 0);
+            return sum + (Number.isFinite(total) ? total : 0);
+          }, 0);
+
+          if (salesTotal > 0) {
+            foodCostPct = Math.round((purchaseTotal / salesTotal) * 1000) / 10;
+          }
+
+          const { data: locSettings } = await supabase
+            .from("location_settings")
+            .select("food_cost_target_pct")
+            .eq("restaurant_id", restaurantId)
+            .limit(1);
+
+          if (locSettings?.[0]?.food_cost_target_pct != null) {
+            foodCostTarget = Number(locSettings[0].food_cost_target_pct) || 30;
+          }
+        }
+
+        // ── Top 3 leaks across waste / price / shrink ──────────────────────
+        type LeakRow = { item_name: string; amount: number; category: string };
+        const leakCandidates: LeakRow[] = [];
+
+        {
+          const { data: wasteRows } = await supabase
+            .from("waste_log")
+            .select("item_name, total_cost, unit_cost, quantity")
+            .eq("restaurant_id", restaurantId)
+            .gte("logged_at", lastWeekStartIso)
+            .lte("logged_at", lastWeekEndIso);
+
+          const wasteByItem = new Map<string, number>();
+          for (const row of wasteRows || []) {
+            const explicit = Number((row as any).total_cost);
+            const derived = Number((row as any).unit_cost) * Number((row as any).quantity);
+            const value = Number.isFinite(explicit) && explicit > 0 ? explicit : derived;
+            if (!Number.isFinite(value) || value <= 0) continue;
+            const name = ((row as any).item_name as string | null)?.trim();
+            if (!name) continue;
+            wasteByItem.set(name, (wasteByItem.get(name) || 0) + value);
+          }
+          for (const [name, amount] of wasteByItem.entries()) {
+            leakCandidates.push({ item_name: name, amount, category: "Waste" });
+          }
+        }
+
+        {
+          const { data: priceNotifs } = await supabase
+            .from("notifications")
+            .select("data")
+            .eq("restaurant_id", restaurantId)
+            .eq("type", "PRICE_INCREASE")
+            .gte("created_at", lastWeekStartIso)
+            .lte("created_at", lastWeekEndIso);
+
+          for (const notif of priceNotifs || []) {
+            const items = Array.isArray((notif as any).data?.items) ? (notif as any).data.items : [];
+            for (const item of items) {
+              const oldCost = Number(item?.old_cost ?? 0);
+              const newCost = Number(item?.new_cost ?? 0);
+              const impact = Math.max(0, newCost - oldCost) * 10;
+              if (impact <= 0) continue;
+              leakCandidates.push({
+                item_name: String(item?.item_name ?? "Item"),
+                amount: impact,
+                category: "Price Hike",
+              });
+            }
+          }
+        }
+
+        {
+          const { data: shrinkNotifs2 } = await supabase
+            .from("notifications")
+            .select("data")
+            .eq("restaurant_id", restaurantId)
+            .in("type", ["SHRINK_ALERT", "COUNT_VARIANCE"])
+            .gte("created_at", lastWeekStartIso)
+            .lte("created_at", lastWeekEndIso);
+
+          for (const notif of shrinkNotifs2 || []) {
+            const items = Array.isArray((notif as any).data?.items) ? (notif as any).data.items : [];
+            for (const item of items) {
+              const impact = Number(item?.dollar_impact ?? 0);
+              if (!Number.isFinite(impact) || impact <= 0) continue;
+              leakCandidates.push({
+                item_name: String(item?.item_name ?? "Item"),
+                amount: impact,
+                category: "Shrinkage",
+              });
+            }
+          }
+        }
+
+        const topLeaks = leakCandidates
+          .sort((a, b) => b.amount - a.amount)
+          .slice(0, 3);
+
+        const topLeaksHtml = topLeaks.length > 0
+          ? `<div style="margin-top:24px">
+              <p style="margin:0 0 10px;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6B7280">Top 3 leaks this week</p>
+              <ol style="margin:0;padding-left:20px">
+                ${topLeaks.map((leak, idx) => `<li style="margin:6px 0">${leak.item_name} — ${formatUsd(leak.amount, 0)} <span style="color:#6B7280">(${leak.category})</span></li>`).join("")}
+              </ol>
+            </div>`
+          : "";
+
+        const actionItems = topLeaks.map((leak) => {
+          if (leak.category === "Waste") return `Check ${leak.item_name.toLowerCase()} storage/rotation`;
+          if (leak.category === "Price Hike") return `Compare ${leak.item_name.toLowerCase()} vendor prices`;
+          return `Review ${leak.item_name.toLowerCase()} usage`;
+        });
+
+        const actionsHtml = actionItems.length > 0
+          ? `<div style="margin-top:24px">
+              <p style="margin:0 0 10px;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6B7280">What to do this week</p>
+              <ul style="margin:0;padding-left:20px">${actionItems.map((a) => `<li style="margin:6px 0">${a}</li>`).join("")}</ul>
+            </div>`
+          : "";
+
+        const nextMonday = new Date(now);
+        nextMonday.setUTCDate(nextMonday.getUTCDate() + ((8 - nextMonday.getUTCDay()) % 7 || 7));
+        const nextDigestLabel = nextMonday.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+
+        const foodCostHtml = foodCostPct != null
+          ? `<p style="margin:20px 0 0;font-size:14px">Your food cost this week: <strong>${foodCostPct}%</strong><br/>
+             <span style="color:#6B7280">Industry target: ${foodCostTarget - 2}–${foodCostTarget + 2}%</span></p>`
+          : "";
+
+        const bodyHtml = `
+          <p style="color:#DC2626;font-size:36px;font-weight:800;margin:6px 0 0;line-height:1.1;letter-spacing:-0.02em">${formatUsd(totalLost, 0)} lost last week</p>
+          <table style="width:100%;border-collapse:collapse;margin-top:24px">
+            ${breakdownRow("Food waste", wasteTotal)}
+            ${breakdownRow("Price hikes", priceHikeTotal)}
+            ${breakdownRow("Overstock", overstockTotal)}
+            ${breakdownRow("Shrinkage", shrinkageTotal, true)}
+          </table>
+          ${foodCostHtml}
+          ${topLeaksHtml}
+          ${actionsHtml}
+          ${topLeakSection}
+          <p style="margin-top:24px;color:#6B7280;font-size:12px">Next digest: Monday ${nextDigestLabel} at 7am UTC</p>
         `;
 
-        const subject = `Your restaurant lost ${formatUsd(totalLost)} last week`;
+        const html = emailWrapper(
+          "Weekly Loss Report",
+          `Week of ${weekStartLabel} – ${weekEndLabel}`,
+          bodyHtml,
+          "See Full Dashboard →",
+          `${APP_BASE_URL}/app/dashboard`,
+          restaurantName,
+        );
+
+        const subject = `Your restaurant lost ${formatUsd(totalLost, 0)} last week — ${weekEndLabel}`;
         let sentCount = 0;
         for (const email of emails) {
           try {
@@ -982,7 +1143,142 @@ Deno.serve(async (req) => {
           },
         });
 
-        results.push(`Weekly digest: ${restaurantName} → ${sentCount} recipient(s), ${formatUsd(totalLost)} lost`);
+        results.push(`Weekly digest: ${restaurantName} → ${sentCount} recipient(s), ${formatUsd(totalLost, 0)} lost`);
+      }
+    }
+
+    // ─── 7) Price hike alert emails (PRICE_INCREASE notifications) ─────────
+    for (const restaurant of restaurants || []) {
+      const restaurantId = restaurant.id as string;
+      const restaurantName = (restaurant.name as string) || "Your restaurant";
+
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: priceNotifsRaw } = await supabase
+        .from("notifications")
+        .select("id, user_id, data, created_at")
+        .eq("restaurant_id", restaurantId)
+        .eq("type", "PRICE_INCREASE")
+        .gte("created_at", oneDayAgo);
+
+      const priceNotifs = (priceNotifsRaw ?? []).filter(
+        (row: { data: { price_email_sent?: boolean } | null }) => !row.data?.price_email_sent,
+      );
+
+      if (priceNotifs.length === 0) continue;
+
+      const byInvoice = new Map<string, typeof priceNotifs>();
+      for (const notif of priceNotifs) {
+        const invoiceId = String((notif as any).data?.invoice_id ?? "");
+        if (!invoiceId) continue;
+        const key = `${notif.user_id}::${invoiceId}`;
+        if (!byInvoice.has(key)) byInvoice.set(key, []);
+        byInvoice.get(key)!.push(notif);
+      }
+
+      for (const [, group] of byInvoice.entries()) {
+        const first = group[0];
+        const userId = first.user_id as string;
+        const invoiceId = String((first as any).data?.invoice_id ?? "");
+
+        const wantsEmail = await userWantsEmail(supabase, restaurantId, userId);
+        if (!wantsEmail) {
+          for (const n of group) {
+            await supabase.from("notifications").update({
+              data: { ...(n as any).data, price_email_sent: true },
+            }).eq("id", n.id);
+          }
+          continue;
+        }
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (!profile?.email?.includes("@")) continue;
+
+        const { data: invoice } = await supabase
+          .from("invoices")
+          .select("vendor_name")
+          .eq("id", invoiceId)
+          .maybeSingle();
+
+        const vendor = invoice?.vendor_name ?? "Vendor";
+        const allItems: Array<{ item_name: string; old_cost: number; new_cost: number }> = [];
+
+        for (const n of group) {
+          const items = Array.isArray((n as any).data?.items) ? (n as any).data.items : [];
+          for (const item of items) {
+            allItems.push({
+              item_name: String(item?.item_name ?? "Item"),
+              old_cost: Number(item?.old_cost ?? 0),
+              new_cost: Number(item?.new_cost ?? 0),
+            });
+          }
+        }
+
+        if (allItems.length === 0) continue;
+
+        const weeklyImpact = allItems.reduce((sum, item) => {
+          const delta = Math.max(0, item.new_cost - item.old_cost);
+          return sum + delta * 10;
+        }, 0);
+
+        const rowsHtml = allItems.slice(0, 8).map((item) => {
+          const delta = Math.max(0, item.new_cost - item.old_cost);
+          const impact = delta * 10;
+          return `<tr>
+            <td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #f3f4f6">${item.item_name}</td>
+            <td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #f3f4f6;text-align:center">${formatUsd(item.old_cost)}→${formatUsd(item.new_cost)}</td>
+            <td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #f3f4f6;text-align:right;color:#DC2626">+${formatUsd(impact, 0)}/wk</td>
+          </tr>`;
+        }).join("");
+
+        const bodyHtml = `
+          <p style="margin:0 0 16px"><strong>${vendor}</strong> raised prices on <strong>${allItems.length}</strong> item${allItems.length > 1 ? "s" : ""} this week.</p>
+          <table style="width:100%;border-collapse:collapse;margin-top:8px">
+            <thead>
+              <tr style="background:#F9FAFB">
+                <th style="padding:8px;text-align:left;font-size:11px;color:#6B7280;text-transform:uppercase">Item</th>
+                <th style="padding:8px;text-align:center;font-size:11px;color:#6B7280;text-transform:uppercase">Old → New</th>
+                <th style="padding:8px;text-align:right;font-size:11px;color:#6B7280;text-transform:uppercase">Impact</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          <p style="margin:20px 0 0;font-size:15px"><strong>Total weekly impact:</strong> <span style="color:#DC2626">${formatUsd(weeklyImpact, 0)}</span></p>
+        `;
+
+        const html = emailWrapper(
+          "Price Hike Alert",
+          restaurantName,
+          bodyHtml,
+          "Review Invoices →",
+          `${APP_BASE_URL}/app/invoices`,
+          restaurantName,
+        );
+
+        try {
+          const sent = await sendMargin6Email({
+            supabaseUrl,
+            serviceKey,
+            to: profile.email,
+            subject: `⚠️ Price hike alert — ${vendor} raised ${allItems.length} items`,
+            html,
+          });
+
+          if (sent) {
+            for (const n of group) {
+              await supabase.from("notifications").update({
+                data: { ...(n as any).data, price_email_sent: true },
+              }).eq("id", n.id);
+            }
+            results.push(`Price hike email: ${restaurantName} → ${profile.email}`);
+          }
+        } catch (priceEmailErr) {
+          console.error("Price hike email failed:", priceEmailErr);
+        }
       }
     }
 

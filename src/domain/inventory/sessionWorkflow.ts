@@ -10,6 +10,7 @@ import {
   prepareSmartOrderFromSession,
   publishSmartOrderAttentionNotifications,
 } from "@/domain/inventory/smartOrderFromSession";
+import { dispatchAppNotification } from "@/domain/notifications/dispatchAppNotifications";
 
 type AppSupabase = SupabaseClient<Database>;
 
@@ -328,12 +329,21 @@ export async function submitInventorySessionForReview(args: {
   supabase: AppSupabase;
   sessionId: string;
 }) {
-  return updateInventorySessionStatus({
+  const result = await updateInventorySessionStatus({
     supabase: args.supabase,
     sessionId: args.sessionId,
     status: "IN_REVIEW",
     expectedCurrentStatus: "IN_PROGRESS",
   });
+
+  if (result.ok) {
+    void dispatchAppNotification(args.supabase, {
+      event: "COUNT_SUBMITTED",
+      sessionId: args.sessionId,
+    });
+  }
+
+  return result;
 }
 
 export async function sendInventorySessionBackToInProgress(args: {
@@ -646,6 +656,19 @@ export async function approveInventorySession(args: {
       "— session approved, notifications will be missing:",
       notifyErr,
     );
+  }
+
+  void dispatchAppNotification(args.supabase, {
+    event: "COUNT_APPROVED",
+    sessionId: args.sessionId,
+  });
+
+  if (approvalResult.run_id) {
+    void dispatchAppNotification(args.supabase, {
+      event: "SMART_ORDER_READY",
+      sessionId: args.sessionId,
+      runId: approvalResult.run_id,
+    });
   }
 
   return {
