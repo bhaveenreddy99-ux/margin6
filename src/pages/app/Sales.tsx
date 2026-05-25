@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Textarea } from "@/components/ui/textarea";
@@ -72,7 +71,7 @@ function parseBulk(raw: string): number[] | null {
 
 export default function SalesPage() {
   const { user } = useAuth();
-  const { currentRestaurant, currentLocation, setCurrentLocation, locations } = useRestaurant();
+  const { currentRestaurant, currentLocation, locations, loading } = useRestaurant();
   const navigate = useNavigate();
   const role = currentRestaurant?.role;
 
@@ -223,23 +222,13 @@ export default function SalesPage() {
                 </Button>
               </>
             ) : (
-              <>
-                <div className="text-center space-y-1">
-                  <CalendarDays className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-                  <h2 className="text-lg font-semibold">Select a location to enter sales</h2>
-                  <p className="text-sm text-muted-foreground">Sales are tracked per location.</p>
-                </div>
-                <Select onValueChange={(id) => setCurrentLocation(locations.find((l) => l.id === id) ?? null)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a location" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {locations.map((l) => (
-                      <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </>
+              <div className="text-center space-y-1">
+                <CalendarDays className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                <h2 className="text-lg font-semibold">Loading location</h2>
+                <p className="text-sm text-muted-foreground">
+                  {loading ? "Preparing sales for your location…" : "No active location is available for this account."}
+                </p>
+              </div>
             )}
           </CardContent>
         </Card>

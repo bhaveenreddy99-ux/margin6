@@ -43,7 +43,7 @@ import type {
 import type { SaveStockWithConversionPayload } from "@/features/inventory-count/hooks/useItemCommands";
 
 export default function InventoryCountPage() {
-  const { currentRestaurant, locations, currentLocation, setCurrentLocation } = useRestaurant();
+  const { currentRestaurant, locations, currentLocation } = useRestaurant();
   const { user } = useAuth();
   const restaurantRole = (currentRestaurant?.role || "").toUpperCase();
   const isManagerOrOwner = restaurantRole === "MANAGER" || restaurantRole === "OWNER";
@@ -591,13 +591,10 @@ export default function InventoryCountPage() {
         <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
           {isStaffMenu
             ? "Your account isn't assigned to a location yet. Ask a manager or owner to assign you to a location before you can start a count."
-            : "Select a location from the switcher above to start a count."}
+            : "No active location is available. Add one in Settings to start a count."}
         </div>
       ) : null}
       <InventoryHubHeader
-        locations={locations}
-        currentLocation={currentLocation}
-        onLocationChange={setCurrentLocation}
         hasInProgressSession={!!landingFocus.focusInProgressSession}
         onStartOrContinue={handleHeaderStartOrContinue}
         startActionDisabled={blockCountWithoutLocation}
