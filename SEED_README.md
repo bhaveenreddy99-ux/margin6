@@ -1,4 +1,4 @@
-# RestaurantIQ Test Data Seed
+# Margin6 Test Data Seed
 
 Complete end-to-end test data for a 3-store franchise operation.
 

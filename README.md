@@ -1,7 +1,7 @@
 
-# RestaurantIQ
+# Margin6
 
-RestaurantIQ is a restaurant back-of-house operations platform designed to help restaurants manage inventory, purchasing, and supplier invoices in one system.
+Margin6 is a restaurant back-of-house operations platform designed to help restaurants manage inventory, purchasing, and supplier invoices in one system.
 
 ## Features
 
