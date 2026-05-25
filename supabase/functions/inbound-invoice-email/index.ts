@@ -68,6 +68,35 @@ function fileTypeFromMime(mime: string): "PDF" | "IMAGE" {
   return "IMAGE";
 }
 
+/** Extract bare email from `"Name" <user@domain.com>` or plain address. */
+function normalizeEmailAddress(value: string): string {
+  return value.toLowerCase().trim().replace(/^.*<([^>]+)>$/, "$1").trim();
+}
+
+function isValidEmailAddress(value: string): boolean {
+  const email = normalizeEmailAddress(value);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function validateInboundPayload(payload: unknown): payload is ResendInboundPayload {
+  if (!payload || typeof payload !== "object") return false;
+  const row = payload as Record<string, unknown>;
+  if (typeof row.from !== "string" || !row.from.trim()) return false;
+  if (!isValidEmailAddress(row.from)) return false;
+
+  const toRaw = row.to;
+  const toList = Array.isArray(toRaw)
+    ? toRaw
+    : typeof toRaw === "string"
+      ? [toRaw]
+      : [];
+  if (toList.length === 0) return false;
+  if (!toList.every((entry) => typeof entry === "string" && isValidEmailAddress(entry))) return false;
+
+  if (row.attachments != null && !Array.isArray(row.attachments)) return false;
+  return true;
+}
+
 // ─── Main handler ──────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -88,7 +117,14 @@ Deno.serve(async (req) => {
 
   let payload: ResendInboundPayload;
   try {
-    payload = await req.json();
+    const body = await req.json();
+    if (!validateInboundPayload(body)) {
+      return new Response(JSON.stringify({ error: "Invalid inbound email payload" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    payload = body;
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
@@ -109,7 +145,7 @@ Deno.serve(async (req) => {
   let matchedAddress: string | null = null;
 
   for (const addr of toAddresses) {
-    const email = addr.toLowerCase().trim().replace(/^.*<(.+)>$/, "$1");
+    const email = normalizeEmailAddress(addr);
     const { data: setting } = await supabase
       .from("restaurant_settings")
       .select("restaurant_id")

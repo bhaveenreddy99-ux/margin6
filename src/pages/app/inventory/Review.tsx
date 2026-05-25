@@ -21,6 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { CheckCircle, XCircle, Eye, ClipboardCheck, ArrowLeft, Search, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { getRisk, computeOrderQty, computeOrderQtyCases, computeRiskLevel, parseInputValue, type RiskThresholds } from "@/lib/inventory-utils";
 import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
 import type {
@@ -81,7 +82,7 @@ export default function ReviewPage() {
       .eq("restaurant_id", currentRestaurant.id)
       .eq("status", "IN_REVIEW")
       .order("updated_at", { ascending: false });
-    if (currentLocation?.id) query = query.eq("location_id", currentLocation.id);
+    if (currentLocation?.id) query = withLocationOrNull(query, currentLocation.id);
     const { data } = await query;
     if (data) setSessions(data);
   }, [currentRestaurant?.id, currentLocation?.id]);

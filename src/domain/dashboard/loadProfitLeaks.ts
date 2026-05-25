@@ -5,6 +5,7 @@ import type {
   ProfitLeakItem,
   ProfitLeakReason,
 } from "@/domain/dashboard/dashboardTypes";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 type Bucket = {
   total: number;
@@ -59,7 +60,7 @@ export async function loadProfitLeaks(
       .eq("restaurant_id", restaurantId)
       .gte("logged_at", from)
       .lte("logged_at", to);
-    if (loc) q = q.eq("location_id", loc);
+    if (loc) q = withLocationOrNull(q, loc);
 
     const { data: wasteRows } = (await q) as unknown as {
       data: Array<{
@@ -106,7 +107,7 @@ export async function loadProfitLeaks(
       .eq("restaurant_id", restaurantId)
       .gte("invoice_date", fromDate)
       .lte("invoice_date", toDate);
-    if (loc) invQ = invQ.eq("location_id", loc);
+    if (loc) invQ = withLocationOrNull(invQ, loc);
 
     const { data: invoices } = (await invQ) as unknown as {
       data: Array<{
@@ -180,7 +181,7 @@ export async function loadProfitLeaks(
       .eq("status", "APPROVED")
       .order("approved_at", { ascending: false })
       .limit(1);
-    if (loc) sessQ = sessQ.eq("location_id", loc);
+    if (loc) sessQ = withLocationOrNull(sessQ, loc);
 
     const { data: sessions } = (await sessQ) as unknown as {
       data: Array<{
@@ -240,7 +241,7 @@ export async function loadProfitLeaks(
       .in("type", ["SHRINK_ALERT", "COUNT_VARIANCE"])
       .gte("created_at", from)
       .lte("created_at", to);
-    if (loc) shrinkQ = shrinkQ.eq("location_id", loc);
+    if (loc) shrinkQ = withLocationOrNull(shrinkQ, loc);
 
     const { data: shrinkNotifs } = (await shrinkQ) as unknown as {
       data: Array<{ data: unknown; created_at: string | null }> | null;

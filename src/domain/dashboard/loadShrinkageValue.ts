@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type { DashboardTimeFilter } from "@/domain/dashboard/dashboardTypes";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 type ShrinkItem = {
   item_name?: string;
@@ -26,7 +27,7 @@ export async function loadShrinkageValue(
     .in("type", ["SHRINK_ALERT", "COUNT_VARIANCE"])
     .gte("created_at", startDate)
     .lte("created_at", endDate);
-  if (locationId) q = q.eq("location_id", locationId);
+  if (locationId) q = withLocationOrNull(q, locationId);
 
   const { data, error } = await q;
   if (error || !data) return 0;

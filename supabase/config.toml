@@ -1,4 +1,4 @@
-project_id = "rldjfjcnsibhuomylvrd"
+project_id = "ogbnctyctoujzdcfphad"
 
 [db]
 major_version = 17
@@ -16,6 +16,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.parse-invoice]
+verify_jwt = false
+
+[functions.inbound-invoice-email]
 verify_jwt = false
 
 [functions.vendor-import-invoices]

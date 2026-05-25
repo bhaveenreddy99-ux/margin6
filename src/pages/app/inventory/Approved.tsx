@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { useLastOrderDates } from "@/hooks/useLastOrderDates";
 import { format } from "date-fns";
 import { getRisk, computeOrderQty, type RiskThresholds } from "@/lib/inventory-utils";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 import type {
   InventorySessionListRow,
@@ -78,7 +79,7 @@ export default function ApprovedPage() {
       .eq("restaurant_id", currentRestaurant.id)
       .eq("status", "APPROVED");
     if (currentLocation?.id) {
-      sessionQuery = sessionQuery.eq("location_id", currentLocation.id);
+      sessionQuery = withLocationOrNull(sessionQuery, currentLocation.id);
     }
     sessionQuery
       .order("approved_at", { ascending: false })

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { fetchInvoiceDocumentIdsForRestaurant } from "@/lib/procurement-dedupe";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -139,19 +140,20 @@ export default function PurchaseHistoryPage() {
       const invoiceDocIds = await fetchInvoiceDocumentIdsForRestaurant(rid);
 
       const locId = currentLocation?.id;
+      const poBase = supabase.from("purchase_orders").select("*, inventory_lists(name)").eq("restaurant_id", rid);
+      const invBase = supabase
+        .from("invoices")
+        .select("*, purchase_orders(po_number, smart_order_run_id, id, status, inventory_lists(name))")
+        .eq("restaurant_id", rid);
+      const phBase = supabase
+        .from("purchase_history")
+        .select("*, inventory_lists(name), source, smart_order_run_id, po_number, receipt_status, invoice_status")
+        .eq("restaurant_id", rid);
+
       const [poRes, invRes, phRes] = await Promise.all([
-        (locId
-          ? supabase.from("purchase_orders").select("*, inventory_lists(name)").eq("restaurant_id", rid).eq("location_id", locId)
-          : supabase.from("purchase_orders").select("*, inventory_lists(name)").eq("restaurant_id", rid)
-        ).order("created_at", { ascending: false }),
-        (locId
-          ? supabase.from("invoices").select("*, purchase_orders(po_number, smart_order_run_id, id, status, inventory_lists(name))").eq("restaurant_id", rid).eq("location_id", locId)
-          : supabase.from("invoices").select("*, purchase_orders(po_number, smart_order_run_id, id, status, inventory_lists(name))").eq("restaurant_id", rid)
-        ).order("created_at", { ascending: false }),
-        (locId
-          ? supabase.from("purchase_history").select("*, inventory_lists(name), source, smart_order_run_id, po_number, receipt_status, invoice_status").eq("restaurant_id", rid).eq("location_id", locId)
-          : supabase.from("purchase_history").select("*, inventory_lists(name), source, smart_order_run_id, po_number, receipt_status, invoice_status").eq("restaurant_id", rid)
-        ).order("created_at", { ascending: false }),
+        (locId ? withLocationOrNull(poBase, locId) : poBase).order("created_at", { ascending: false }),
+        (locId ? withLocationOrNull(invBase, locId) : invBase).order("created_at", { ascending: false }),
+        (locId ? withLocationOrNull(phBase, locId) : phBase).order("created_at", { ascending: false }),
       ]);
 
       if (cancelled) return;

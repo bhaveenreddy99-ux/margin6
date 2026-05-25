@@ -8,6 +8,7 @@ import type {
   WasteLogPeriodRow,
   WasteLogSnapshotRow,
 } from "@/domain/dashboard/dashboardTypes";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 export type WasteMetricsResult = {
   todayWasteEntries: WasteLogSnapshotRow[];
@@ -32,7 +33,7 @@ export async function loadWasteMetrics(
     .select("item_name, quantity, reason, logged_at")
     .eq("restaurant_id", restaurantId)
     .gte("logged_at", todayStart.toISOString());
-  const wasteTodayQuery = (locationId ? wasteTodayBase.eq("location_id", locationId) : wasteTodayBase)
+  const wasteTodayQuery = (locationId ? withLocationOrNull(wasteTodayBase, locationId) : wasteTodayBase)
     .order("logged_at", { ascending: false })
     .limit(20);
 
@@ -44,7 +45,7 @@ export async function loadWasteMetrics(
     .eq("restaurant_id", restaurantId)
     .gte("logged_at", rangeStart.toISOString())
     .lte("logged_at", rangeEnd.toISOString());
-  const wasteRangeQuery = locationId ? wasteRangeBase.eq("location_id", locationId) : wasteRangeBase;
+  const wasteRangeQuery = locationId ? withLocationOrNull(wasteRangeBase, locationId) : wasteRangeBase;
 
   const [wasteTodayResult, wasteRangeResult] = await Promise.all([
     wasteTodayQuery as unknown as Promise<{ data: WasteLogSnapshotRow[] | null }>,

@@ -22,6 +22,7 @@ import { format, startOfDay, subDays, startOfMonth } from "date-fns";
 import { formatCurrency } from "@/lib/inventory-utils";
 import { getPackFromCatalogItem, convertInputToCasesSafe } from "@/lib/inventory-conversions";
 import { computeLineInventoryValue } from "@/domain/inventory/casePlanningEngine";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 // ─── Constants ───────────────────────────────────────────
 const REASONS = [
@@ -117,7 +118,7 @@ export default function WasteLogPage() {
       .eq("restaurant_id", currentRestaurant.id)
       .order("logged_at", { ascending: false })
       .limit(200);
-    if (currentLocation?.id) query = query.eq("location_id", currentLocation.id);
+    if (currentLocation?.id) query = withLocationOrNull(query, currentLocation.id);
     const { data } = await query;
     if (data) setEntries(data);
     setLoading(false);

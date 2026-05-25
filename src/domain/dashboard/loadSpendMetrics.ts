@@ -18,6 +18,7 @@ import type {
   SpendPurchaseHistoryItemCostRow,
   SpendPurchaseHistoryRow,
 } from "@/domain/dashboard/dashboardTypes";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 export type SpendMetricsResult = {
   periodSpend: number;
@@ -47,7 +48,7 @@ async function fetchSpendOverviewData(
     .select("id, vendor_name, created_at, invoice_date")
     .eq("restaurant_id", restaurantId)
     .eq("status", "confirmed");
-  if (locationId) invoiceQuery = invoiceQuery.eq("location_id", locationId);
+  if (locationId) invoiceQuery = withLocationOrNull(invoiceQuery, locationId);
 
   const { data: invoiceSpendRows } = (await invoiceQuery) as unknown as {
     data: SpendInvoiceRow[] | null;
@@ -71,7 +72,7 @@ async function fetchSpendOverviewData(
     .select("id, vendor_name, created_at, invoice_date")
     .eq("restaurant_id", restaurantId)
     .in("invoice_status", ["COMPLETE", "POSTED"]);
-  if (locationId) purchaseHistoryQuery = purchaseHistoryQuery.eq("location_id", locationId);
+  if (locationId) purchaseHistoryQuery = withLocationOrNull(purchaseHistoryQuery, locationId);
 
   const { data: purchaseHistoryRows } = (await purchaseHistoryQuery) as unknown as {
     data: SpendPurchaseHistoryRow[] | null;
@@ -136,7 +137,7 @@ export async function loadSpendMetrics(
     .from("invoices")
     .select("id, invoice_total, invoice_date, status, receipt_status")
     .eq("restaurant_id", restaurantId);
-  if (locationId) invoiceStatusQuery = invoiceStatusQuery.eq("location_id", locationId);
+  if (locationId) invoiceStatusQuery = withLocationOrNull(invoiceStatusQuery, locationId);
 
   const [spendOverview, invoiceStatusResult] = await Promise.all([
     fetchSpendOverviewData(restaurantId, locationId, timeFilter),
