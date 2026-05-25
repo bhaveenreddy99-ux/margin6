@@ -103,7 +103,7 @@ export function AppSidebar() {
             <img src={logo} alt="Margin6" className="h-full w-full object-contain" />
           </div>
           <span className="text-[15px] font-bold text-sidebar-accent-foreground tracking-tight">
-            Restau<span className="text-sidebar-primary">rantIQ</span>
+            Margin<span className="text-sidebar-primary">6</span>
           </span>
         </Link>
       </div>
