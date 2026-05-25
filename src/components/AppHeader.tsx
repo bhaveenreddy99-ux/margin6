@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Building2, Bell, ChevronsUpDown, Check, Search, Plus } from "lucide-react";
 import { useState, useMemo } from "react";
-import logo from "@/assets/logo.png";
 import { DemoRoleSwitcher } from "@/components/DemoRoleSwitcher";
 
 const routeNames: Record<string, string> = {
@@ -158,8 +157,10 @@ export function AppHeader() {
         )}
       </Button>
 
-      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
-        <img src={logo} alt="Margin6" className="h-full w-full object-contain" />
+      <div className="h-6 px-2 rounded-md bg-primary/10 flex items-center justify-center">
+        <span className="text-[10px] font-bold tracking-tight text-foreground">
+          Margin<span className="text-orange-500">6</span>
+        </span>
       </div>
     </header>
   );

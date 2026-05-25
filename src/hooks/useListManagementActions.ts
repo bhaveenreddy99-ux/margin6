@@ -1364,7 +1364,7 @@ export function useListManagementActions({
     const meta = { listName: list.name };
     if (format === "csv") exportToCSV(data, fileName, "inventory");
     else if (format === "xlsx") exportToExcel(data, fileName, "inventory", meta);
-    else exportToPDF(data, fileName, "inventory", meta);
+    else void exportToPDF(data, fileName, "inventory", meta);
   };
 
   const handleAddFromPurchase = async (itemName: string) => {

@@ -494,7 +494,7 @@ export default function PARManagementPage() {
     const meta = { listName: g.name };
     if (exportFormat === "csv") exportToCSV(rows, filename, "inventory");
     else if (exportFormat === "excel") exportToExcel(rows, filename, "inventory", meta);
-    else exportToPDF(rows, filename, "inventory", meta);
+    else void exportToPDF(rows, filename, "inventory", meta);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
@@ -953,7 +953,7 @@ export default function PARManagementPage() {
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() =>
-                          exportToPDF(
+                          void exportToPDF(
                             items.map(i => ({ item_name: i.item_name, category: i.category, unit: i.unit, par_level: i.par_level })),
                             `par-${selectedGuide.name}`,
                             "inventory",

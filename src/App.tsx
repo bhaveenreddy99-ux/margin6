@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,41 +11,48 @@ import { DemoRoleProvider } from "@/components/DemoRoleSwitcher";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { OwnerRoute } from "@/components/OwnerRoute";
 import { StaffRestrictedRoute } from "@/components/StaffRestrictedRoute";
-import LandingPage from "@/pages/Landing";
-import PricingPage from "@/pages/Pricing";
-import LoginPage from "@/pages/Login";
-import SignupPage from "@/pages/Signup";
-import DemoPage from "@/pages/Demo";
-import PublicDemoPage from "@/pages/PublicDemo";
-import LeakAuditPage from "@/pages/LeakAudit";
-import CreateRestaurantPage from "@/pages/onboarding/CreateRestaurant";
 import AppLayout from "@/layouts/AppLayout";
-import DashboardPage from "@/pages/app/Dashboard";
-import MyRestaurantsPage from "@/pages/app/MyRestaurants";
-import ListManagementPage from "@/pages/app/ListManagement";
-import EnterInventoryPage from "@/pages/app/inventory/EnterInventory";
-import ReviewPage from "@/pages/app/inventory/Review";
-import ApprovedPage from "@/pages/app/inventory/Approved";
-import ImportPage from "@/pages/app/inventory/Import";
-import SmartOrderPage from "@/pages/app/SmartOrder";
-import ParHubPage from "@/pages/app/ParHub";
-import PARManagementPage from "@/pages/app/PARManagement";
-import PARSuggestionsPage from "@/pages/app/PARSuggestions";
-import InvoicesPage from "@/pages/app/Invoices";
-import InvoiceReviewPage from "@/pages/app/InvoiceReview";
-import PurchaseHistoryPage from "@/pages/app/PurchaseHistory";
-import WasteLogPage from "@/pages/app/WasteLog";
-import SalesPage from "@/pages/app/Sales";
-import SettingsPage from "@/pages/app/Settings";
-import NotificationsPage from "@/pages/app/Notifications";
-import BillingPage from "@/pages/app/Billing";
-import AlertSettingsPage from "@/pages/app/settings/AlertSettings";
-import ReminderSettingsPage from "@/pages/app/settings/ReminderSettings";
-import ForgotPasswordPage from "@/pages/ForgotPassword";
-import ResetPasswordPage from "@/pages/ResetPassword";
-import NotFound from "@/pages/NotFound";
+
+const LandingPage = lazy(() => import("@/pages/Landing"));
+const PricingPage = lazy(() => import("@/pages/Pricing"));
+const LoginPage = lazy(() => import("@/pages/Login"));
+const SignupPage = lazy(() => import("@/pages/Signup"));
+const DemoPage = lazy(() => import("@/pages/Demo"));
+const PublicDemoPage = lazy(() => import("@/pages/PublicDemo"));
+const LeakAuditPage = lazy(() => import("@/pages/LeakAudit"));
+const CreateRestaurantPage = lazy(() => import("@/pages/onboarding/CreateRestaurant"));
+const DashboardPage = lazy(() => import("@/pages/app/Dashboard"));
+const MyRestaurantsPage = lazy(() => import("@/pages/app/MyRestaurants"));
+const ListManagementPage = lazy(() => import("@/pages/app/ListManagement"));
+const EnterInventoryPage = lazy(() => import("@/pages/app/inventory/EnterInventory"));
+const ReviewPage = lazy(() => import("@/pages/app/inventory/Review"));
+const ApprovedPage = lazy(() => import("@/pages/app/inventory/Approved"));
+const ImportPage = lazy(() => import("@/pages/app/inventory/Import"));
+const SmartOrderPage = lazy(() => import("@/pages/app/SmartOrder"));
+const ParHubPage = lazy(() => import("@/pages/app/ParHub"));
+const PARManagementPage = lazy(() => import("@/pages/app/PARManagement"));
+const PARSuggestionsPage = lazy(() => import("@/pages/app/PARSuggestions"));
+const InvoicesPage = lazy(() => import("@/pages/app/Invoices"));
+const InvoiceReviewPage = lazy(() => import("@/pages/app/InvoiceReview"));
+const PurchaseHistoryPage = lazy(() => import("@/pages/app/PurchaseHistory"));
+const WasteLogPage = lazy(() => import("@/pages/app/WasteLog"));
+const SalesPage = lazy(() => import("@/pages/app/Sales"));
+const SettingsPage = lazy(() => import("@/pages/app/Settings"));
+const NotificationsPage = lazy(() => import("@/pages/app/Notifications"));
+const BillingPage = lazy(() => import("@/pages/app/Billing"));
+const AlertSettingsPage = lazy(() => import("@/pages/app/settings/AlertSettings"));
+const ReminderSettingsPage = lazy(() => import("@/pages/app/settings/ReminderSettings"));
+const ForgotPasswordPage = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPasswordPage = lazy(() => import("@/pages/ResetPassword"));
+const NotFound = lazy(() => import("@/pages/NotFound"));
 
 const queryClient = new QueryClient();
+
+const routeFallback = (
+  <div className="flex items-center justify-center h-screen">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+  </div>
+);
 
 function SmartLanding() {
   const { restaurants, loading } = useRestaurant();
@@ -71,52 +79,54 @@ const App = () => (
         <AuthProvider>
           <RestaurantProvider>
           <DemoRoleProvider>
-            <Routes>
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/pricing" element={<PricingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/signup" element={<SignupPage />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="/reset-password" element={<ResetPasswordPage />} />
-              <Route path="/demo" element={<DemoPage />} />
-              <Route path="/demo-live" element={<PublicDemoPage />} />
-              <Route path="/audit" element={<LeakAuditPage />} />
-              <Route path="/onboarding/create-restaurant" element={<CreateRestaurantPage />} />
-              <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-                <Route index element={<SmartLanding />} />
-                <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="restaurants" element={<MyRestaurantsPage />} />
-                <Route path="restaurants/new" element={<CreateRestaurantPage />} />
-                <Route path="inventory/lists" element={<StaffRestrictedRoute><ListManagementPage /></StaffRestrictedRoute>} />
-                <Route path="inventory/enter" element={<EnterInventoryPage />} />
-                <Route path="inventory/review" element={<StaffRestrictedRoute><ReviewPage /></StaffRestrictedRoute>} />
-                <Route path="inventory/approved" element={<StaffRestrictedRoute><ApprovedPage /></StaffRestrictedRoute>} />
-                <Route path="inventory/import/:listId" element={<StaffRestrictedRoute><ImportPage /></StaffRestrictedRoute>} />
-                <Route path="smart-order" element={<StaffRestrictedRoute><SmartOrderPage /></StaffRestrictedRoute>} />
-                <Route path="par" element={<StaffRestrictedRoute><ParHubPage /></StaffRestrictedRoute>}>
-                  <Route index element={<PARManagementPage />} />
-                  <Route path="suggestions" element={<PARSuggestionsPage />} />
+            <Suspense fallback={routeFallback}>
+              <Routes>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/pricing" element={<PricingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+                <Route path="/demo" element={<DemoPage />} />
+                <Route path="/demo-live" element={<PublicDemoPage />} />
+                <Route path="/audit" element={<LeakAuditPage />} />
+                <Route path="/onboarding/create-restaurant" element={<CreateRestaurantPage />} />
+                <Route path="/app" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<SmartLanding />} />
+                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="restaurants" element={<MyRestaurantsPage />} />
+                  <Route path="restaurants/new" element={<CreateRestaurantPage />} />
+                  <Route path="inventory/lists" element={<StaffRestrictedRoute><ListManagementPage /></StaffRestrictedRoute>} />
+                  <Route path="inventory/enter" element={<EnterInventoryPage />} />
+                  <Route path="inventory/review" element={<StaffRestrictedRoute><ReviewPage /></StaffRestrictedRoute>} />
+                  <Route path="inventory/approved" element={<StaffRestrictedRoute><ApprovedPage /></StaffRestrictedRoute>} />
+                  <Route path="inventory/import/:listId" element={<StaffRestrictedRoute><ImportPage /></StaffRestrictedRoute>} />
+                  <Route path="smart-order" element={<StaffRestrictedRoute><SmartOrderPage /></StaffRestrictedRoute>} />
+                  <Route path="par" element={<StaffRestrictedRoute><ParHubPage /></StaffRestrictedRoute>}>
+                    <Route index element={<PARManagementPage />} />
+                    <Route path="suggestions" element={<PARSuggestionsPage />} />
+                  </Route>
+
+                  <Route path="invoices" element={<StaffRestrictedRoute><InvoicesPage /></StaffRestrictedRoute>} />
+                  <Route path="invoices/:id/review" element={<StaffRestrictedRoute><InvoiceReviewPage /></StaffRestrictedRoute>} />
+                  <Route path="orders" element={<Navigate to="/app/invoices" replace />} />
+                  <Route path="reports" element={<Navigate to="/app/dashboard" replace />} />
+                  <Route path="reports/compare" element={<Navigate to="/app/dashboard" replace />} />
+                  <Route path="staff" element={<Navigate to="/app/settings" replace />} />
+                  <Route path="locations" element={<Navigate to="/app/settings" replace />} />
+                  <Route path="settings/locations" element={<Navigate to="/app/settings" replace />} />
+                  <Route path="purchase-history" element={<StaffRestrictedRoute><PurchaseHistoryPage /></StaffRestrictedRoute>} />
+                  <Route path="waste-log" element={<WasteLogPage />} />
+                  <Route path="sales" element={<StaffRestrictedRoute><SalesPage /></StaffRestrictedRoute>} />
+                  <Route path="notifications" element={<NotificationsPage />} />
+                  <Route path="settings" element={<OwnerRoute><SettingsPage /></OwnerRoute>} />
+                  <Route path="billing" element={<OwnerRoute><BillingPage /></OwnerRoute>} />
+                  <Route path="settings/alerts" element={<OwnerRoute><AlertSettingsPage /></OwnerRoute>} />
+                  <Route path="settings/reminders" element={<OwnerRoute><ReminderSettingsPage /></OwnerRoute>} />
                 </Route>
-                
-                <Route path="invoices" element={<StaffRestrictedRoute><InvoicesPage /></StaffRestrictedRoute>} />
-                <Route path="invoices/:id/review" element={<StaffRestrictedRoute><InvoiceReviewPage /></StaffRestrictedRoute>} />
-                <Route path="orders" element={<Navigate to="/app/invoices" replace />} />
-                <Route path="reports" element={<Navigate to="/app/dashboard" replace />} />
-                <Route path="reports/compare" element={<Navigate to="/app/dashboard" replace />} />
-                <Route path="staff" element={<Navigate to="/app/settings" replace />} />
-                <Route path="locations" element={<Navigate to="/app/settings" replace />} />
-                <Route path="settings/locations" element={<Navigate to="/app/settings" replace />} />
-                <Route path="purchase-history" element={<StaffRestrictedRoute><PurchaseHistoryPage /></StaffRestrictedRoute>} />
-                <Route path="waste-log" element={<WasteLogPage />} />
-                <Route path="sales" element={<StaffRestrictedRoute><SalesPage /></StaffRestrictedRoute>} />
-                <Route path="notifications" element={<NotificationsPage />} />
-                <Route path="settings" element={<OwnerRoute><SettingsPage /></OwnerRoute>} />
-                <Route path="billing" element={<OwnerRoute><BillingPage /></OwnerRoute>} />
-                <Route path="settings/alerts" element={<OwnerRoute><AlertSettingsPage /></OwnerRoute>} />
-                <Route path="settings/reminders" element={<OwnerRoute><ReminderSettingsPage /></OwnerRoute>} />
-              </Route>
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
           </DemoRoleProvider>
           </RestaurantProvider>
         </AuthProvider>

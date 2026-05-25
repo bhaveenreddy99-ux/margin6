@@ -1,6 +1,4 @@
 import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 interface ExportItem {
   item_name: string;
@@ -88,12 +86,18 @@ export function exportToExcel(
   XLSX.writeFile(wb, `${filename}.xlsx`);
 }
 
-export function exportToPDF(
+export async function exportToPDF(
   items: ExportItem[],
   filename: string,
   type: "inventory" | "smartorder" = "inventory",
   meta?: { listName?: string; sessionName?: string; date?: string }
 ) {
+  const [{ default: jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  const autoTable = autoTableModule.default;
+
   const doc = new jsPDF();
   let y = 15;
   doc.setFontSize(16);

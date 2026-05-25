@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { jsPDF } from "jspdf";
 import {
   ArrowRight,
   BarChart3,
@@ -200,7 +199,7 @@ export default function LeakAuditPage() {
 
   const handleDownloadPdf = () => {
     if (!result) return;
-    generateLeakAuditPdf(result);
+    void generateLeakAuditPdf(result);
   };
 
   const reset = () => {
@@ -642,7 +641,8 @@ function ResultsScreen({
 }
 
 // ── PDF generator (jspdf) ─────────────────────────────────────────────────
-function generateLeakAuditPdf(result: AuditResult) {
+async function generateLeakAuditPdf(result: AuditResult) {
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 48;

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
 import { LayoutDashboard, Package, ClipboardList, ShoppingCart, BookOpen, FileText, LogOut, Receipt, Settings, Bell, Trash2, DollarSign, CreditCard, Building2 } from "lucide-react";
-import logo from "@/assets/logo.png";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -99,9 +98,6 @@ export function AppSidebar() {
     <Sidebar className="border-r border-sidebar-border bg-sidebar">
       <div className="p-4 pb-2">
         <Link to="/app/dashboard" className="flex items-center gap-2.5 mb-3 cursor-pointer hover:opacity-80 transition-opacity">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary/10 overflow-hidden shrink-0">
-            <img src={logo} alt="Margin6" className="h-full w-full object-contain" />
-          </div>
           <span className="text-[15px] font-bold text-sidebar-accent-foreground tracking-tight">
             Margin<span className="text-sidebar-primary">6</span>
           </span>

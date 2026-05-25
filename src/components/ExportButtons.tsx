@@ -39,7 +39,7 @@ export function ExportButtons({ items, filename, type = "inventory", meta, vendo
         <DropdownMenuItem onClick={() => exportToExcel(items, filename, type, meta)}>
           Export Excel (.xlsx)
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => exportToPDF(items, filename, type, meta)}>
+        <DropdownMenuItem onClick={() => void exportToPDF(items, filename, type, meta)}>
           Export PDF
         </DropdownMenuItem>
       </DropdownMenuContent>
