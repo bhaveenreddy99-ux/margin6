@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.dispatch-app-notifications]
 verify_jwt = true
 
+[functions.create-checkout-session]
+verify_jwt = true
+
 [functions.vendor-import-invoices]
 verify_jwt = false
 

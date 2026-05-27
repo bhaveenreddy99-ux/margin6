@@ -17,7 +17,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useSubscription } from "@/hooks/useSubscription";
 
-const PLAN_PRICE_MONTHLY = 99;
+const PLAN_PRICE_MONTHLY = 69.99;
+const PLAN_PRICE_LABEL = PLAN_PRICE_MONTHLY.toFixed(2);
+const PLAN_NAME = "Founding Member";
+const PLAN_SUBTEXT = "Locked in forever · Goes to $99 after first 100 members";
 
 const PLAN_FEATURES: string[] = [
   "Real-time Money Lost hero with full math breakdown",
@@ -58,8 +61,19 @@ export default function BillingPage() {
     }
     setUpgrading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error("Please sign in again to upgrade");
+        setUpgrading(false);
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: { restaurant_id: currentRestaurant.id },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
       });
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
@@ -98,14 +112,12 @@ export default function BillingPage() {
             <div>
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-[hsl(25,95%,53%)]" />
-                <h2 className="text-base font-bold tracking-tight">Pro Plan</h2>
+                <h2 className="text-base font-bold tracking-tight">{PLAN_NAME}</h2>
               </div>
-              <p className="text-sm text-muted-foreground mt-1">
-                Everything Margin6 ships, billed monthly, cancel anytime.
-              </p>
+              <p className="text-sm text-muted-foreground mt-1">{PLAN_SUBTEXT}</p>
             </div>
             <p className="text-3xl font-extrabold tracking-tight tabular-nums">
-              ${PLAN_PRICE_MONTHLY}
+              ${PLAN_PRICE_LABEL}
               <span className="text-sm font-medium text-muted-foreground">/mo</span>
             </p>
           </div>
@@ -168,7 +180,7 @@ function StatusCard({
         <CardContent className="p-5 flex items-start gap-3">
           <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold">Pro Plan — ${PLAN_PRICE_MONTHLY}/month</p>
+            <p className="text-sm font-bold">{PLAN_NAME} — ${PLAN_PRICE_LABEL}/month</p>
             <p className="text-xs text-muted-foreground mt-1">
               Subscription is active. Manage your payment method in Stripe's customer
               portal (link arrives in your monthly receipt email).
@@ -231,7 +243,7 @@ function StatusCard({
                 Your free trial has ended
               </p>
               <p className="text-xs text-amber-900/80 dark:text-amber-100/80 mt-1">
-                Upgrade to keep accessing Margin6. ${PLAN_PRICE_MONTHLY}/month —
+                Upgrade to keep accessing Margin6. ${PLAN_PRICE_LABEL}/month —
                 cancel anytime.
               </p>
             </div>

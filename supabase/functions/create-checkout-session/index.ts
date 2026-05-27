@@ -1,10 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import Stripe from "https://esm.sh/stripe@17.7.0?target=denonext";
+import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 
 // Creates a Stripe Checkout Session for the caller's currently-selected
 // restaurant. Required secrets:
 //   STRIPE_SECRET_KEY, STRIPE_PRICE_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-//   APP_URL (optional; defaults to https://margin6.com)
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,8 +13,9 @@ const corsHeaders = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response("ok", { headers: corsHeaders });
   }
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -23,14 +23,32 @@ Deno.serve(async (req) => {
     });
   }
 
+  console.log("STRIPE_SECRET_KEY exists:", !!Deno.env.get("STRIPE_SECRET_KEY"));
+  console.log("STRIPE_PRICE_ID exists:", !!Deno.env.get("STRIPE_PRICE_ID"));
+
   const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
   const priceId = Deno.env.get("STRIPE_PRICE_ID");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const appUrl = Deno.env.get("APP_URL") || "https://margin6.com";
 
-  if (!stripeSecret || !priceId || !supabaseUrl || !serviceKey) {
-    console.error("create-checkout-session: missing env vars");
+  if (!stripeSecret) {
+    console.error("create-checkout-session: STRIPE_SECRET_KEY not set");
+    return new Response(JSON.stringify({ error: "Server not configured" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (!priceId) {
+    console.error("create-checkout-session: STRIPE_PRICE_ID not set");
+    return new Response(JSON.stringify({ error: "STRIPE_PRICE_ID not set" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (!supabaseUrl || !serviceKey) {
+    console.error("create-checkout-session: missing Supabase env vars");
     return new Response(JSON.stringify({ error: "Server not configured" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -46,22 +64,22 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Verify caller identity via the user's JWT.
   const userClient = createClient(supabaseUrl, serviceKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false },
   });
   const { data: userData, error: userErr } = await userClient.auth.getUser(token);
   if (userErr || !userData?.user) {
+    console.error("create-checkout-session: auth failed", userErr?.message);
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
+
   const userId = userData.user.id;
   const userEmail = userData.user.email ?? undefined;
 
-  // Resolve restaurant_id: explicit body wins, else the caller's first OWNER membership.
   let restaurantId: string | undefined;
   try {
     const body = (await req.json().catch(() => null)) as
@@ -69,7 +87,7 @@ Deno.serve(async (req) => {
       | null;
     if (body?.restaurant_id) restaurantId = body.restaurant_id;
   } catch {
-    // ignore — body optional
+    // body optional
   }
 
   const admin = createClient(supabaseUrl, serviceKey, {
@@ -85,7 +103,6 @@ Deno.serve(async (req) => {
       .limit(1);
     restaurantId = ownerships?.[0]?.restaurant_id ?? undefined;
   } else {
-    // Verify the caller actually owns this restaurant.
     const { data: ownership } = await admin
       .from("restaurant_members")
       .select("restaurant_id")
@@ -121,7 +138,10 @@ Deno.serve(async (req) => {
     });
   }
 
-  const stripe = new Stripe(stripeSecret, { apiVersion: "2024-12-18.acacia" });
+  const stripe = new Stripe(stripeSecret, {
+    apiVersion: "2024-04-10",
+    httpClient: Stripe.createFetchHttpClient(),
+  });
 
   try {
     const customerId = (restaurant as { stripe_customer_id?: string | null })
@@ -130,8 +150,8 @@ Deno.serve(async (req) => {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${appUrl}/app/dashboard?upgraded=true`,
-      cancel_url: `${appUrl}/app/billing`,
+      success_url: "https://margin6.com/app/billing?success=true",
+      cancel_url: "https://margin6.com/app/billing?canceled=true",
       ...(customerId
         ? { customer: customerId }
         : userEmail
