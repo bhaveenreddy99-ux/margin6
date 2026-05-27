@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,8 +8,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   Check, AlertTriangle, X, TrendingUp, TrendingDown, Package, Info, Plus
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { formatNum } from "@/lib/inventory-utils";
 import { InvoiceItem, LinkedSmartOrderLine } from "./types";
+import CatalogItemMapCombobox from "./CatalogItemMapCombobox";
+import AddToCatalogSheet from "./AddToCatalogSheet";
+import type { InvoiceCatalogItem, InvoiceListOption } from "@/domain/invoices/invoicesPageTypes";
 
 type SessionLineForOh = { catalog_item_id?: string | null; item_name: string; current_stock: number | null };
 
@@ -45,29 +50,60 @@ function resolveLinkedOrderLine(
 
 interface InvoiceItemsTableProps {
   items: InvoiceItem[];
-  catalogItems: any[];
+  catalogItems: InvoiceCatalogItem[];
+  inventoryLists: InvoiceListOption[];
+  restaurantId: string | null;
+  vendorName: string;
   linkedSmartOrderItems: LinkedSmartOrderLine[];
-  lastSessionItems: any[];
-  onUpdateItem: (index: number, field: string, value: any) => void;
+  lastSessionItems: SessionLineForOh[];
+  onUpdateItem: (index: number, field: string, value: unknown) => void;
   onItemQuantityChange: (index: number, quantity: number) => void;
   onItemUnitCostChange: (index: number, unitCost: number | null) => void;
   onRemoveItem: (index: number) => void;
   onMapItem: (index: number, catalogId: string) => void;
   onAddManualItem: () => void;
+  onCatalogItemAdded: (index: number, catalogItemId: string, catalogItemName: string) => void;
+  refreshCatalogItems: () => Promise<void>;
 }
 
 export default function InvoiceItemsTable({
-  items, catalogItems, linkedSmartOrderItems, lastSessionItems,
-  onUpdateItem, onItemQuantityChange, onItemUnitCostChange, onRemoveItem, onMapItem, onAddManualItem,
+  items,
+  catalogItems,
+  inventoryLists,
+  restaurantId,
+  vendorName,
+  linkedSmartOrderItems,
+  lastSessionItems,
+  onUpdateItem,
+  onItemQuantityChange,
+  onItemUnitCostChange,
+  onRemoveItem,
+  onMapItem,
+  onAddManualItem,
+  onCatalogItemAdded,
+  refreshCatalogItems,
 }: InvoiceItemsTableProps) {
+  const [addToCatalogIndex, setAddToCatalogIndex] = useState<number | null>(null);
   const unmatchedCount = items.filter(i => i.match_status === "UNMATCHED").length;
   const matchedCount = items.filter(i => i.match_status === "MATCHED").length;
   const invoiceTotal = items.reduce((sum, i) => sum + (i.line_total ?? (i.unit_cost ? i.unit_cost * i.quantity : 0)), 0);
+  const addToCatalogItem = addToCatalogIndex != null ? items[addToCatalogIndex] ?? null : null;
 
   const getExpectedOnHand = (line: InvoiceItem, qtyReceived: number) => {
     const sessionItem = resolveSessionStockForExpected(line, lastSessionItems);
     if (!sessionItem) return null;
     return Number(sessionItem.current_stock ?? 0) + qtyReceived;
+  };
+
+  const openAddToCatalog = (index: number) => {
+    setAddToCatalogIndex(index);
+  };
+
+  const handleCatalogAdded = async (catalogItemId: string, catalogItemName: string) => {
+    if (addToCatalogIndex == null) return;
+    await refreshCatalogItems();
+    onCatalogItemAdded(addToCatalogIndex, catalogItemId, catalogItemName);
+    setAddToCatalogIndex(null);
   };
 
   if (items.length === 0) return null;
@@ -105,7 +141,7 @@ export default function InvoiceItemsTable({
               <TableHead className="text-[10px] font-semibold uppercase text-right">Qty</TableHead>
               <TableHead className="text-[10px] font-semibold uppercase text-right">Unit Cost</TableHead>
               <TableHead className="text-[10px] font-semibold uppercase text-right">Total</TableHead>
-              <TableHead className="text-[10px] font-semibold uppercase">Match</TableHead>
+              <TableHead className="text-[10px] font-semibold uppercase min-w-[220px]">Match</TableHead>
               {lastSessionItems.length > 0 && (
                 <TableHead className="text-[10px] font-semibold uppercase text-right">
                   <Tooltip><TooltipTrigger className="flex items-center gap-1">Est. On-Hand <Info className="h-3 w-3" /></TooltipTrigger>
@@ -127,7 +163,7 @@ export default function InvoiceItemsTable({
                 : null;
 
               return (
-                <TableRow key={idx} className={item.match_status === "UNMATCHED" ? "bg-destructive/5" : ""}>
+                <TableRow key={item.id ?? idx} className={item.match_status === "UNMATCHED" ? "bg-destructive/5" : ""}>
                   <TableCell>
                     {item.match_status === "MATCHED" ? (
                       <Check className="h-4 w-4 text-success" />
@@ -179,14 +215,22 @@ export default function InvoiceItemsTable({
                   </TableCell>
                   <TableCell>
                     {item.match_status === "UNMATCHED" ? (
-                      <Select onValueChange={v => onMapItem(idx, v)}>
-                        <SelectTrigger className="h-7 text-[10px] w-32"><SelectValue placeholder="Map to item..." /></SelectTrigger>
-                        <SelectContent>
-                          {catalogItems.map(c => (
-                            <SelectItem key={c.id} value={c.id} className="text-xs">{c.item_name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <CatalogItemMapCombobox
+                          catalogItems={catalogItems}
+                          onSelect={(catalogId) => onMapItem(idx, catalogId)}
+                          onAddToCatalog={() => openAddToCatalog(idx)}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px] px-2"
+                          onClick={() => openAddToCatalog(idx)}
+                        >
+                          + Add to Catalog
+                        </Button>
+                      </div>
                     ) : item.match_status === "MANUAL" ? (
                       <Select value={item.catalog_item_id || "none"} onValueChange={v => onMapItem(idx, v === "none" ? "" : v)}>
                         <SelectTrigger className="h-7 text-[10px] w-32"><SelectValue placeholder="Link item..." /></SelectTrigger>
@@ -219,9 +263,25 @@ export default function InvoiceItemsTable({
                     </TableCell>
                   )}
                   <TableCell>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => onRemoveItem(idx)}>
-                      <X className="h-3 w-3" />
-                    </Button>
+                    {item.match_status === "UNMATCHED" ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => onRemoveItem(idx)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Remove — not an inventory item (fees, surcharges)</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => onRemoveItem(idx)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -233,6 +293,20 @@ export default function InvoiceItemsTable({
       <Button variant="outline" size="sm" onClick={onAddManualItem} className="gap-1.5 text-xs">
         <Plus className="h-3.5 w-3.5" /> Add Item
       </Button>
+
+      <AddToCatalogSheet
+        open={addToCatalogIndex != null}
+        onOpenChange={(open) => {
+          if (!open) setAddToCatalogIndex(null);
+        }}
+        invoiceItem={addToCatalogItem}
+        restaurantId={restaurantId}
+        vendorName={vendorName}
+        inventoryLists={inventoryLists}
+        onSuccess={(catalogItemId, catalogItemName) => {
+          void handleCatalogAdded(catalogItemId, catalogItemName);
+        }}
+      />
     </div>
   );
 }

@@ -40,6 +40,11 @@ export type InvoiceCatalogItem = Pick<
 
 export type InvoiceLocationOption = Pick<LocationRow, "id" | "name">;
 
+export type InvoiceListOption = Pick<
+  Database["public"]["Tables"]["inventory_lists"]["Row"],
+  "id" | "name"
+>;
+
 export type SmartOrderRunOption = Pick<
   SmartOrderRunRow,
   "id" | "created_at" | "inventory_list_id"

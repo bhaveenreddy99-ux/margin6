@@ -24,6 +24,8 @@ export interface InvoiceItem {
   catalog_item_id: string | null;
   match_status: "MATCHED" | "UNMATCHED" | "MANUAL";
   catalog_match_name?: string;
+  /** Present when line was loaded from a saved invoice_items row. */
+  id?: string;
 }
 
 export interface InvoiceHeader {

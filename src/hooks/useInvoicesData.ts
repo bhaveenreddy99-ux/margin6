@@ -11,6 +11,7 @@ import type {
   InvoiceItemRow,
   InvoiceListQueryRow,
   InvoiceListRow,
+  InvoiceListOption,
   InvoiceLocationOption,
   LastSessionItem,
   SmartOrderRunItemRow,
@@ -46,6 +47,7 @@ export function useInvoicesData({
   const [loading, setLoading] = useState(true);
   const [deliveryIssuePOs, setDeliveryIssuePOs] = useState<DeliveryIssuePoRow[]>([]);
   const [catalogItems, setCatalogItems] = useState<InvoiceCatalogItem[]>([]);
+  const [inventoryLists, setInventoryLists] = useState<InvoiceListOption[]>([]);
   const [vendorMappings, setVendorMappings] = useState<VendorMappingRow[]>([]);
   const [locations, setLocations] = useState<InvoiceLocationOption[]>([]);
   const [smartOrders, setSmartOrders] = useState<SmartOrderRunOption[]>([]);
@@ -95,6 +97,19 @@ export function useInvoicesData({
     refreshPurchases();
   }, [refreshPurchases]);
 
+  const refreshCatalogItems = useCallback(async () => {
+    if (!currentRestaurantId) return;
+
+    const { data } = (await supabase
+      .from("inventory_catalog_items")
+      .select("id, item_name, vendor_sku, product_number, brand_name, vendor_name, unit, pack_size, default_unit_cost")
+      .eq("restaurant_id", currentRestaurantId)) as unknown as {
+      data: InvoiceCatalogItem[] | null;
+    };
+
+    if (data) setCatalogItems(data);
+  }, [currentRestaurantId]);
+
   useEffect(() => {
     if (!currentRestaurantId) return;
     const request = supabase.rpc("get_delivery_issue_pos", {
@@ -140,16 +155,26 @@ export function useInvoicesData({
       data: SmartOrderRunOption[] | null;
     }>;
 
+    const listsPromise = (supabase
+      .from("inventory_lists")
+      .select("id, name")
+      .eq("restaurant_id", currentRestaurantId)
+      .order("name")) as unknown as Promise<{
+      data: InvoiceListOption[] | null;
+    }>;
+
     Promise.all([
       catalogPromise,
       mappingPromise,
       locationPromise,
       smartOrderPromise,
-    ]).then(([catalogResult, mappingResult, locationResult, smartOrderResult]) => {
+      listsPromise,
+    ]).then(([catalogResult, mappingResult, locationResult, smartOrderResult, listsResult]) => {
       if (catalogResult.data) setCatalogItems(catalogResult.data);
       if (mappingResult.data) setVendorMappings(mappingResult.data);
       if (locationResult.data) setLocations(locationResult.data);
       if (smartOrderResult.data) setSmartOrders(smartOrderResult.data);
+      if (listsResult.data) setInventoryLists(listsResult.data);
     });
   }, [currentRestaurantId]);
 
@@ -222,12 +247,14 @@ export function useInvoicesData({
     loading,
     deliveryIssuePOs,
     catalogItems,
+    inventoryLists,
     vendorMappings,
     locations,
     smartOrders,
     lastSessionItems,
     linkedSmartOrderItems,
     refreshPurchases,
+    refreshCatalogItems,
     loadInvoiceItems,
   };
 }

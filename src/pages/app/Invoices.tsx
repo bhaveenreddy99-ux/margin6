@@ -85,12 +85,14 @@ export default function InvoicesPage() {
     loading,
     deliveryIssuePOs,
     catalogItems,
+    inventoryLists,
     locations,
     smartOrders,
     lastSessionItems,
     linkedSmartOrderItems,
     vendorMappings,
     refreshPurchases,
+    refreshCatalogItems,
     loadInvoiceItems,
   } = useInvoicesData({
     currentRestaurantId: currentRestaurant?.id,
@@ -309,6 +311,22 @@ export default function InvoicesPage() {
 
   const mapItemToCatalog = useCallback(
     (index: number, catalogId: string) => {
+      if (!catalogId) {
+        setItems((current) =>
+          current.map((item, itemIndex) =>
+            itemIndex === index
+              ? {
+                  ...item,
+                  catalog_item_id: null,
+                  match_status: "MANUAL",
+                  catalog_match_name: undefined,
+                }
+              : item,
+          ),
+        );
+        return;
+      }
+
       const catalogItem = catalogItems.find((item) => item.id === catalogId);
       if (!catalogItem) return;
       setItems((current) =>
@@ -325,6 +343,24 @@ export default function InvoicesPage() {
       );
     },
     [catalogItems],
+  );
+
+  const handleCatalogItemAdded = useCallback(
+    (index: number, catalogItemId: string, catalogItemName: string) => {
+      setItems((current) =>
+        current.map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                catalog_item_id: catalogItemId,
+                match_status: "MATCHED",
+                catalog_match_name: catalogItemName,
+              }
+            : item,
+        ),
+      );
+    },
+    [],
   );
 
   const handleEditInvoice = useCallback(
@@ -629,6 +665,9 @@ export default function InvoicesPage() {
             <InvoiceItemsTable
               items={items}
               catalogItems={catalogItems}
+              inventoryLists={inventoryLists}
+              restaurantId={currentRestaurant?.id ?? null}
+              vendorName={header.vendor_name}
               linkedSmartOrderItems={linkedSmartOrderItems}
               lastSessionItems={lastSessionItems}
               onUpdateItem={updateItem}
@@ -637,6 +676,8 @@ export default function InvoicesPage() {
               onRemoveItem={removeItem}
               onMapItem={mapItemToCatalog}
               onAddManualItem={addManualItem}
+              onCatalogItemAdded={handleCatalogItemAdded}
+              refreshCatalogItems={refreshCatalogItems}
             />
 
             {/* Save Actions */}

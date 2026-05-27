@@ -150,6 +150,7 @@ export function buildInvoiceEditorItems(
   catalogItems: InvoiceCatalogItem[],
 ): InvoiceItem[] {
   return rows.map((row) => ({
+    id: row.id,
     product_number:
       row.product_number != null && String(row.product_number).trim() !== ""
         ? String(row.product_number).trim()
