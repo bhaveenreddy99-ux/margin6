@@ -609,10 +609,18 @@ export function useInvoiceActions({
       }
 
       setSaving(true);
+      let savedInvoiceId: string | null = null;
+      let savedHadManualPoLink = false;
+      let savedManualPo: string | null = null;
+      let savedParsedPo: string | null = null;
+      let savedVendor = "";
       try {
         const capturedParsedPo = parsedPoNumberFromPdf;
         const capturedManualPo = header.po_number.trim() || null;
         const capturedVendor = header.vendor_name.trim();
+        savedManualPo = capturedManualPo;
+        savedParsedPo = capturedParsedPo;
+        savedVendor = capturedVendor;
 
         let purchaseOrderId: string | null = null;
         if (header.linked_smart_order_id) {
@@ -625,6 +633,7 @@ export function useInvoiceActions({
           };
           purchaseOrderId = purchaseOrder?.id ?? null;
         }
+        savedHadManualPoLink = purchaseOrderId != null;
 
         const invoicePayload = buildInvoiceInsertPayload({
           restaurantId: currentRestaurantId,
@@ -642,7 +651,11 @@ export function useInvoiceActions({
             .eq("id", editingPurchaseId);
           if (invoiceError) throw invoiceError;
           invoiceId = editingPurchaseId;
-          await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
+          const { error: deleteItemsError } = await supabase
+            .from("invoice_items")
+            .delete()
+            .eq("invoice_id", invoiceId);
+          if (deleteItemsError) throw deleteItemsError;
         } else {
           const { data: invoiceRow, error: invoiceError } = await supabase
             .from("invoices")
@@ -661,24 +674,38 @@ export function useInvoiceActions({
         const { error: itemsError } = await supabase.from("invoice_items").insert(invoiceItemRows);
         if (itemsError) throw itemsError;
 
-        await applyAutoPoLinkAfterSave({
-          invoiceId,
-          restaurantId: currentRestaurantId,
-          hadManualPoLink: purchaseOrderId != null,
-          manualPoNumber: capturedManualPo,
-          parsedPoFromPdf: capturedParsedPo,
-          vendorName: capturedVendor,
-        });
+        savedInvoiceId = invoiceId;
 
         const statusLabel = intent === "RECEIVED" ? "submitted for review" : "saved as draft";
         toast.success(`Invoice ${statusLabel.toLowerCase()} successfully`);
         setCreateOpen(false);
         onResetCreateForm();
-        refreshPurchases();
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Failed to save invoice";
         toast.error(message);
+        setSaving(false);
+        return;
       }
+
+      try {
+        await applyAutoPoLinkAfterSave({
+          invoiceId: savedInvoiceId!,
+          restaurantId: currentRestaurantId,
+          hadManualPoLink: savedHadManualPoLink,
+          manualPoNumber: savedManualPo,
+          parsedPoFromPdf: savedParsedPo,
+          vendorName: savedVendor,
+        });
+      } catch (error: unknown) {
+        console.warn("[handleSaveInvoice] auto PO link failed after save", error);
+      }
+
+      try {
+        await refreshPurchases();
+      } catch (error: unknown) {
+        console.warn("[handleSaveInvoice] refreshPurchases failed after save", error);
+      }
+
       setSaving(false);
     },
     [
