@@ -34,6 +34,30 @@ import type {
   PurchaseOrderCatalogLinkRow,
 } from "@/domain/invoices/invoicesPageTypes";
 import type { InvoiceHeader, InvoiceItem } from "@/components/invoices/types";
+import { normalizeImageOrientation } from "@/domain/invoices/normalizeImageOrientation";
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+const PARSE_PROGRESS_MESSAGES: { delayMs: number; message: string }[] = [
+  { delayMs: 0, message: "AI is parsing your invoice..." },
+  { delayMs: 5000, message: "Reading your invoice..." },
+  { delayMs: 15000, message: "Extracting line items..." },
+  { delayMs: 30000, message: "Almost done — large invoices take up to 60 seconds" },
+  { delayMs: 45000, message: "Still working — please don't close this window" },
+];
+
+export type ParseFailureKind = "scanned_pdf" | null;
+
+function isLikelyScannedPdfFailure(
+  error: unknown,
+  result?: ParseInvoiceResult | null,
+): boolean {
+  if (result?.error === "no_items") return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/422|could not parse|no_items|scanned|not parse/i.test(message)) return true;
+  if (result && !result.items?.length && Boolean(result.error)) return true;
+  return false;
+}
 
 type UseInvoiceActionsArgs = {
   currentRestaurantId: string | null | undefined;
@@ -78,6 +102,8 @@ export function useInvoiceActions({
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [intakeUploading, setIntakeUploading] = useState(false);
+  const [parsingProgressMessage, setParsingProgressMessage] = useState<string | null>(null);
+  const [parseFailureKind, setParseFailureKind] = useState<ParseFailureKind>(null);
 
   const lastDraftAutoMatchInvoiceIdRef = useRef<string | null>(null);
   const editingPurchaseIdRef = useRef<string | null>(null);
@@ -96,7 +122,39 @@ export function useInvoiceActions({
     parsedPoRef.current = parsedPoNumberFromPdf;
   }, [parsedPoNumberFromPdf]);
 
+  useEffect(() => {
+    if (!parsing && !intakeUploading) {
+      setParsingProgressMessage(null);
+      return;
+    }
+
+    setParsingProgressMessage(PARSE_PROGRESS_MESSAGES[0]?.message ?? null);
+    const timers = PARSE_PROGRESS_MESSAGES.slice(1).map(({ delayMs, message }) =>
+      window.setTimeout(() => setParsingProgressMessage(message), delayMs),
+    );
+
+    return () => {
+      timers.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [parsing, intakeUploading]);
+
+  const clearParseFailure = useCallback(() => {
+    setParseFailureKind(null);
+  }, []);
+
+  const assertFileSizeAllowed = useCallback((file: File): boolean => {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error("File too large — max 10MB. Try splitting the invoice.");
+      return false;
+    }
+    return true;
+  }, []);
+
   const fileToBase64Raw = useCallback(async (file: File): Promise<string> => {
+    if (file.type.startsWith("image/")) {
+      return normalizeImageOrientation(file);
+    }
+
     const arrayBuffer = await file.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
     let binary = "";
@@ -143,6 +201,7 @@ export function useInvoiceActions({
         setParsedPoNumberFromPdf(null);
         toast.error("Could not read — please fill in manually");
       } else {
+        setParseFailureKind("scanned_pdf");
         toast.error("AI could not extract items from this PDF");
       }
     },
@@ -442,6 +501,9 @@ export function useInvoiceActions({
   const handleImportedFile = useCallback(
     async (file: File) => {
       setParsedPoNumberFromPdf(null);
+      setParseFailureKind(null);
+
+      if (!assertFileSizeAllowed(file)) return;
 
       const isSpreadsheet = /\.(csv|xlsx|xls)$/i.test(file.name);
       const isPDF = /\.pdf$/i.test(file.name);
@@ -471,12 +533,24 @@ export function useInvoiceActions({
             body: { content: base64, file_type: "PDF" },
           });
           if (error) throw error;
-          applyParseInvoiceResult((result || {}) as ParseInvoiceResult, "pdf");
+          const parsed = (result || {}) as ParseInvoiceResult;
+          if (isLikelyScannedPdfFailure(null, parsed)) {
+            setParseFailureKind("scanned_pdf");
+            toast.error("Could not parse this PDF");
+            return;
+          }
+          applyParseInvoiceResult(parsed, "pdf");
         } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : "Failed to parse PDF";
-          toast.error(message);
+          if (isLikelyScannedPdfFailure(error)) {
+            setParseFailureKind("scanned_pdf");
+            toast.error("Could not parse this PDF");
+          } else {
+            const message = error instanceof Error ? error.message : "Failed to parse PDF";
+            toast.error(message);
+          }
+        } finally {
+          setParsing(false);
         }
-        setParsing(false);
         return;
       }
 
@@ -484,6 +558,7 @@ export function useInvoiceActions({
     },
     [
       applyParseInvoiceResult,
+      assertFileSizeAllowed,
       catalogItems,
       fileToBase64Raw,
       setItems,
@@ -495,6 +570,10 @@ export function useInvoiceActions({
   const handleCapturedPhoto = useCallback(
     async (file: File) => {
       setParsedPoNumberFromPdf(null);
+      setParseFailureKind(null);
+
+      if (!assertFileSizeAllowed(file)) return;
+
       setParsing(true);
       try {
         const base64 = await fileToBase64Raw(file);
@@ -514,7 +593,7 @@ export function useInvoiceActions({
         setParsing(false);
       }
     },
-    [applyParseInvoiceResult, fileToBase64Raw, setParsedPoNumberFromPdf],
+    [applyParseInvoiceResult, assertFileSizeAllowed, fileToBase64Raw, setParsedPoNumberFromPdf],
   );
 
   const handleSaveInvoice = useCallback(
@@ -620,7 +699,10 @@ export function useInvoiceActions({
   const handleIntakeUpload = useCallback(
     async (file: File, sourceKind: "file" | "photo") => {
       if (!currentRestaurantId || !userId) return;
+      if (!assertFileSizeAllowed(file)) return;
+
       setIntakeUploading(true);
+      setParseFailureKind(null);
       let parsedPoForHeader: string | null = null;
       let parseApplied = false;
       try {
@@ -684,14 +766,26 @@ export function useInvoiceActions({
               },
             });
             if (parseFunctionError) {
+              const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+              if (isPdf && isLikelyScannedPdfFailure(parseFunctionError)) {
+                setParseFailureKind("scanned_pdf");
+              }
               toast.error(parseFunctionError instanceof Error ? parseFunctionError.message : "Could not parse invoice — edit manually");
             } else {
               const payloadError = parseResult != null ? parseInvoicePayloadError(parseResult) : null;
               if (payloadError) {
+                const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+                if (isPdf && isLikelyScannedPdfFailure(null, parseResult as ParseInvoiceResult)) {
+                  setParseFailureKind("scanned_pdf");
+                }
                 toast.error(payloadError);
               } else if (parseResult && typeof parseResult === "object") {
                 const result = parseResult as ParseInvoiceResult;
                 if (typeof result.error === "string" && result.error.trim()) {
+                  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+                  if (isPdf && isLikelyScannedPdfFailure(null, result)) {
+                    setParseFailureKind("scanned_pdf");
+                  }
                   toast.error(result.error);
                 } else {
                   const patch = buildInvoicePatchFromParse(result);
@@ -750,6 +844,8 @@ export function useInvoiceActions({
       }
     },
     [
+      assertFileSizeAllowed,
+      currentLocation?.id,
       currentRestaurantId,
       fileToBase64Raw,
       onOpenEditorForInvoice,
@@ -772,6 +868,9 @@ export function useInvoiceActions({
     parsing,
     saving,
     intakeUploading,
+    parsingProgressMessage,
+    parseFailureKind,
+    clearParseFailure,
     handleImportedFile,
     handleCapturedPhoto,
     handleSaveInvoice,

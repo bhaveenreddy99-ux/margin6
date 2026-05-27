@@ -4,8 +4,46 @@ const corsHeaders = {
 };
 
 /** Same instructions for PDF document + invoice photo (vision). */
-const EXTRACT_INVOICE_PROMPT =
-  "Extract all invoice line items from this invoice PDF. Use the extract_invoice tool. Include every product line item with its SKU/product number, description, brand, quantity shipped (use SHIP qty not ORDER qty), unit price, and line total. For Performance Foodservice invoices: vendor_name='Performance Foodservice', invoice_number is the INVOICE field, invoice_date is the DELV DATE field in YYYY-MM-DD format. Skip rows that are headers, subtotals, tax lines, or freight unless they have a product SKU.";
+const EXTRACT_INVOICE_PROMPT = `
+Extract all invoice line items from this vendor invoice.
+Use the extract_invoice tool.
+
+GENERAL RULES:
+- Include EVERY product line item
+- Use SHIPPED quantity not ORDERED quantity
+- Skip headers, subtotals, tax lines unless they have a product SKU
+- For unit_cost: use the per-unit price (not extended price)
+- For line_total: use the extended/total price for that line
+
+VENDOR-SPECIFIC RULES:
+Performance Foodservice / PFG:
+  - vendor_name = "Performance Foodservice"
+  - invoice_number = the INVOICE field (e.g. 108666)
+  - invoice_date = DELV DATE field in YYYY-MM-DD format
+  - quantity = SHIP column (not ORDER column)
+  - brand_name = brand code before item description (e.g. SCHLTZ, CAMPBL)
+  - product_number = item number (e.g. HT664, AW706)
+
+Sysco:
+  - vendor_name = "Sysco"
+  - invoice_number = the Invoice Number field
+  - invoice_date = Invoice Date in YYYY-MM-DD format
+  - quantity = Shipped QTY
+  - brand_name = brand name in description
+
+US Foods:
+  - vendor_name = "US Foods"
+  - invoice_number = Invoice # field
+  - quantity = Shipped quantity
+
+Restaurant Depot / Jetro:
+  - vendor_name = "Restaurant Depot"
+  - Extract all items with quantities and prices
+
+For any other vendor:
+  - Extract vendor name from header
+  - Extract all line items with best available data
+`.trim();
 
 /** Max decoded image size (bytes) — aligns with typical vision API limits. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -46,6 +84,44 @@ function detectImageMediaType(bytes: Uint8Array): string | null {
   return null;
 }
 
+function validateExtractedInvoice(input: Record<string, unknown>): Record<string, unknown> {
+  if (!input || typeof input !== "object") {
+    return { items: [], error: "no_items" };
+  }
+
+  let items = Array.isArray(input.items) ? input.items : [];
+  if (items.length === 0) {
+    return { ...input, items: [], error: input.error ?? "no_items" };
+  }
+
+  items = items.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    return String((item as Record<string, unknown>).item_name ?? "").trim().length > 0;
+  });
+
+  let total = Number(input.total);
+  if ((!Number.isFinite(total) || total <= 0) && items.length > 0) {
+    const summed = items.reduce((sum, raw) => {
+      const row = raw as Record<string, unknown>;
+      const lineTotal = Number(row.line_total);
+      if (Number.isFinite(lineTotal) && lineTotal > 0) return sum + lineTotal;
+      const qty = Number(row.quantity);
+      const unitCost = Number(row.unit_cost);
+      if (Number.isFinite(qty) && Number.isFinite(unitCost) && qty > 0 && unitCost > 0) {
+        return sum + qty * unitCost;
+      }
+      return sum;
+    }, 0);
+    if (summed > 0) total = Math.round(summed * 100) / 100;
+  }
+
+  return {
+    ...input,
+    items,
+    total: Number.isFinite(total) && total > 0 ? total : input.total,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -80,6 +156,7 @@ Deno.serve(async (req) => {
     // Build message content based on file type
     let messageContent: unknown[];
     if (file_type === "PDF") {
+      // Multi-page PDFs: Claude document source preserves all pages (not image tiles).
       messageContent = [
         {
           type: "document",
@@ -235,7 +312,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify(toolUse.input), {
+    const validated = validateExtractedInvoice(toolUse.input as Record<string, unknown>);
+
+    return new Response(JSON.stringify(validated), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

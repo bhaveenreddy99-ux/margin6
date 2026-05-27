@@ -34,6 +34,7 @@ import {
   resolveOwnerManagerMembers,
   sendMargin6Email,
 } from "../_shared/margin6Email.ts";
+import { matchInvoiceCatalogItems } from "../_shared/matchInvoiceCatalogItems.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,8 +44,11 @@ const corsHeaders = {
 // ─── Types from Resend inbound webhook payload ─────────────────────────────
 interface ResendAttachment {
   filename: string;
-  content: string;       // base64 encoded
-  contentType: string;
+  content?: string;          // base64 (old format)
+  content_type?: string;     // new Resend format
+  contentType?: string;      // old format fallback
+  download_url?: string;     // new Resend format
+  size?: number;
 }
 
 interface ResendInboundPayload {
@@ -64,11 +68,51 @@ function sanitizeFilename(name: string): string {
 
 /** Pick the best attachment: prefer PDF, fall back to any image. */
 function pickBestAttachment(attachments: ResendAttachment[]): ResendAttachment | null {
-  const pdf = attachments.find(a => a.contentType === "application/pdf" || a.filename.endsWith(".pdf"));
+  const pdf = attachments.find(a =>
+    (a.content_type ?? a.contentType) === "application/pdf" ||
+    a.filename?.endsWith(".pdf")
+  );
   if (pdf) return pdf;
-  const img = attachments.find(a => a.contentType.startsWith("image/"));
+  const img = attachments.find(a =>
+    (a.content_type ?? a.contentType ?? "").startsWith("image/")
+  );
   if (img) return img;
   return null;
+}
+
+async function resolveAttachmentBase64(
+  attachment: ResendAttachment,
+): Promise<string | null> {
+  if (attachment.content) {
+    return attachment.content;
+  }
+
+  if (!attachment.download_url) {
+    return null;
+  }
+
+  try {
+    const fileResp = await fetch(attachment.download_url);
+    if (!fileResp.ok) {
+      console.warn(
+        "[inbound] attachment download failed:",
+        fileResp.status,
+        attachment.download_url,
+      );
+      return null;
+    }
+
+    const arrayBuf = await fileResp.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  } catch (dlErr) {
+    console.warn("[inbound] attachment download error:", dlErr);
+    return null;
+  }
 }
 
 /** Map MIME type to parse-invoice file_type. */
@@ -126,7 +170,13 @@ Deno.serve(async (req) => {
 
   let payload: ResendInboundPayload;
   try {
-    const body = await req.json();
+    const rawBody = await req.json();
+    console.log("[inbound] raw body type:", rawBody?.type);
+    console.log("[inbound] raw body keys:", Object.keys(rawBody ?? {}));
+
+    // Resend wraps inbound payload: {"type":"email.received","data":{...}}
+    const body = rawBody?.data ?? rawBody;
+
     if (!validateInboundPayload(body)) {
       return new Response(JSON.stringify({ error: "Invalid inbound email payload" }), {
         status: 400,
@@ -134,6 +184,14 @@ Deno.serve(async (req) => {
       });
     }
     payload = body;
+
+    console.log("[inbound] attachments count:", body?.attachments?.length ?? 0);
+    if (body?.attachments?.length > 0) {
+      console.log("[inbound] first attachment keys:", Object.keys(body.attachments[0]));
+      console.log("[inbound] first attachment filename:", body.attachments[0].filename);
+      console.log("[inbound] has content:", !!body.attachments[0].content);
+      console.log("[inbound] has download_url:", !!body.attachments[0].download_url);
+    }
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
@@ -176,14 +234,58 @@ Deno.serve(async (req) => {
     });
   }
 
-  // ── 2. Pick file to parse ───────────────────────────────────────────────
+  // ── 2. Pick attachment and download immediately (Resend URLs expire quickly) ──
   const attachment = pickBestAttachment(payload.attachments ?? []);
-  const hasFile    = attachment != null;
-  const fileBase64 = hasFile ? attachment!.content : null;
-  const fileMime   = hasFile ? attachment!.contentType : "application/pdf";
-  const fileName   = hasFile ? attachment!.filename    : "emailed-invoice.pdf";
+  const hasFile = attachment != null;
+  const fileMime = hasFile
+    ? (attachment!.content_type ?? attachment!.contentType ?? "application/pdf")
+    : "application/pdf";
+  const fileName = hasFile ? attachment!.filename : "emailed-invoice.pdf";
 
-  // ── 3. Create draft invoice ─────────────────────────────────────────────
+  let fileBase64: string | null = null;
+  if (hasFile && attachment) {
+    fileBase64 = await resolveAttachmentBase64(attachment);
+    if (!fileBase64) {
+      console.warn("[inbound-invoice-email] attachment download failed for:", fileName);
+      return new Response(JSON.stringify({ success: false, reason: "attachment_download_failed" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  // ── 3. Idempotency — skip duplicate drafts from Resend retries ───────────
+  const today = new Date().toISOString().split("T")[0];
+  const subjectTrimmed = payload.subject?.trim() || null;
+
+  let dedupQuery = supabase
+    .from("invoices")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "draft")
+    .gte("created_at", `${today}T00:00:00Z`)
+    .lte("created_at", `${today}T23:59:59Z`);
+
+  if (subjectTrimmed) {
+    dedupQuery = dedupQuery.eq("vendor_name", subjectTrimmed);
+  } else {
+    const retryWindow = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    dedupQuery = dedupQuery.gte("created_at", retryWindow).is("vendor_name", null);
+  }
+
+  const { data: existingInvoice } = await dedupQuery
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingInvoice?.id) {
+    console.log(`[inbound-invoice-email] deduplicated retry → invoice ${existingInvoice.id}`);
+    return new Response(
+      JSON.stringify({ success: true, invoice_id: existingInvoice.id, deduplicated: true }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  // ── 4. Create draft invoice ─────────────────────────────────────────────
   const now = new Date().toISOString();
   const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
@@ -191,7 +293,7 @@ Deno.serve(async (req) => {
       restaurant_id:  restaurantId,
       status:         "draft",
       receipt_status: "pending",
-      vendor_name:    null,
+      vendor_name:    subjectTrimmed,
       invoice_number: null,
       invoice_date:   null,
       created_by:     null,   // email path — no user session
@@ -329,7 +431,12 @@ Deno.serve(async (req) => {
 
       if (itemRows.length > 0) {
         const { error: itemErr } = await supabase.from("invoice_items").insert(itemRows);
-        if (itemErr) console.warn("[inbound-invoice-email] invoice_items insert error:", itemErr);
+        if (itemErr) {
+          console.warn("[inbound-invoice-email] invoice_items insert error:", itemErr);
+        } else {
+          const matchedCount = await matchInvoiceCatalogItems(supabase, restaurantId, invoiceId);
+          console.log(`[inbound-invoice-email] catalog matched ${matchedCount} items`);
+        }
       }
     }
   }

@@ -139,6 +139,9 @@ export default function InvoicesPage() {
     parsing,
     saving,
     intakeUploading,
+    parsingProgressMessage,
+    parseFailureKind,
+    clearParseFailure,
     handleImportedFile,
     handleCapturedPhoto,
     handleSaveInvoice,
@@ -164,13 +167,46 @@ export default function InvoicesPage() {
     onOpenEditorForInvoice: openInvoiceEditor,
   });
 
+  const showPhotoQualityTip = useCallback(() => {
+    toast.info("For best results: good lighting, all text visible, lay invoice flat before photographing", {
+      duration: 5000,
+    });
+  }, []);
+
   const handleTakePhotoClick = useCallback(() => {
     if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
       toast.error("Use Upload PDF instead on desktop");
       return;
     }
+    showPhotoQualityTip();
+    clearParseFailure();
     photoInputRef.current?.click();
-  }, []);
+  }, [clearParseFailure, showPhotoQualityTip]);
+
+  const handleIntakePhotoClick = useCallback(() => {
+    showPhotoQualityTip();
+    clearParseFailure();
+    intakePhotoRef.current?.click();
+  }, [clearParseFailure, showPhotoQualityTip]);
+
+  const handleScannedPdfTakePhoto = useCallback(() => {
+    clearParseFailure();
+    setCreateTab("import");
+    if (!createOpen) {
+      resetCreateForm();
+      setCreateOpen(true);
+    }
+    handleTakePhotoClick();
+  }, [clearParseFailure, createOpen, handleTakePhotoClick, resetCreateForm]);
+
+  const handleScannedPdfEnterManually = useCallback(() => {
+    clearParseFailure();
+    setCreateTab("manual");
+    if (!createOpen) {
+      resetCreateForm();
+      setCreateOpen(true);
+    }
+  }, [clearParseFailure, createOpen, resetCreateForm]);
 
   const onImportFilePicked = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -395,11 +431,34 @@ export default function InvoicesPage() {
             size="sm"
             className="gap-2"
             disabled={intakeUploading || !currentRestaurant}
-            onClick={() => intakePhotoRef.current?.click()}
+            onClick={handleIntakePhotoClick}
           >
             {intakeUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
             Upload Photo
           </Button>
+          {(intakeUploading && parsingProgressMessage) && (
+            <p className="w-full text-xs text-muted-foreground">{parsingProgressMessage}</p>
+          )}
+          {parseFailureKind === "scanned_pdf" && !createOpen && (
+            <Alert className="w-full border-warning/30 bg-warning/5">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              <AlertDescription className="text-sm space-y-3">
+                <p>This looks like a scanned invoice. Try:</p>
+                <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                  <li>Take a photo of the invoice instead (use Upload Photo)</li>
+                  <li>Enter the items manually</li>
+                </ol>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button type="button" size="sm" variant="outline" onClick={handleScannedPdfTakePhoto}>
+                    Take Photo Instead
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={handleScannedPdfEnterManually}>
+                    Enter Manually
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
           <Button
             type="button"
             className="bg-gradient-amber shadow-amber gap-2"
@@ -507,11 +566,33 @@ export default function InvoicesPage() {
                       ) : (
                         <Upload className="h-8 w-8 mx-auto text-muted-foreground/40" />
                       )}
-                      <p className="text-sm font-medium">{parsing ? "AI is parsing your invoice..." : "Drop or click to upload"}</p>
+                      <p className="text-sm font-medium">
+                        {parsing ? (parsingProgressMessage ?? "AI is parsing your invoice...") : "Drop or click to upload"}
+                      </p>
                       <p className="text-xs text-muted-foreground">PDF, CSV, or Excel files supported</p>
                     </label>
                   </div>
                 </div>
+                {parseFailureKind === "scanned_pdf" && (
+                  <Alert className="border-warning/30 bg-warning/5">
+                    <AlertTriangle className="h-4 w-4 text-warning" />
+                    <AlertDescription className="text-sm space-y-3">
+                      <p>This looks like a scanned invoice. Try:</p>
+                      <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                        <li>Take a photo of the invoice instead (use Upload Photo)</li>
+                        <li>Enter the items manually</li>
+                      </ol>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button type="button" size="sm" variant="outline" onClick={handleScannedPdfTakePhoto}>
+                          Take Photo Instead
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" onClick={handleScannedPdfEnterManually}>
+                          Enter Manually
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="space-y-2">
                   <input
                     ref={photoInputRef}
