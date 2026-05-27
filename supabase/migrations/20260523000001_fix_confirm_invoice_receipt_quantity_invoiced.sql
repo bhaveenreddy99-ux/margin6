@@ -1,22 +1,5 @@
--- =============================================================================
--- Price-change vs unit-mismatch detection on invoice confirmation.
---
--- Bug: confirm_invoice_receipt was firing PRICE_INCREASE/PRICE_DECREASE
--- whenever the catalog $/unit differed from the invoiced $/unit, even when
--- the invoice was charging in a different unit-of-measure (case vs lb).
--- That surfaced fake "-92% drops" the moment a deli vendor billed by-the-pound
--- on a catalog row whose unit_cost was per-case.
---
--- This migration replaces confirm_invoice_receipt to:
---   * Compare pack_size between invoice_items and inventory_catalog_items.
---     Different (case-insensitive) → treat as UNIT_MISMATCH, not a price change.
---   * Treat any |%change| > 50% as UNIT_MISMATCH on the assumption that real
---     vendor price moves are smaller than that.
---   * Only fire PRICE_INCREASE when units match AND new > old by > 5%.
---   * Still fire PRICE_DECREASE when units match AND new < old by > 5%.
---   * Always update the catalog cost so reporting stays current — only
---     the notification path branches.
--- =============================================================================
+-- Fix regression: confirm_invoice_receipt referenced dropped column ii.quantity.
+-- Live column is invoice_items.quantity_invoiced.
 
 CREATE OR REPLACE FUNCTION public.confirm_invoice_receipt(
   p_invoice_id    uuid,

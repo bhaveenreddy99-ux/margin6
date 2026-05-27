@@ -1,5 +1,5 @@
 -- Stock movements on receipt confirmation: use reviewed invoice_line_comparisons.received_qty
--- when present; otherwise invoice_items.quantity (unchanged fallback).
+-- when present; otherwise invoice_items.quantity_invoiced (unchanged fallback).
 
 CREATE OR REPLACE FUNCTION public.confirm_invoice_receipt(
   p_invoice_id uuid,
@@ -52,9 +52,9 @@ BEGIN
         SELECT
           ii.id,
           ii.item_name,
-          ii.quantity,
+          ii.quantity_invoiced,
           ii.catalog_item_id,
-          COALESCE(ilc.received_qty, ii.quantity) AS qty_for_stock
+          COALESCE(ilc.received_qty, ii.quantity_invoiced) AS qty_for_stock
         FROM public.invoice_items AS ii
         LEFT JOIN (
           SELECT DISTINCT ON (invoice_item_id)
@@ -111,9 +111,9 @@ BEGIN
         SELECT
           ii.id,
           ii.item_name,
-          ii.quantity,
+          ii.quantity_invoiced,
           ii.catalog_item_id,
-          COALESCE(ilc.received_qty, ii.quantity) AS qty_for_stock
+          COALESCE(ilc.received_qty, ii.quantity_invoiced) AS qty_for_stock
         FROM public.invoice_items AS ii
         LEFT JOIN (
           SELECT DISTINCT ON (invoice_item_id)

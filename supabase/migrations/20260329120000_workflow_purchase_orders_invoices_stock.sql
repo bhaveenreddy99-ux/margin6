@@ -700,7 +700,7 @@ BEGIN
 
     IF NOT v_already_confirmed THEN
       FOR v_item IN
-        SELECT ii.id, ii.item_name, ii.quantity, ii.catalog_item_id
+        SELECT ii.id, ii.item_name, ii.quantity_invoiced, ii.catalog_item_id
         FROM public.invoice_items AS ii
         WHERE ii.invoice_id = p_invoice_id
       LOOP
@@ -746,7 +746,7 @@ BEGIN
       END LOOP;
     ELSE
       FOR v_item IN
-        SELECT ii.id, ii.item_name, ii.quantity, ii.catalog_item_id
+        SELECT ii.id, ii.item_name, ii.quantity_invoiced, ii.catalog_item_id
         FROM public.invoice_items AS ii
         WHERE ii.invoice_id = p_invoice_id
       LOOP

@@ -74,10 +74,10 @@ BEGIN
     SELECT
       ii.id,
       ii.item_name,
-      ii.quantity,
+      ii.quantity_invoiced,
       ii.unit_cost                            AS invoiced_unit_cost,
       ii.catalog_item_id,
-      COALESCE(ilc.received_qty, ii.quantity) AS qty_for_stock
+      COALESCE(ilc.received_qty, ii.quantity_invoiced) AS qty_for_stock
     FROM public.invoice_items AS ii
     LEFT JOIN (
       SELECT DISTINCT ON (invoice_item_id)

@@ -209,10 +209,10 @@ BEGIN
       SELECT
         ii.id,
         ii.item_name,
-        ii.quantity           AS billed_qty,
+        ii.quantity_invoiced           AS billed_qty,
         ii.unit               AS billed_unit,
         ii.catalog_item_id,
-        COALESCE(ilc.received_qty, ii.quantity)        AS received_qty_raw,
+        COALESCE(ilc.received_qty, ii.quantity_invoiced)        AS received_qty_raw,
         COALESCE(ii.unit, 'CS')                        AS source_unit,
         cat.pack_size
       FROM public.invoice_items AS ii
@@ -312,7 +312,7 @@ BEGIN
     -- Already confirmed — return current state only
     FOR v_item IN
       SELECT ii.id, ii.item_name, ii.catalog_item_id,
-             COALESCE(ilc.received_qty, ii.quantity) AS received_qty_raw
+             COALESCE(ilc.received_qty, ii.quantity_invoiced) AS received_qty_raw
       FROM public.invoice_items AS ii
       LEFT JOIN LATERAL (
         SELECT received_qty FROM public.invoice_line_comparisons
