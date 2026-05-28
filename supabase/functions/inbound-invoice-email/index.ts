@@ -35,6 +35,7 @@ import {
   sendMargin6Email,
 } from "../_shared/margin6Email.ts";
 import { matchInvoiceCatalogItems } from "../_shared/matchInvoiceCatalogItems.ts";
+import { resolveUnitCost } from "../_shared/resolveInvoiceUnitCost.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -408,17 +409,24 @@ Deno.serve(async (req) => {
           const qty       = Number(r.quantity)  || 0;
           const unitCost  = r.unit_cost  != null ? Number(r.unit_cost)  : null;
           const lineTotal = r.line_total != null ? Number(r.line_total) : null;
+          const packSize  = r.pack_size  ? String(r.pack_size).trim()  : null;
+          const correctedUnitCost = resolveUnitCost(
+            unitCost != null && Number.isFinite(unitCost) ? unitCost : null,
+            lineTotal != null && Number.isFinite(lineTotal) ? lineTotal : null,
+            qty,
+            packSize,
+          );
           const totalCost =
             lineTotal != null && Number.isFinite(lineTotal) ? lineTotal
-            : unitCost != null && Number.isFinite(unitCost) && Number.isFinite(qty)
-              ? unitCost * qty
+            : correctedUnitCost != null && Number.isFinite(correctedUnitCost) && Number.isFinite(qty)
+              ? correctedUnitCost * qty
               : null;
           return {
             invoice_id:      invoiceId,
             item_name:       String(r.item_name ?? "").trim(),
             product_number:  r.product_number ? String(r.product_number).trim() : null,
             quantity_invoiced: qty,
-            unit_cost:       unitCost,
+            unit_cost:       correctedUnitCost,
             total_cost:      totalCost,
             unit:            r.unit       ? String(r.unit).trim()       : null,
             pack_size:       r.pack_size  ? String(r.pack_size).trim()  : null,

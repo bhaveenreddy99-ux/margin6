@@ -1,3 +1,5 @@
+import { applyWeightItemUnitCostCorrection } from "../_shared/resolveInvoiceUnitCost.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -12,7 +14,7 @@ GENERAL RULES:
 - Include EVERY product line item
 - Use SHIPPED quantity not ORDERED quantity
 - Skip headers, subtotals, tax lines unless they have a product SKU
-- For unit_cost: use the per-unit price (not extended price)
+- For unit_cost: use the per-unit price (not extended price), EXCEPT for weight-priced items (see below)
 - For line_total: use the extended/total price for that line
 
 VENDOR-SPECIFIC RULES:
@@ -23,6 +25,18 @@ Performance Foodservice / PFG:
   - quantity = SHIP column (not ORDER column)
   - brand_name = brand code before item description (e.g. SCHLTZ, CAMPBL)
   - product_number = item number (e.g. HT664, AW706)
+
+  WEIGHT-PRICED ITEMS (critical for PFG):
+  Some items show a per-pound rate as unit price but are sold by the case. Identify when:
+  - The description or pack size says "LB" (e.g. "3/7 LB")
+  - OR unit price is very low (under $10) but line total is much higher (over $20)
+  - OR a WEIGHING line shows: "WEIGHING X.XX LBS @ $Y.YY"
+  For weight-priced items:
+  - unit_cost MUST be line_total divided by quantity (the actual per-case cost), NOT the per-pound rate
+  - quantity = SHIP column (cases shipped)
+  - Example: "WEIGHING 40.02 LBS @ 3.20" with line total $128.06 and qty 2
+    → unit_cost = 64.03 (128.06 / 2), NOT 3.20
+    → line_total = 128.06
 
 Sysco:
   - vendor_name = "Sysco"
@@ -98,6 +112,8 @@ function validateExtractedInvoice(input: Record<string, unknown>): Record<string
     if (!item || typeof item !== "object") return false;
     return String((item as Record<string, unknown>).item_name ?? "").trim().length > 0;
   });
+
+  items = applyWeightItemUnitCostCorrection(items);
 
   let total = Number(input.total);
   if ((!Number.isFinite(total) || total <= 0) && items.length > 0) {
@@ -263,7 +279,7 @@ Deno.serve(async (req) => {
                       product_number: { type: "string", description: "Vendor product/SKU number" },
                       item_name: { type: "string", description: "Item description" },
                       quantity: { type: "number", description: "Quantity shipped" },
-                      unit_cost: { type: "number", description: "Unit price (no currency symbols)" },
+                      unit_cost: { type: "number", description: "Per-case unit price (for weight-sold items use line_total/qty, not per-lb rate)" },
                       line_total: { type: "number", description: "Line total (no currency symbols)" },
                       unit: { type: "string", description: "Unit of measure e.g. CS, EA, LB" },
                       pack_size: { type: "string", description: "Pack size e.g. 6/10# or 4/1GAL" },
