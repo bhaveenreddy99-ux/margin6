@@ -1,12 +1,4 @@
--- =============================================================================
--- Invoice Price Sync + Price Change Notifications
---
--- Rebuilds confirm_invoice_receipt to:
---   1. Auto-update inventory_catalog_items.default_unit_cost
---      when the invoiced price differs from stored by > 1% AND > $0.01
---   2. Insert PRICE_INCREASE / PRICE_DECREASE in-app notifications for
---      every OWNER and MANAGER at that restaurant
--- =============================================================================
+-- Fix confirm_invoice_receipt: inventory_catalog_items has default_unit_cost, not unit_cost.
 
 CREATE OR REPLACE FUNCTION public.confirm_invoice_receipt(
   p_invoice_id    uuid,
@@ -31,9 +23,15 @@ DECLARE
   v_old_cost          numeric;
   v_new_cost          numeric;
   v_pct_diff          numeric;
+  v_abs_pct           numeric;
+  v_catalog_pack      text;
+  v_invoice_pack      text;
+  v_units_match       boolean;
+  v_classification    text;
   v_member            RECORD;
   v_price_increases   jsonb   := '[]'::jsonb;
   v_price_decreases   jsonb   := '[]'::jsonb;
+  v_unit_mismatches   jsonb   := '[]'::jsonb;
 BEGIN
   IF NOT public.is_member_of(p_restaurant_id) THEN
     RAISE EXCEPTION 'Access denied';
@@ -69,13 +67,13 @@ BEGIN
     RETURNING confirmed_at INTO v_confirmed_at;
   END IF;
 
-  -- Loop every invoice line
   FOR v_item IN
     SELECT
       ii.id,
       ii.item_name,
       ii.quantity_invoiced,
       ii.unit_cost                            AS invoiced_unit_cost,
+      ii.pack_size                            AS invoiced_pack_size,
       ii.catalog_item_id,
       COALESCE(ilc.received_qty, ii.quantity_invoiced) AS qty_for_stock
     FROM public.invoice_items AS ii
@@ -102,7 +100,6 @@ BEGIN
 
     v_confirmed_count := v_confirmed_count + 1;
 
-    -- 1. Stock movement (unchanged)
     IF NOT v_already_confirmed
        AND v_item.qty_for_stock IS NOT NULL
        AND v_item.qty_for_stock > 0 THEN
@@ -122,18 +119,24 @@ BEGIN
       END IF;
     END IF;
 
-    -- 2. Price sync
     IF NOT v_already_confirmed
        AND v_item.invoiced_unit_cost IS NOT NULL
        AND v_item.invoiced_unit_cost > 0 THEN
 
-      SELECT default_unit_cost INTO v_old_cost
+      SELECT default_unit_cost, pack_size
+        INTO v_old_cost, v_catalog_pack
       FROM public.inventory_catalog_items
       WHERE id = v_item.catalog_item_id;
 
       v_new_cost := v_item.invoiced_unit_cost;
+      v_invoice_pack := lower(coalesce(btrim(v_item.invoiced_pack_size), ''));
+      v_catalog_pack := lower(coalesce(btrim(v_catalog_pack), ''));
 
-      -- Threshold: > $0.01 absolute AND > 1% relative
+      -- Units match when either side is blank (legacy data) or the trimmed
+      -- pack_size strings are identical case-insensitively.
+      v_units_match :=
+        v_invoice_pack = '' OR v_catalog_pack = '' OR v_invoice_pack = v_catalog_pack;
+
       IF v_old_cost IS NULL
          OR (
            ABS(v_new_cost - v_old_cost) > 0.01
@@ -153,23 +156,54 @@ BEGIN
           WHEN v_old_cost IS NULL OR v_old_cost = 0 THEN NULL
           ELSE ROUND(((v_new_cost - v_old_cost) / ABS(v_old_cost)) * 100, 1)
         END;
+        v_abs_pct := CASE WHEN v_pct_diff IS NULL THEN NULL ELSE ABS(v_pct_diff) END;
+
+        -- Classify:
+        --   * pack_size mismatch              → UNIT_MISMATCH
+        --   * |%change| > 50% (suspect unit)  → UNIT_MISMATCH
+        --   * |%change| <= 5%                 → not noteworthy, no notification
+        --   * new > old by > 5%               → PRICE_INCREASE
+        --   * new < old by > 5%               → PRICE_DECREASE
+        IF NOT v_units_match THEN
+          v_classification := 'unit_mismatch';
+        ELSIF v_abs_pct IS NOT NULL AND v_abs_pct > 50 THEN
+          v_classification := 'unit_mismatch';
+        ELSIF v_abs_pct IS NULL OR v_abs_pct <= 5 THEN
+          v_classification := 'no_alert';
+        ELSIF v_new_cost > v_old_cost THEN
+          v_classification := 'price_increase';
+        ELSE
+          v_classification := 'price_decrease';
+        END IF;
 
         v_price_changes := v_price_changes || jsonb_build_object(
-          'item_name',  v_item.item_name,
-          'old_cost',   v_old_cost,
-          'new_cost',   v_new_cost,
-          'pct_change', v_pct_diff,
-          'direction',  CASE WHEN v_new_cost > COALESCE(v_old_cost, 0) THEN 'up' ELSE 'down' END
+          'item_name',     v_item.item_name,
+          'old_cost',      v_old_cost,
+          'new_cost',      v_new_cost,
+          'pct_change',    v_pct_diff,
+          'invoice_pack',  v_invoice_pack,
+          'catalog_pack',  v_catalog_pack,
+          'classification', v_classification,
+          'direction',     CASE WHEN v_new_cost > COALESCE(v_old_cost, 0) THEN 'up' ELSE 'down' END
         );
 
-        IF v_new_cost > COALESCE(v_old_cost, 0) THEN
+        IF v_classification = 'unit_mismatch' THEN
+          v_unit_mismatches := v_unit_mismatches || jsonb_build_object(
+            'item_name',    v_item.item_name,
+            'old_cost',     v_old_cost,
+            'new_cost',     v_new_cost,
+            'pct_change',   v_pct_diff,
+            'invoice_pack', v_invoice_pack,
+            'catalog_pack', v_catalog_pack
+          );
+        ELSIF v_classification = 'price_increase' THEN
           v_price_increases := v_price_increases || jsonb_build_object(
             'item_name',  v_item.item_name,
             'old_cost',   v_old_cost,
             'new_cost',   v_new_cost,
             'pct_change', v_pct_diff
           );
-        ELSE
+        ELSIF v_classification = 'price_decrease' THEN
           v_price_decreases := v_price_decreases || jsonb_build_object(
             'item_name',  v_item.item_name,
             'old_cost',   v_old_cost,
@@ -187,8 +221,12 @@ BEGIN
     );
   END LOOP;
 
-  -- 3. Price change notifications → every OWNER + MANAGER
-  IF NOT v_already_confirmed AND jsonb_array_length(v_price_changes) > 0 THEN
+  IF NOT v_already_confirmed
+     AND (
+       jsonb_array_length(v_price_increases) > 0
+       OR jsonb_array_length(v_price_decreases) > 0
+       OR jsonb_array_length(v_unit_mismatches) > 0
+     ) THEN
     FOR v_member IN
       SELECT user_id FROM public.restaurant_members
       WHERE restaurant_id = p_restaurant_id
@@ -247,6 +285,32 @@ BEGIN
           jsonb_build_object('invoice_id', p_invoice_id, 'items', v_price_decreases)
         );
       END IF;
+
+      IF jsonb_array_length(v_unit_mismatches) > 0 THEN
+        INSERT INTO public.notifications (
+          restaurant_id, user_id, type, title, message, severity, data
+        ) VALUES (
+          p_restaurant_id,
+          v_member.user_id,
+          'UNIT_MISMATCH',
+          format('%s item%s billed in a different unit — verify pricing',
+            jsonb_array_length(v_unit_mismatches),
+            CASE WHEN jsonb_array_length(v_unit_mismatches) > 1 THEN 's' ELSE '' END),
+          (
+            SELECT string_agg(
+              format('%s: catalog %s vs invoice %s (was $%s, now $%s)',
+                item->>'item_name',
+                COALESCE(NULLIF(item->>'catalog_pack', ''), '—'),
+                COALESCE(NULLIF(item->>'invoice_pack', ''), '—'),
+                COALESCE(ROUND((item->>'old_cost')::numeric, 2)::text, '?'),
+                ROUND((item->>'new_cost')::numeric, 2)),
+              ', ' ORDER BY (item->>'item_name'))
+            FROM jsonb_array_elements(v_unit_mismatches) item
+          ),
+          'WARNING',
+          jsonb_build_object('invoice_id', p_invoice_id, 'items', v_unit_mismatches)
+        );
+      END IF;
     END LOOP;
   END IF;
 
@@ -258,6 +322,7 @@ BEGIN
     'inventory_updated',       v_movements_count > 0,
     'stock_movements_created', v_movements_count,
     'price_changes',           v_price_changes,
+    'unit_mismatches',         v_unit_mismatches,
     'confirmed_at',            v_confirmed_at,
     'message', CASE
       WHEN v_already_confirmed THEN 'Receipt was already confirmed.'

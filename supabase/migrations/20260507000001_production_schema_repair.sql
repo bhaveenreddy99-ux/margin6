@@ -624,7 +624,7 @@ BEGIN
 
       -- ── Price sync ──────────────────────────────────────────────────────
       IF v_item.invoiced_unit_cost IS NOT NULL AND v_item.invoiced_unit_cost > 0 THEN
-        SELECT unit_cost INTO v_old_cost
+        SELECT default_unit_cost INTO v_old_cost
         FROM public.inventory_catalog_items
         WHERE id = v_item.catalog_item_id;
 
@@ -642,7 +642,6 @@ BEGIN
         THEN
           UPDATE public.inventory_catalog_items
           SET
-            unit_cost         = v_new_cost,
             default_unit_cost = v_new_cost,
             updated_at        = now()
           WHERE id = v_item.catalog_item_id;
