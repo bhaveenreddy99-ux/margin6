@@ -99,7 +99,7 @@ export function MoneyLostWidget({
       icon: TrendingUp,
       value: priceIncreaseImpact,
       formula:
-        "Σ (invoiced_unit_cost − po_unit_cost) × received_qty across invoice_line_comparisons where status = 'price_mismatch' and invoice.invoice_date within period",
+        "Σ (new_cost − old_cost) × 1 from PRICE_INCREASE notifications in period, plus invoice_line_comparisons where status = 'price_mismatch'",
     },
     overstock: {
       title: "Overstock",

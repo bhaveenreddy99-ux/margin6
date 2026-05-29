@@ -6,6 +6,12 @@ import type {
   ProfitLeakReason,
 } from "@/domain/dashboard/dashboardTypes";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
+import {
+  buildPriceIncreaseBreakdownRows,
+  fetchPriceIncreaseNotifications,
+  loadVendorNamesForInvoiceIds,
+  parsePriceIncreaseNotificationData,
+} from "@/domain/dashboard/priceIncreaseFromNotifications";
 
 type Bucket = {
   total: number;
@@ -35,10 +41,9 @@ function getOrCreate(map: Map<LeakKey, Bucket>, key: LeakKey): Bucket {
 /**
  * Builds the top-5 ranked list of (item, reason) pairs that lost the most
  * money in the period. Sources: waste_log, invoice_line_comparisons (price
- * mismatches on invoices dated within the period), and the latest APPROVED
- * inventory session's overstocked items. Returns `[]` on any failure — never
- * throws. Each leak entry includes a per-line breakdown so the UI can open a
- * DrilldownSheet without re-querying.
+ * mismatches), PRICE_INCREASE notifications from posted invoices, and the
+ * latest APPROVED inventory session's overstocked items. Returns `[]` on any
+ * failure — never throws.
  */
 export async function loadProfitLeaks(
   supabase: SupabaseClient,
@@ -167,6 +172,27 @@ export async function loadProfitLeaks(
           source: meta ? `${meta.vendor} · ${meta.number}` : "invoice",
         });
       }
+    }
+
+    // Posted invoices emit PRICE_INCREASE notifications — not invoice_line_comparisons.
+    const priceNotifs = await fetchPriceIncreaseNotifications(
+      supabase,
+      restaurantId,
+      loc,
+      from,
+      to,
+    );
+    const notifInvoiceIds = priceNotifs
+      .map((n) => parsePriceIncreaseNotificationData(n.data).invoice_id)
+      .filter((id): id is string => Boolean(id));
+    const vendorByInvoiceId = await loadVendorNamesForInvoiceIds(supabase, notifInvoiceIds);
+
+    for (const row of buildPriceIncreaseBreakdownRows(priceNotifs, vendorByInvoiceId)) {
+      const name = row.label.trim();
+      if (!name) continue;
+      const bucket = getOrCreate(buckets, leakKey(name, "Price Hike"));
+      bucket.total += row.value;
+      bucket.rows.push(row);
     }
   } catch {
     // swallow

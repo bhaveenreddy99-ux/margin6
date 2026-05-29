@@ -4,7 +4,7 @@ import { ChevronRight, Inbox, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
-import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
+import { loadPriceIncreaseAlertRows } from "@/domain/dashboard/priceIncreaseFromNotifications";
 import type { DashboardTimeFilter } from "@/domain/dashboard/dashboardTypes";
 
 interface PriceHikeAlertsCardProps {
@@ -12,14 +12,6 @@ interface PriceHikeAlertsCardProps {
   locationId: string | null | undefined;
   timeFilter: DashboardTimeFilter;
 }
-
-type PriceHikeRow = {
-  id: string;
-  vendor_name: string;
-  item_name: string;
-  pct_change: number;
-  dollar_impact: number;
-};
 
 function severityClasses(pct: number): string {
   if (pct > 20) {
@@ -48,7 +40,7 @@ export function PriceHikeAlertsCard({
   timeFilter,
 }: PriceHikeAlertsCardProps) {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<PriceHikeRow[]>([]);
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof loadPriceIncreaseAlertRows>>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,77 +48,13 @@ export function PriceHikeAlertsCard({
     (async () => {
       setLoading(true);
       try {
-        const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
-        const fromDate = startDate.slice(0, 10);
-        const toDate = endDate.slice(0, 10);
-
-        let invQ = supabase
-          .from("invoices")
-          .select("id, vendor_name, invoice_date")
-          .eq("restaurant_id", restaurantId)
-          .gte("invoice_date", fromDate)
-          .lte("invoice_date", toDate);
-        if (locationId) invQ = invQ.eq("location_id", locationId);
-
-        const { data: invoices } = (await invQ) as unknown as {
-          data: Array<{
-            id: string;
-            vendor_name: string | null;
-            invoice_date: string | null;
-          }> | null;
-        };
-
-        const vendorById = new Map<string, string>();
-        for (const inv of invoices ?? []) {
-          vendorById.set(inv.id, inv.vendor_name ?? "Unknown vendor");
-        }
-        const invoiceIds = Array.from(vendorById.keys());
-        if (cancelled) return;
-        if (invoiceIds.length === 0) {
-          setRows([]);
-          return;
-        }
-
-        const { data: comparisons } = (await supabase
-          .from("invoice_line_comparisons")
-          .select(
-            "id, invoice_id, item_name, po_unit_cost, invoiced_unit_cost, invoiced_qty, status",
-          )
-          .in("invoice_id", invoiceIds)
-          .eq("status", "price_mismatch")) as unknown as {
-          data: Array<{
-            id: string;
-            invoice_id: string | null;
-            item_name: string | null;
-            po_unit_cost: number | null;
-            invoiced_unit_cost: number | null;
-            invoiced_qty: number | null;
-            status: string | null;
-          }> | null;
-        };
-
-        if (cancelled) return;
-
-        const next: PriceHikeRow[] = [];
-        for (const row of comparisons ?? []) {
-          const po = Number(row.po_unit_cost ?? 0);
-          const inv = Number(row.invoiced_unit_cost ?? 0);
-          const qty = Number(row.invoiced_qty ?? 0);
-          if (!Number.isFinite(po) || po <= 0) continue;
-          if (!Number.isFinite(inv) || inv <= po) continue;
-          const pct = ((inv - po) / po) * 100;
-          const dollarImpact = Math.max(0, (inv - po) * qty);
-          if (dollarImpact <= 0) continue;
-          next.push({
-            id: row.id,
-            vendor_name: row.invoice_id ? vendorById.get(row.invoice_id) ?? "Unknown vendor" : "Unknown vendor",
-            item_name: (row.item_name ?? "").trim() || "Item",
-            pct_change: pct,
-            dollar_impact: dollarImpact,
-          });
-        }
-        next.sort((a, b) => b.dollar_impact - a.dollar_impact);
-        setRows(next);
+        const next = await loadPriceIncreaseAlertRows(
+          supabase,
+          restaurantId,
+          locationId,
+          timeFilter,
+        );
+        if (!cancelled) setRows(next);
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -1,3 +1,4 @@
+import type { FoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
 import type { KPISnapshot, OverstockItem, ProfitLeakItem } from "@/domain/dashboard/dashboardTypes";
 import type { InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import type { InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
@@ -12,6 +13,12 @@ export function buildDashboardSnapshot(
   shrinkageValue: number = 0,
   topProfitLeaks: ProfitLeakItem[] = [],
   overstockItems: OverstockItem[] = [],
+  foodCost: FoodCostMetrics = {
+    foodCostPct: null,
+    weeklyGrossSales: null,
+    targetPct: 30,
+    status: null,
+  },
 ): KPISnapshot {
   return {
     stockStatus: inventory.stockStatus,
@@ -38,5 +45,9 @@ export function buildDashboardSnapshot(
     shrinkageValue,
     topProfitLeaks,
     overstockItems,
+    foodCostPct: foodCost.foodCostPct,
+    weeklyGrossSales: foodCost.weeklyGrossSales,
+    foodCostTargetPct: foodCost.targetPct,
+    foodCostStatus: foodCost.status,
   };
 }

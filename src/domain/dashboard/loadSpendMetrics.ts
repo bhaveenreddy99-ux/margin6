@@ -19,6 +19,10 @@ import type {
   SpendPurchaseHistoryRow,
 } from "@/domain/dashboard/dashboardTypes";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
+import {
+  fetchPriceIncreaseNotifications,
+  sumPriceIncreaseImpactFromNotifications,
+} from "@/domain/dashboard/priceIncreaseFromNotifications";
 
 export type SpendMetricsResult = {
   periodSpend: number;
@@ -164,6 +168,19 @@ export async function loadSpendMetrics(
       }
       priceImpact += linePriceIncreaseImpact(comparison);
     }
+  }
+
+  try {
+    const priceNotifs = await fetchPriceIncreaseNotifications(
+      supabase,
+      restaurantId,
+      locationId,
+      startDate,
+      endDate,
+    );
+    priceImpact += sumPriceIncreaseImpactFromNotifications(priceNotifs);
+  } catch {
+    // swallow — comparison-based impact still returned
   }
 
   return {

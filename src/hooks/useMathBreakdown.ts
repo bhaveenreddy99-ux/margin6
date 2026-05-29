@@ -1,6 +1,11 @@
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
-import type { DrilldownRow } from "@/components/DrilldownSheet";
+import {
+  buildPriceIncreaseBreakdownRows,
+  fetchPriceIncreaseNotifications,
+  loadVendorNamesForInvoiceIds,
+  parsePriceIncreaseNotificationData,
+} from "@/domain/dashboard/priceIncreaseFromNotifications";
 
 type WasteRow = {
   item_name: string | null;
@@ -115,34 +120,56 @@ export async function fetchPriceHikeBreakdown(
   const invMap = new Map<string, InvoiceMeta>();
   for (const inv of invoices ?? []) invMap.set(inv.id, inv);
   const invoiceIds = Array.from(invMap.keys());
-  if (invoiceIds.length === 0) return [];
 
-  const { data: comparisons } = (await supabase
-    .from("invoice_line_comparisons")
-    .select(
-      "invoice_id, item_name, po_unit_cost, invoiced_unit_cost, received_qty, invoiced_qty, status",
-    )
-    .in("invoice_id", invoiceIds)
-    .eq("status", "price_mismatch")) as unknown as { data: ComparisonRow[] | null };
+  let comparisonRows: DrilldownRow[] = [];
+  if (invoiceIds.length > 0) {
+    const { data: comparisons } = (await supabase
+      .from("invoice_line_comparisons")
+      .select(
+        "invoice_id, item_name, po_unit_cost, invoiced_unit_cost, received_qty, invoiced_qty, status",
+      )
+      .in("invoice_id", invoiceIds)
+      .eq("status", "price_mismatch")) as unknown as { data: ComparisonRow[] | null };
 
-  return (comparisons ?? [])
-    .map((row) => {
-      const po = Number(row.po_unit_cost ?? 0);
-      const inv = Number(row.invoiced_unit_cost ?? 0);
-      const qty = Number(row.received_qty ?? row.invoiced_qty ?? 0);
-      const impact = Math.max(0, (inv - po) * qty);
-      const meta = row.invoice_id ? invMap.get(row.invoice_id) : undefined;
-      return {
-        label: row.item_name ?? "—",
-        value: Number.isFinite(impact) ? impact : 0,
-        date: fmtDate(meta?.invoice_date ?? null),
-        source: meta
-          ? `${meta.vendor_name ?? "Unknown"}${meta.invoice_number ? ` · ${meta.invoice_number}` : ""}`
-          : "—",
-      };
-    })
-    .filter((r) => r.value > 0)
-    .sort((a, b) => b.value - a.value);
+    comparisonRows = (comparisons ?? [])
+      .map((row) => {
+        const po = Number(row.po_unit_cost ?? 0);
+        const inv = Number(row.invoiced_unit_cost ?? 0);
+        const qty = Number(row.received_qty ?? row.invoiced_qty ?? 0);
+        const impact = Math.max(0, (inv - po) * qty);
+        const meta = row.invoice_id ? invMap.get(row.invoice_id) : undefined;
+        return {
+          label: row.item_name ?? "—",
+          value: Number.isFinite(impact) ? impact : 0,
+          date: fmtDate(meta?.invoice_date ?? null),
+          source: meta
+            ? `${meta.vendor_name ?? "Unknown"}${meta.invoice_number ? ` · ${meta.invoice_number}` : ""}`
+            : "—",
+        };
+      })
+      .filter((r) => r.value > 0);
+  }
+
+  const priceNotifs = await fetchPriceIncreaseNotifications(
+    supabase,
+    restaurantId,
+    locationId,
+    from,
+    to,
+  );
+  const invoiceIdsFromNotifs = priceNotifs
+    .map((n) => parsePriceIncreaseNotificationData(n.data).invoice_id)
+    .filter((id): id is string => Boolean(id));
+  const vendorByInvoiceId = await loadVendorNamesForInvoiceIds(
+    supabase,
+    invoiceIdsFromNotifs,
+  );
+  const notificationRows = buildPriceIncreaseBreakdownRows(
+    priceNotifs,
+    vendorByInvoiceId,
+  );
+
+  return [...comparisonRows, ...notificationRows].sort((a, b) => b.value - a.value);
 }
 
 export async function fetchOverstockBreakdown(

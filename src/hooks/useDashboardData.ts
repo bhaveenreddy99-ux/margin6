@@ -7,6 +7,7 @@ import { buildDashboardSnapshot } from "@/domain/dashboard/buildDashboardSnapsho
 import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT, type InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import { loadInvoiceMetrics, type InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
 import { loadOverstockItems } from "@/domain/dashboard/loadOverstockItems";
+import { loadFoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
 import { loadProfitLeaks } from "@/domain/dashboard/loadProfitLeaks";
 import { loadShrinkageValue } from "@/domain/dashboard/loadShrinkageValue";
 import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
@@ -52,6 +53,10 @@ const DEFAULT_SNAPSHOT: KPISnapshot = {
   shrinkageValue: 0,
   topProfitLeaks: [],
   overstockItems: [],
+  foodCostPct: null,
+  weeklyGrossSales: null,
+  foodCostTargetPct: 30,
+  foodCostStatus: null,
 };
 
 const EMPTY_INVOICE_RESULT: InvoiceMetricsResult = { pendingInvoices: 0 };
@@ -162,9 +167,26 @@ export function useDashboardData({
           loadOverstockItems(restaurantId, locationId),
         ]);
 
+        const foodCostResult = await loadFoodCostMetrics(
+          locationId,
+          spendResult.periodSpend,
+          timeFilter,
+        );
+
         if (cancelled) return;
 
-        setSnapshot(buildDashboardSnapshot(inventoryResult, invoiceResult, spendResult, wasteResult, shrinkageResult, profitLeaksResult, overstockItemsResult));
+        setSnapshot(
+          buildDashboardSnapshot(
+            inventoryResult,
+            invoiceResult,
+            spendResult,
+            wasteResult,
+            shrinkageResult,
+            profitLeaksResult,
+            overstockItemsResult,
+            foodCostResult,
+          ),
+        );
         setError(null);
         previousFetchRef.current = { locKey, timeFilter, refetchCount };
       } catch (err) {

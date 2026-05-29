@@ -1230,6 +1230,10 @@ function SingleDashboard() {
     shrinkageValue,
     topProfitLeaks,
     overstockItems,
+    foodCostPct,
+    weeklyGrossSales,
+    foodCostTargetPct,
+    foodCostStatus,
   } = useDashboardData({
     currentRestaurantId: currentRestaurant?.id,
     currentLocationId: currentLocation?.id,
@@ -1246,6 +1250,31 @@ function SingleDashboard() {
       missingParCount,
     });
   }, [reorderSummary, deliveryIssuesCount, priceIncreaseImpact, missingParCount]);
+
+  const foodCostLabel = useMemo(() => {
+    if (foodCostPct == null) {
+      return weeklyGrossSales == null
+        ? "Enter weekly sales to unlock food cost %"
+        : "No spend recorded this period";
+    }
+    switch (foodCostStatus) {
+      case "under":
+        return `Under industry target (28–32%) · your target ${foodCostTargetPct}%`;
+      case "at":
+        return `Within industry target (28–32%) · your target ${foodCostTargetPct}%`;
+      case "over":
+        return `Above industry target (28–32%) · your target ${foodCostTargetPct}%`;
+      default:
+        return `Industry target 28–32% · your target ${foodCostTargetPct}%`;
+    }
+  }, [foodCostPct, foodCostStatus, foodCostTargetPct, weeklyGrossSales]);
+
+  const foodCostAccent = useMemo((): "destructive" | "warning" | "success" | "primary" => {
+    if (foodCostStatus === "over") return "destructive";
+    if (foodCostStatus === "at") return "success";
+    if (foodCostStatus === "under") return "primary";
+    return "primary";
+  }, [foodCostStatus]);
 
   const {
     reorderValue,
@@ -1442,6 +1471,15 @@ function SingleDashboard() {
                   accent={lastCountAccent}
                   changeLabel={lastCountDescription}
                 />
+                {perms.can_see_food_cost_pct && (
+                  <KpiCard
+                    icon={BarChart3}
+                    label="Food cost this period"
+                    value={foodCostPct != null ? `${foodCostPct.toFixed(1)}%` : "—"}
+                    accent={foodCostAccent}
+                    changeLabel={foodCostLabel}
+                  />
+                )}
               </div>
             </section>
 

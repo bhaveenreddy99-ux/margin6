@@ -24,7 +24,7 @@ const REASON_FORMULA: Record<ProfitLeakReason, string> = {
   Waste:
     "Σ waste_log.total_cost grouped by item_name (period scoped)",
   "Price Hike":
-    "Σ (invoiced_unit_cost − po_unit_cost) × invoiced_qty grouped by item_name (status = 'price_mismatch', invoices in period)",
+    "Σ (invoiced_unit_cost − po_unit_cost) × invoiced_qty grouped by item_name (status = 'price_mismatch', invoices in period) plus PRICE_INCREASE notifications",
   Overstock:
     "(current_stock − par_level) × unit_cost on the latest APPROVED session, item-by-item",
   Shrinkage:

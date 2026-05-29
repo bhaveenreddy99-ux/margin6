@@ -216,6 +216,10 @@ export type KPISnapshot = {
   shrinkageValue: number;
   topProfitLeaks: ProfitLeakItem[];
   overstockItems: OverstockItem[];
+  foodCostPct: number | null;
+  weeklyGrossSales: number | null;
+  foodCostTargetPct: number;
+  foodCostStatus: "under" | "at" | "over" | null;
 };
 
 export type SingleDashboardData = KPISnapshot & {
