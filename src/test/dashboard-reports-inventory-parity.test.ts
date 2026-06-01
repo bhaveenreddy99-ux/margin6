@@ -5,14 +5,14 @@ import { resolve } from "node:path";
 const srcRoot = resolve(process.cwd(), "src");
 
 /**
- * Pins that Dashboard and Reports both derive inventory session snapshot + trend from
- * `loadInventoryMetrics`, so session ordering and valuation cannot drift between surfaces.
+ * Pins that Dashboard inventory KPIs derive session snapshot + trend from
+ * `loadInventoryMetrics`, so session ordering and valuation stay centralized.
  */
-describe("Dashboard vs Reports inventory loader parity", () => {
-  it("Reports loads inventory KPIs through loadInventoryMetrics", () => {
-    const reports = readFileSync(resolve(srcRoot, "pages/app/Reports.tsx"), "utf8");
-    expect(reports).toContain("loadInventoryMetrics");
-    expect(reports).not.toMatch(/\.from\("inventory_sessions"\)/);
+describe("Dashboard inventory loader wiring", () => {
+  it("Dashboard loads inventory KPIs through loadInventoryMetrics", () => {
+    const dashboard = readFileSync(resolve(srcRoot, "pages/app/Dashboard.tsx"), "utf8");
+    expect(dashboard).toContain("loadInventoryMetrics");
+    expect(dashboard).not.toMatch(/\.from\("inventory_sessions"\)/);
   });
 
   it("useDashboardData loads inventory through loadInventoryMetrics", () => {
