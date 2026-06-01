@@ -136,42 +136,58 @@ export function useDashboardData({
 
     const run = async () => {
       try {
-        let inventoryResult: InventoryMetricsResult;
-        let invoiceResult: InvoiceMetricsResult;
-
         if (!onlyTimeFilterChanged) {
           setLoading(true);
           latestSessionUnitCostByCatalogIdRef.current = {};
-
-          [inventoryResult, invoiceResult] = await Promise.all([
-            loadInventoryMetrics(restaurantId, locationId),
-            loadInvoiceMetrics(restaurantId, locationId),
-          ]);
-
-          if (cancelled) return;
-
-          latestSessionUnitCostByCatalogIdRef.current = inventoryResult.latestSessionUnitCostByCatalogId;
-          cachedInventoryRef.current = inventoryResult;
-          cachedInvoiceRef.current = invoiceResult;
-        } else {
-          inventoryResult = cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT;
-          invoiceResult = cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT;
         }
 
         const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
-        const [spendResult, wasteResult, shrinkageResult, profitLeaksResult, overstockItemsResult] = await Promise.all([
-          loadSpendMetrics(restaurantId, locationId, timeFilter),
-          loadWasteMetrics(restaurantId, locationId, timeFilter, latestSessionUnitCostByCatalogIdRef.current),
+
+        const inventoryPromise: Promise<InventoryMetricsResult> = onlyTimeFilterChanged
+          ? Promise.resolve(cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT)
+          : loadInventoryMetrics(restaurantId, locationId);
+
+        const invoicePromise: Promise<InvoiceMetricsResult> = onlyTimeFilterChanged
+          ? Promise.resolve(cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT)
+          : loadInvoiceMetrics(restaurantId, locationId);
+
+        const spendPromise = loadSpendMetrics(restaurantId, locationId, timeFilter);
+
+        const [
+          inventoryResult,
+          invoiceResult,
+          spendResult,
+          shrinkageResult,
+          profitLeaksResult,
+          overstockItemsResult,
+          wasteResult,
+          foodCostResult,
+        ] = await Promise.all([
+          inventoryPromise,
+          invoicePromise,
+          spendPromise,
           loadShrinkageValue(restaurantId, locationId, timeFilter),
           loadProfitLeaks(supabase, restaurantId, locationId, startDate, endDate),
           loadOverstockItems(restaurantId, locationId),
+          inventoryPromise.then((inventory) =>
+            loadWasteMetrics(
+              restaurantId,
+              locationId,
+              timeFilter,
+              inventory.latestSessionUnitCostByCatalogId,
+            ),
+          ),
+          spendPromise.then((spend) =>
+            loadFoodCostMetrics(locationId, spend.periodSpend, timeFilter),
+          ),
         ]);
 
-        const foodCostResult = await loadFoodCostMetrics(
-          locationId,
-          spendResult.periodSpend,
-          timeFilter,
-        );
+        if (!onlyTimeFilterChanged) {
+          latestSessionUnitCostByCatalogIdRef.current =
+            inventoryResult.latestSessionUnitCostByCatalogId;
+          cachedInventoryRef.current = inventoryResult;
+          cachedInvoiceRef.current = invoiceResult;
+        }
 
         if (cancelled) return;
 
