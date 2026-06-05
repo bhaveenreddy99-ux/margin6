@@ -42,6 +42,7 @@ const NotificationsPage = lazy(() => import("@/pages/app/Notifications"));
 const BillingPage = lazy(() => import("@/pages/app/Billing"));
 const AlertSettingsPage = lazy(() => import("@/pages/app/settings/AlertSettings"));
 const ReminderSettingsPage = lazy(() => import("@/pages/app/settings/ReminderSettings"));
+const AuditCenterPage = lazy(() => import("@/pages/app/settings/AuditCenter"));
 const ForgotPasswordPage = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPasswordPage = lazy(() => import("@/pages/ResetPassword"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
@@ -136,6 +137,7 @@ const App = () => (
                   <Route path="billing" element={<OwnerRoute><BillingPage /></OwnerRoute>} />
                   <Route path="settings/alerts" element={<OwnerRoute><AlertSettingsPage /></OwnerRoute>} />
                   <Route path="settings/reminders" element={<OwnerRoute><ReminderSettingsPage /></OwnerRoute>} />
+                  <Route path="settings/audit" element={<OwnerRoute><AuditCenterPage /></OwnerRoute>} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>

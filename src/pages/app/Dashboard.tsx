@@ -45,6 +45,22 @@ import { useDashboardData } from "@/hooks/useDashboardData";
 import { useLocationPermissions } from "@/hooks/useLocationPermissions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DataQualityBanner } from "@/components/dashboard/DataQualityBanner";
+import {
+  buildDataQualityInput,
+  buildFoodCostExplain,
+  buildInventoryExplain,
+  buildKpiConfidenceInput,
+  buildReorderExplain,
+  KpiConfidenceBadge,
+  KpiExplainSheet,
+  type KpiExplainPayload,
+} from "@/components/explainability";
+import {
+  computeFoodCostConfidence,
+  computeInventoryValueConfidence,
+  computeReorderConfidence,
+} from "@/domain/dataQuality";
 
 // ─── Today's Briefing ───
 function TodaysBriefing({
@@ -116,6 +132,8 @@ function KpiCard({
   change,
   changeLabel,
   accent,
+  confidence,
+  onViewMath,
 }: {
   icon: LucideIcon;
   label: string;
@@ -123,6 +141,8 @@ function KpiCard({
   change?: number;
   changeLabel?: string;
   accent: "destructive" | "warning" | "success" | "primary";
+  confidence?: "high" | "medium" | "low";
+  onViewMath?: () => void;
 }) {
   const accentMap = {
     destructive: { bg: "bg-destructive/8", text: "text-destructive", border: "border-destructive/10" },
@@ -150,6 +170,21 @@ function KpiCard({
         <p className="text-2xl sm:text-3xl font-bold tracking-tight font-display tabular-nums mt-1">{value}</p>
         {changeLabel && (
           <p className="text-xs text-muted-foreground/85 mt-2 leading-snug">{changeLabel}</p>
+        )}
+        {(confidence || onViewMath) && (
+          <div className="flex items-center justify-between gap-2 mt-auto pt-3">
+            {confidence ? <KpiConfidenceBadge level={confidence} compact /> : <span />}
+            {onViewMath && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px] text-muted-foreground"
+                onClick={onViewMath}
+              >
+                View math
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -1185,6 +1220,8 @@ function SingleDashboard() {
   const perms = useLocationPermissions();
   const navigate = useNavigate();
   const [timeFilter, setTimeFilter] = useState<DashboardTimeFilter>("this_week");
+  const [explainOpen, setExplainOpen] = useState(false);
+  const [explainPayload, setExplainPayload] = useState<KpiExplainPayload | null>(null);
   const prevRestaurantIdRef = useRef<string | null>(null);
   const [namePulse, setNamePulse] = useState(false);
 
@@ -1296,6 +1333,100 @@ function SingleDashboard() {
     [reorderSummary, daysSinceLastCount, lastSessionDate, lastSessionName, missingCostCount],
   );
 
+  const periodLabel = dashboardSpendPeriodLabel(timeFilter);
+
+  const dataQualityInput = useMemo(
+    () =>
+      buildDataQualityInput({
+        snapshot: {
+          missingParCount,
+          missingCostCount,
+          periodSpend,
+          weeklyGrossSales,
+          pendingInvoices,
+          deliveryIssuesCount,
+          shrinkageValue,
+          lastSessionDate,
+        },
+        daysSinceLastCount,
+      }),
+    [
+      daysSinceLastCount,
+      deliveryIssuesCount,
+      lastSessionDate,
+      missingCostCount,
+      missingParCount,
+      pendingInvoices,
+      periodSpend,
+      shrinkageValue,
+      weeklyGrossSales,
+    ],
+  );
+
+  const confidenceSnapshot = useMemo(
+    () => ({
+      missingParCount,
+      missingCostCount,
+      periodSpend,
+      weeklyGrossSales,
+      pendingInvoices,
+      deliveryIssuesCount,
+      shrinkageValue,
+      lastSessionDate,
+      overstockValue,
+      inventoryValue,
+      recordedWasteValue,
+      priceIncreaseImpact,
+      wasteItemsMissingCost,
+      reorderSummary,
+      foodCostPct,
+    }),
+    [
+      deliveryIssuesCount,
+      foodCostPct,
+      inventoryValue,
+      lastSessionDate,
+      missingCostCount,
+      missingParCount,
+      overstockValue,
+      pendingInvoices,
+      periodSpend,
+      priceIncreaseImpact,
+      recordedWasteValue,
+      reorderSummary,
+      shrinkageValue,
+      wasteItemsMissingCost,
+      weeklyGrossSales,
+    ],
+  );
+
+  const kpiConfidenceInput = useMemo(
+    () =>
+      buildKpiConfidenceInput({
+        snapshot: confidenceSnapshot,
+        daysSinceLastCount,
+      }),
+    [confidenceSnapshot, daysSinceLastCount],
+  );
+
+  const inventoryConfidence = useMemo(
+    () => computeInventoryValueConfidence(kpiConfidenceInput).level,
+    [kpiConfidenceInput],
+  );
+  const reorderConfidence = useMemo(
+    () => computeReorderConfidence(kpiConfidenceInput).level,
+    [kpiConfidenceInput],
+  );
+  const foodCostConfidence = useMemo(
+    () => computeFoodCostConfidence(kpiConfidenceInput).level,
+    [kpiConfidenceInput],
+  );
+
+  const openExplain = useCallback((payload: KpiExplainPayload) => {
+    setExplainPayload(payload);
+    setExplainOpen(true);
+  }, []);
+
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
@@ -1376,6 +1507,8 @@ function SingleDashboard() {
               daysSinceLastCount={daysSinceLastCount}
             />
 
+            <DataQualityBanner input={dataQualityInput} />
+
             {missingCostCount > 0 ? (
               <Alert className="border-amber-200/80 bg-amber-50/80 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/25 dark:text-amber-100/95 [&>svg]:text-amber-700 dark:[&>svg]:text-amber-400">
                 <AlertTriangle className="h-4 w-4" />
@@ -1450,6 +1583,17 @@ function SingleDashboard() {
                       ? `excl. ${reorderSummary.missingCostCount} items — no cost data`
                       : "Estimated to reach PAR levels"
                   }
+                  confidence={reorderConfidence}
+                  onViewMath={() =>
+                    openExplain(
+                      buildReorderExplain({
+                        snapshot: confidenceSnapshot,
+                        daysSinceLastCount,
+                        periodLabel,
+                        reorderValue,
+                      }),
+                    )
+                  }
                 />
                 <KpiCard
                   icon={DollarSign}
@@ -1463,6 +1607,20 @@ function SingleDashboard() {
                   }
                   accent="primary"
                   changeLabel={inventoryValueLabel}
+                  confidence={perms.can_see_inventory_value ? inventoryConfidence : undefined}
+                  onViewMath={
+                    perms.can_see_inventory_value
+                      ? () =>
+                          openExplain(
+                            buildInventoryExplain({
+                              snapshot: confidenceSnapshot,
+                              daysSinceLastCount,
+                              periodLabel,
+                              displayValue: inventoryValue,
+                            }),
+                          )
+                      : undefined
+                  }
                 />
                 <KpiCard
                   icon={CalendarDays}
@@ -1478,6 +1636,15 @@ function SingleDashboard() {
                     value={foodCostPct != null ? `${foodCostPct.toFixed(1)}%` : "—"}
                     accent={foodCostAccent}
                     changeLabel={foodCostLabel}
+                    confidence={foodCostConfidence}
+                    onViewMath={() =>
+                      openExplain(
+                        buildFoodCostExplain({
+                          snapshot: confidenceSnapshot,
+                          periodLabel,
+                        }),
+                      )
+                    }
                   />
                 )}
               </div>
@@ -1545,6 +1712,8 @@ function SingleDashboard() {
           )}
         </TabsContent>
       </Tabs>
+
+      <KpiExplainSheet open={explainOpen} onOpenChange={setExplainOpen} payload={explainPayload} />
     </div>
   );
 }
