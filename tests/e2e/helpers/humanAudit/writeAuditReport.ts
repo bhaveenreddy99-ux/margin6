@@ -45,9 +45,9 @@ function renderMarkdown(report: AuditReport): string {
   for (const check of report.checks) {
     if (check.skipped && check.skipReason === "observation only") continue;
     const pass = check.skipped ? "SKIP" : check.pass ? "PASS" : "**FAIL**";
-    const ui = check.uiValue.replace(/\|/g, "\\|");
-    const expected = check.expectedValue.replace(/\|/g, "\\|");
-    const formula = check.formula.replace(/\|/g, "\\|");
+    const ui = escapeMdCell(check.uiValue);
+    const expected = escapeMdCell(check.expectedValue);
+    const formula = escapeMdCell(check.formula);
     const tables = (check.sourceTables ?? check.sourceData).replace(/\|/g, "\\|");
     const confidence = check.confidence ?? "—";
     lines.push(
@@ -65,10 +65,10 @@ function renderMarkdown(report: AuditReport): string {
 
   for (const check of report.checks) {
     const pass = check.skipped ? "SKIP" : check.pass ? "PASS" : "**FAIL**";
-    const ui = check.uiValue.replace(/\|/g, "\\|");
-    const expected = check.expectedValue.replace(/\|/g, "\\|");
-    const source = check.sourceData.replace(/\|/g, "\\|");
-    const formula = check.formula.replace(/\|/g, "\\|");
+    const ui = escapeMdCell(check.uiValue);
+    const expected = escapeMdCell(check.expectedValue);
+    const source = escapeMdCell(check.sourceData);
+    const formula = escapeMdCell(check.formula);
     const confidence = check.confidence ?? "—";
     lines.push(
       `| ${check.page} | ${check.label} | ${ui} | ${expected} | ${pass} | ${source} | ${formula} | ${confidence} |`,
@@ -107,4 +107,8 @@ function renderMarkdown(report: AuditReport): string {
   );
 
   return lines.join("\n");
+}
+
+function escapeMdCell(value: string | undefined | null): string {
+  return (value ?? "—").replace(/\|/g, "\\|");
 }

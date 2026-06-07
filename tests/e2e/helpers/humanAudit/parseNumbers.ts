@@ -24,6 +24,11 @@ export function formatMoney(n: number | null | undefined): string {
   return `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
+export function formatCount(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return String(Math.round(n));
+}
+
 export function formatPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return `${n.toFixed(1)}%`;

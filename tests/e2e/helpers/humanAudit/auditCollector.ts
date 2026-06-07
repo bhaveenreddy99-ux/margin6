@@ -1,12 +1,15 @@
 import type { AuditCheck, AuditReport } from "./types";
 import {
   dashboardDollarsMatch,
+  formatCount,
   formatMoney,
   formatPct,
   isStrictAuditMode,
   numbersMatch,
   strictDollarsMatch,
 } from "./parseNumbers";
+
+export type AuditValueKind = "count" | "money" | "percent";
 
 export class HumanAuditCollector {
   private checks: AuditCheck[] = [];
@@ -31,25 +34,45 @@ export class HumanAuditCollector {
     sourceData: string;
     formula: string;
     tolerance?: number;
+    valueKind?: AuditValueKind;
     useDashboardRounding?: boolean;
     sourceTables?: string;
     confidence?: AuditCheck["confidence"];
     lastUpdated?: string;
     coreKpi?: boolean;
   }): void {
+    const valueKind: AuditValueKind =
+      args.valueKind ??
+      (args.useDashboardRounding ? "money" : "count");
+
     const expectedValue =
       args.expectedNumeric == null
         ? "—"
-        : args.formula.includes("%")
+        : valueKind === "percent"
           ? formatPct(args.expectedNumeric)
-          : formatMoney(args.expectedNumeric);
+          : valueKind === "count"
+            ? formatCount(args.expectedNumeric)
+            : formatMoney(args.expectedNumeric);
 
     const strict = isStrictAuditMode();
-    const pass = args.useDashboardRounding
-      ? strict
+    let pass: boolean;
+    if (valueKind === "count") {
+      pass = numbersMatch(args.uiNumeric, args.expectedNumeric, 0);
+    } else if (valueKind === "percent") {
+      pass = numbersMatch(
+        args.uiNumeric,
+        args.expectedNumeric,
+        strict ? 0.01 : (args.tolerance ?? 0.5),
+      );
+    } else if (args.useDashboardRounding) {
+      pass = strict
         ? strictDollarsMatch(args.uiNumeric, args.expectedNumeric)
-        : dashboardDollarsMatch(args.uiNumeric, args.expectedNumeric)
-      : numbersMatch(args.uiNumeric, args.expectedNumeric, strict ? 0.01 : (args.tolerance ?? 1));
+        : dashboardDollarsMatch(args.uiNumeric, args.expectedNumeric);
+    } else {
+      pass = strict
+        ? strictDollarsMatch(args.uiNumeric, args.expectedNumeric)
+        : numbersMatch(args.uiNumeric, args.expectedNumeric, args.tolerance ?? 0.01);
+    }
 
     this.checks.push({
       page: args.page,

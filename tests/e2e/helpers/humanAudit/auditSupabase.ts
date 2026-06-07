@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-function loadDotEnv(): void {
-  const envPath = path.resolve(process.cwd(), ".env");
-  if (!fs.existsSync(envPath)) return;
+function loadDotEnvFile(relativePath: string, markerEnvKey: string): boolean {
+  const envPath = path.resolve(process.cwd(), relativePath);
+  if (!fs.existsSync(envPath)) return false;
   const content = fs.readFileSync(envPath, "utf8");
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
@@ -21,6 +21,16 @@ function loadDotEnv(): void {
     }
     if (!process.env[key]) process.env[key] = value;
   }
+  process.env[markerEnvKey] = "1";
+  return true;
+}
+
+function loadDotEnv(): void {
+  loadDotEnvFile(".env", "_AUDIT_DOTENV_LOADED");
+  // Vite loads `.env.local` over `.env`; match that so Playwright audit sees the same Supabase project.
+  loadDotEnvFile(".env.local", "_AUDIT_DOTENV_LOCAL_LOADED");
+  const authPath = path.resolve(process.cwd(), "playwright/.auth/user.json");
+  if (fs.existsSync(authPath)) process.env._AUDIT_PLAYWRIGHT_AUTH_EXISTS = "1";
 }
 
 loadDotEnv();

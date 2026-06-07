@@ -4,12 +4,11 @@ import { openAppRoute } from "./helpers/navigation";
 import { test, expect } from "./helpers/test";
 import { HumanAuditCollector, logCheck } from "./helpers/humanAudit/auditCollector";
 import { fetchLiveExpectedMetrics } from "./helpers/humanAudit/auditExpectedMetrics";
-import { readBrowserAuditSession } from "./helpers/humanAudit/auditSession";
 import {
-  createAuditSupabaseClient,
-  getSupabaseEnv,
-  resolvePrimaryLocationId,
-} from "./helpers/humanAudit/auditSupabase";
+  buildResolvedAuditSession,
+  waitForRestaurantContextSettled,
+} from "./helpers/humanAudit/auditSession";
+import { getSupabaseEnv } from "./helpers/humanAudit/auditSupabase";
 import { formatPct, isStrictAuditMode } from "./helpers/humanAudit/parseNumbers";
 import {
   readInlineCount,
@@ -21,6 +20,10 @@ import {
   waitForPageSettle,
 } from "./helpers/humanAudit/uiCapture";
 import { writeAuditReport } from "./helpers/humanAudit/writeAuditReport";
+import {
+  diagnoseLiveExpectedMetrics,
+  logLiveMetricsDiagnostic,
+} from "./helpers/humanAudit/diagnoseLiveMetrics";
 
 const missingAuthReason = getMissingAuthReason();
 const collector = new HumanAuditCollector();
@@ -52,42 +55,26 @@ test.describe("Human dashboard trust flow", () => {
     test.setTimeout(180_000);
 
     await openAppRoute(page, "/app/dashboard");
-    await waitForPageSettle(page, 2500);
+    await waitForRestaurantContextSettled(page);
 
-    await page
-      .waitForFunction(
-        () =>
-          Object.keys(localStorage).some((key) => {
-            if (!key.includes("auth")) return false;
-            const raw = localStorage.getItem(key);
-            return Boolean(raw && raw.includes("access_token"));
-          }),
-        undefined,
-        { timeout: 15_000 },
-      )
-      .catch(() => undefined);
-
-    const browserSession = await readBrowserAuditSession(page);
+    const browserSession = await buildResolvedAuditSession(page);
     const supabaseEnv = getSupabaseEnv();
-    let locationId = browserSession.locationId;
 
-    if (browserSession.accessToken && browserSession.restaurantId && !locationId) {
-      const client = createAuditSupabaseClient(browserSession.accessToken);
-      if (client) {
-        locationId = await resolvePrimaryLocationId(client, browserSession.restaurantId);
-      }
-    }
-
-    const expected = supabaseEnv
-      ? await fetchLiveExpectedMetrics(browserSession, locationId, "this_week")
-      : null;
+    const expected =
+      supabaseEnv && browserSession.restaurantId
+        ? await fetchLiveExpectedMetrics(browserSession, browserSession.locationId, "this_week")
+        : null;
 
     const hasExpected = Boolean(expected);
+
+    if (!hasExpected) {
+      logLiveMetricsDiagnostic(diagnoseLiveExpectedMetrics(browserSession));
+    }
 
     collector.setMeta({
       baseUrl: process.env.E2E_BASE_URL ?? "http://127.0.0.1:4173",
       restaurantId: browserSession.restaurantId,
-      locationId,
+      locationId: browserSession.locationId,
       timeFilter: "this_week",
       dataSourceAvailable: hasExpected,
     });
@@ -128,6 +115,7 @@ test.describe("Human dashboard trust flow", () => {
       sourceData: "latest APPROVED inventory_session_items + smart_order_settings thresholds",
       sourceTables: "inventory_sessions, inventory_session_items, smart_order_settings",
       formula: "count items where stock/par < red threshold (default 50%)",
+      valueKind: "count",
     });
 
     const reorderUi = await readKpiCardValue(page, "Reorder needed today");
@@ -184,6 +172,7 @@ test.describe("Human dashboard trust flow", () => {
         expectedNumeric: expected?.foodCostPct ?? null,
         sourceData: "weekly_sales + posted invoice spend (this_week filter)",
         formula: "periodSpend / weekly_gross_sales × 100",
+        valueKind: "percent",
         tolerance: 0.5,
       });
     }
@@ -348,6 +337,7 @@ test.describe("Human dashboard trust flow", () => {
         expectedNumeric: expected.smartOrderRedCount,
         sourceData: "latest smart_order_run_items + risk thresholds",
         formula: "count lines where stock/par < red threshold",
+        valueKind: "count",
       });
     } else {
       collector.skip({
@@ -369,6 +359,7 @@ test.describe("Human dashboard trust flow", () => {
       expectedNumeric: expected?.invoiceTotal ?? null,
       sourceData: "invoices table for restaurant/location",
       formula: "count(all invoices)",
+      valueKind: "count",
     });
 
     const pendingUi = await readSummaryStat(page, "Pending");
@@ -380,6 +371,7 @@ test.describe("Human dashboard trust flow", () => {
       expectedNumeric: expected?.invoicePending ?? null,
       sourceData: "invoices by status",
       formula: "draftCount + receivedCount (summarizeInvoices)",
+      valueKind: "count",
     });
 
     const vendorsUi = await readSummaryStat(page, "Active Vendors");
@@ -391,6 +383,7 @@ test.describe("Human dashboard trust flow", () => {
       expectedNumeric: expected?.invoiceActiveVendors ?? null,
       sourceData: "distinct vendor_name on invoices",
       formula: "Set(vendor_name).size",
+      valueKind: "count",
     });
 
     // ── Invoice Review + Receipt Confirmation ───────────────────────────────
@@ -473,6 +466,7 @@ test.describe("Human dashboard trust flow", () => {
         expectedNumeric: expected.unreadNotifications,
         sourceData: "notifications where read_at IS NULL",
         formula: "count for current user + restaurant, last 30 days",
+        valueKind: "count",
       });
     } else {
       collector.skip({
