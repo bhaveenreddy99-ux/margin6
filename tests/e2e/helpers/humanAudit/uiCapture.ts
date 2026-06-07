@@ -14,10 +14,10 @@ export async function readKpiCardValue(page: Page, label: string): Promise<strin
   return ((await value.textContent()) ?? "").trim();
 }
 
-export async function readMoneyLostHero(page: Page): Promise<string> {
+export async function readProfitRiskHero(page: Page): Promise<string> {
   const hero = page
     .locator("div")
-    .filter({ has: page.getByText(/money lost this period/i) })
+    .filter({ has: page.getByText(/profit risk identified/i) })
     .locator("p")
     .filter({ hasText: /^\$/ })
     .first();
@@ -26,6 +26,9 @@ export async function readMoneyLostHero(page: Page): Promise<string> {
   }
   return "";
 }
+
+/** @deprecated Use readProfitRiskHero */
+export const readMoneyLostHero = readProfitRiskHero;
 
 export async function readSummaryStat(page: Page, label: string): Promise<string> {
   const card = page.locator("div.rounded-lg.border").filter({ hasText: label }).first();

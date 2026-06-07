@@ -47,27 +47,27 @@ test.describe("Margin6 — full feature suite (authenticated)", () => {
     await expect(page.getByText(/upload your first invoice/i)).toBeVisible();
   });
 
-  // ── 3. Money Lost widget ──────────────────────────────────────────────────
-  test("03 Money Lost widget — hero or empty state, Waste sub-label opens drilldown", async ({ page }) => {
+  // ── 3. Profit Risk widget ─────────────────────────────────────────────────
+  test("03 Profit Risk widget — hero or empty state, waste row opens drilldown", async ({ page }) => {
     await openAppRoute(page, "/app/dashboard");
     await settle(page);
 
     await expectAnyVisible(
       [
-        page.getByText(/money lost this period/i),
-        page.getByText(/no loss data yet/i),
+        page.getByText(/profit risk identified/i),
+        page.getByText(/no risk data yet/i),
       ],
-      "Money Lost widget should render either the hero copy or the empty state.",
+      "Profit Risk widget should render either the hero copy or the empty state.",
     );
 
-    const wasteBtn = page.getByRole("button", { name: /waste/i });
+    const wasteBtn = page.getByRole("button", { name: /recorded waste/i });
     const wasteCount = await wasteBtn.count();
     if (wasteCount > 0) {
       // The sub-label button sits inside the gradient card — pick the first one
       // (button role, not the Waste Log sidebar link which is a link role).
       await wasteBtn.first().click();
       await page.waitForTimeout(500);
-      await expect(page.getByText(/show your math/i).first()).toBeVisible();
+      await expect(page.getByText(/line breakdown/i).first()).toBeVisible();
       await page.keyboard.press("Escape");
       await page.waitForTimeout(300);
     } else {

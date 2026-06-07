@@ -14,7 +14,7 @@ import { formatPct, isStrictAuditMode } from "./helpers/humanAudit/parseNumbers"
 import {
   readInlineCount,
   readKpiCardValue,
-  readMoneyLostHero,
+  readProfitRiskHero,
   readSummaryStat,
   uiInteger,
   uiMoney,
@@ -30,7 +30,7 @@ const CORE_KPI_LABELS = [
   "Critical low stock items",
   "Reorder needed today",
   "Inventory value",
-  "Money Lost This Period",
+  "Profit Risk Identified",
 ] as const;
 
 test.describe("Human dashboard trust flow", () => {
@@ -188,36 +188,36 @@ test.describe("Human dashboard trust flow", () => {
       });
     }
 
-    const moneyLostUi = await readMoneyLostHero(page);
-    if (moneyLostUi) {
+    const profitRiskUi = await readProfitRiskHero(page);
+    if (profitRiskUi) {
       compareOrSkip({
         page: "Dashboard",
-        label: "Money Lost This Period",
-        uiValue: moneyLostUi,
-        uiNumeric: uiMoney(moneyLostUi),
+        label: "Profit Risk Identified",
+        uiValue: profitRiskUi,
+        uiNumeric: uiMoney(profitRiskUi),
         expectedNumeric: expected?.moneyLostTotal ?? null,
         sourceData: "waste_log + PRICE_INCREASE notifications + overstock session + shrinkage notifications",
         sourceTables: "waste_log, notifications, inventory_session_items",
-        formula: "waste + price hikes + overstock + shrinkage",
+        formula: "recorded waste + price hikes + overstock exposure + shrinkage alerts",
         useDashboardRounding: true,
       });
     } else {
-      const emptyState = await page.getByText(/no loss data yet/i).isVisible().catch(() => false);
+      const emptyState = await page.getByText(/no risk data yet/i).isVisible().catch(() => false);
       if (emptyState && expected && expected.moneyLostTotal <= 0) {
         collector.compareExact({
           page: "Dashboard",
-          label: "Money Lost This Period",
-          uiValue: "No loss data yet",
-          expectedValue: "No loss data yet",
-          sourceData: "same as Money Lost widget",
+          label: "Profit Risk Identified",
+          uiValue: "No risk data yet",
+          expectedValue: "No risk data yet",
+          sourceData: "same as Profit Risk widget",
           formula: "total ≤ 0 → empty state",
         });
       } else {
         collector.skip({
           page: "Dashboard",
-          label: "Money Lost This Period",
+          label: "Profit Risk Identified",
           reason: emptyState ? "Empty state with positive expected total — check permissions or loading." : "Widget not visible.",
-          uiValue: moneyLostUi || "—",
+          uiValue: profitRiskUi || "—",
         });
       }
     }

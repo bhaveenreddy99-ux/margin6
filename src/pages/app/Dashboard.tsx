@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRestaurant } from "@/contexts/RestaurantContext";
-import { MoneyLostWidget } from "@/components/MoneyLostWidget";
+import { ProfitRiskWidget } from "@/components/ProfitRiskWidget";
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { OverstockCashTrapCard } from "@/components/OverstockCashTrapCard";
 import { PriceHikeAlertsCard } from "@/components/PriceHikeAlertsCard";
@@ -25,6 +25,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { loadInventoryMetrics } from "@/domain/dashboard/loadInventoryMetrics";
+import { formatStockRiskBandCopy } from "@/domain/dashboard/dashboardSelectors";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
+import { supabase } from "@/integrations/supabase/client";
 import { format, differenceInDays } from "date-fns";
 import type { ComputedUsageItem, PARRecommendation } from "@/lib/usage-analytics";
 import {
@@ -1036,12 +1039,23 @@ function DashboardReportsTab({
   const [topItems, setTopItems] = useState<{ item_name: string; total_value: number; current_stock: number; unit: string }[]>([]);
   const [parMetrics, setParMetrics] = useState<{ total: number; major: number; top5: string[] } | null>(null);
   const [lastApprovedAt, setLastApprovedAt] = useState<string | null>(null);
+  const [stockBandCopy, setStockBandCopy] = useState({
+    critical: "Below red threshold % of PAR",
+    low: "Between red and yellow threshold % of PAR",
+    ok: "At or above yellow threshold % of PAR",
+  });
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setFetchError(false);
     try {
       const metrics = await loadInventoryMetrics(restaurantId, locationId ?? undefined);
+      const { data: riskSettings } = await supabase
+        .from("smart_order_settings")
+        .select("red_threshold, yellow_threshold")
+        .eq("restaurant_id", restaurantId)
+        .maybeSingle();
+      setStockBandCopy(formatStockRiskBandCopy(riskThresholdsFromSettings(riskSettings)));
       setLastApprovedAt(metrics.lastSessionApprovedAtIso);
       setKpis({
         value: metrics.inventoryValue,
@@ -1116,7 +1130,7 @@ function DashboardReportsTab({
           </div>
           <p className="text-xs font-medium text-muted-foreground">Critical Items</p>
           <p className="text-3xl font-bold tracking-tight tabular-nums text-destructive mt-1">{kpis.red}</p>
-          <p className="text-xs text-muted-foreground/70 mt-2">Below 50% of PAR level</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">{stockBandCopy.critical}</p>
         </div>
         <div className="rounded-xl border border-warning/15 bg-card hover:shadow-md transition-all duration-200 p-5">
           <div className="flex items-start justify-between gap-2 mb-3">
@@ -1126,7 +1140,7 @@ function DashboardReportsTab({
           </div>
           <p className="text-xs font-medium text-muted-foreground">Low Stock</p>
           <p className="text-3xl font-bold tracking-tight tabular-nums text-warning mt-1">{kpis.yellow}</p>
-          <p className="text-xs text-muted-foreground/70 mt-2">Between 50–100% of PAR</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">{stockBandCopy.low}</p>
         </div>
         <div className="rounded-xl border border-success/15 bg-card hover:shadow-md transition-all duration-200 p-5">
           <div className="flex items-start justify-between gap-2 mb-3">
@@ -1136,7 +1150,7 @@ function DashboardReportsTab({
           </div>
           <p className="text-xs font-medium text-muted-foreground">Stocked OK</p>
           <p className="text-3xl font-bold tracking-tight tabular-nums text-success mt-1">{kpis.green}</p>
-          <p className="text-xs text-muted-foreground/70 mt-2">At or above PAR level</p>
+          <p className="text-xs text-muted-foreground/70 mt-2">{stockBandCopy.ok}</p>
         </div>
       </div>
 
@@ -1519,7 +1533,7 @@ function SingleDashboard() {
             ) : null}
 
             {currentRestaurant && (
-              <MoneyLostWidget
+              <ProfitRiskWidget
                 recordedWasteValue={recordedWasteValue}
                 priceIncreaseImpact={priceIncreaseImpact}
                 overstockValue={overstockValue}
@@ -1527,6 +1541,10 @@ function SingleDashboard() {
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}
                 timeFilter={timeFilter}
+                lastSessionDate={lastSessionDate}
+                periodLabel={periodLabel}
+                confidenceSnapshot={confidenceSnapshot}
+                daysSinceLastCount={daysSinceLastCount}
                 noParConfigured={(() => {
                   const s = reorderSummary;
                   if (!s) return false;

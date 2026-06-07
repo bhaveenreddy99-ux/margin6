@@ -12,6 +12,10 @@ import {
   loadVendorNamesForInvoiceIds,
   parsePriceIncreaseNotificationData,
 } from "@/domain/dashboard/priceIncreaseFromNotifications";
+import { buildLatestInventorySnapshot, buildSessionOverstockLines } from "@/domain/dashboard/dashboardSelectors";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
+import { dollarsForWasteRow } from "@/domain/waste/recordedWasteValue";
+import type { InventorySessionItemRow } from "@/domain/dashboard/dashboardTypes";
 
 type Bucket = {
   total: number;
@@ -57,11 +61,13 @@ export async function loadProfitLeaks(
   const toDate = to.slice(0, 10);
   const loc = locationId ?? undefined;
 
-  // ── 1. Waste ──────────────────────────────────────────────────────────────
+  // ── 1. Waste (same row valuation as Dashboard loadWasteMetrics) ───────────
   try {
     let q = supabase
       .from("waste_log")
-      .select("item_name, total_cost, unit_cost, quantity, reason, logged_at")
+      .select(
+        "item_name, total_cost, unit_cost, quantity, quantity_unit, catalog_item_id, reason, logged_at",
+      )
       .eq("restaurant_id", restaurantId)
       .gte("logged_at", from)
       .lte("logged_at", to);
@@ -73,22 +79,74 @@ export async function loadProfitLeaks(
         total_cost: number | null;
         unit_cost: number | null;
         quantity: number | null;
+        quantity_unit: string | null;
+        catalog_item_id: string | null;
         reason: string | null;
         logged_at: string | null;
       }> | null;
     };
 
+    const catalogIds = [
+      ...new Set(
+        (wasteRows ?? [])
+          .map((r) => r.catalog_item_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
+    const catalogDefaultById = new Map<string, number>();
+    if (catalogIds.length > 0) {
+      const { data: catalogRows } = (await supabase
+        .from("inventory_catalog_items")
+        .select("id, default_unit_cost")
+        .eq("restaurant_id", restaurantId)
+        .in("id", catalogIds)) as unknown as {
+        data: Array<{ id: string; default_unit_cost: number | null }> | null;
+      };
+      for (const row of catalogRows ?? []) {
+        const value = Number(row.default_unit_cost);
+        if (Number.isFinite(value) && value >= 0) catalogDefaultById.set(row.id, value);
+      }
+    }
+
+    let sessionUnitByCatalogId = new Map<string, number>();
+    try {
+      let sessQ = supabase
+        .from("inventory_sessions")
+        .select("id")
+        .eq("restaurant_id", restaurantId)
+        .eq("status", "APPROVED")
+        .order("approved_at", { ascending: false })
+        .limit(1);
+      if (loc) sessQ = withLocationOrNull(sessQ, loc);
+      const { data: sessions } = (await sessQ) as unknown as {
+        data: Array<{ id: string }> | null;
+      };
+      if (sessions?.length) {
+        const { data: sessionItems } = (await supabase
+          .from("inventory_session_items")
+          .select("*")
+          .eq("session_id", sessions[0]!.id)) as unknown as {
+          data: InventorySessionItemRow[] | null;
+        };
+        const { data: riskSettings } = await supabase
+          .from("smart_order_settings")
+          .select("red_threshold, yellow_threshold")
+          .eq("restaurant_id", restaurantId)
+          .maybeSingle();
+        const snap = buildLatestInventorySnapshot(
+          sessionItems ?? [],
+          riskThresholdsFromSettings(riskSettings),
+        );
+        sessionUnitByCatalogId = new Map(Object.entries(snap.latestSessionUnitCostByCatalogId));
+      }
+    } catch {
+      // unit cost map optional — waste rows may still have total_cost
+    }
+
     for (const row of wasteRows ?? []) {
       const name = (row.item_name ?? "").trim();
       if (!name) continue;
-      const explicit = Number(row.total_cost);
-      const derived = Number(row.unit_cost) * Number(row.quantity);
-      const value =
-        Number.isFinite(explicit) && explicit > 0
-          ? explicit
-          : Number.isFinite(derived) && derived > 0
-            ? derived
-            : 0;
+      const value = dollarsForWasteRow(row, catalogDefaultById, sessionUnitByCatalogId);
       if (value <= 0) continue;
 
       const bucket = getOrCreate(buckets, leakKey(name, "Waste"));
@@ -221,34 +279,21 @@ export async function loadProfitLeaks(
       const session = sessions[0];
       const { data: items } = (await supabase
         .from("inventory_session_items")
-        .select("item_name, current_stock, par_level, unit_cost")
+        .select("*")
         .eq("session_id", session.id)) as unknown as {
-        data: Array<{
-          item_name: string | null;
-          current_stock: number | null;
-          par_level: number | null;
-          unit_cost: number | null;
-        }> | null;
+        data: InventorySessionItemRow[] | null;
       };
 
       const sourceLabel = session.name ?? "Latest count";
       const sourceDate = fmtDate(session.approved_at);
+      const overstockLines = buildSessionOverstockLines(items ?? []);
 
-      for (const row of items ?? []) {
-        const name = (row.item_name ?? "").trim();
-        if (!name) continue;
-        const stock = Number(row.current_stock ?? 0);
-        const par = Number(row.par_level ?? 0);
-        const cost = Number(row.unit_cost ?? 0);
-        const excess = Math.max(0, stock - par);
-        const dollars = excess * cost;
-        if (!Number.isFinite(dollars) || dollars <= 0) continue;
-
-        const bucket = getOrCreate(buckets, leakKey(name, "Overstock"));
-        bucket.total += dollars;
+      for (const line of overstockLines) {
+        const bucket = getOrCreate(buckets, leakKey(line.item_name, "Overstock"));
+        bucket.total += line.dollars;
         bucket.rows.push({
-          label: name,
-          value: dollars,
+          label: line.item_name,
+          value: line.dollars,
           date: sourceDate,
           source: sourceLabel,
         });

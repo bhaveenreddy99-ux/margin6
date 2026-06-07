@@ -215,7 +215,7 @@ export default function AuditCenterPage() {
       {
         metric: "Profit risk total",
         value: fmtMoney(moneyLostTotal),
-        formula: "waste + price hikes + overstock + shrinkage",
+        formula: "recorded waste + price hikes + overstock exposure + shrinkage alerts",
         sourceTables: "waste_log, notifications, inventory_session_items",
         lastUpdated,
         confidence: mlConf.level,

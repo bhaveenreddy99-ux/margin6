@@ -2,7 +2,7 @@ import { endOfWeek, startOfDay, startOfWeek, subDays, subWeeks, format } from "d
 import { computeInventoryItem, computeReorderSummary, type InventoryItemInput } from "@/domain/inventory/reorderEngine";
 import type { ReorderSummary } from "@/domain/inventory/reorderEngine";
 import type { RiskThresholds } from "@/lib/inventory-utils";
-import { computeLineInventoryValue } from "@/domain/inventory/casePlanningEngine";
+import { computeLineInventoryValue, computeLineOverstockValue } from "@/domain/inventory/casePlanningEngine";
 import { catalogIdFromSessionItem } from "@/domain/inventory/sessionItemCatalogLink";
 import { catalogItemIdsWithDuplicateParentRows } from "@/domain/inventory/zoneReconcile";
 import { STOCK_TRUTH_MESSAGE } from "@/lib/stockTruthCopy";
@@ -254,6 +254,60 @@ export function buildLatestInventorySnapshot(
     missingCostCount,
     overstockValue: reorderSummary.totalWasteValue,
     missingParCount,
+  };
+}
+
+/**
+ * Per-line overstock rows from the latest session — same engine as dashboard hero
+ * (`buildLatestInventorySnapshot` / `reorderSummary.totalWasteValue`), including zone dedupe.
+ */
+export function buildSessionOverstockLines(
+  rawItems: InventorySessionItemRow[],
+): import("@/domain/dashboard/dashboardTypes").OverstockItem[] {
+  const items = deduplicateSessionItems(rawItems);
+  const result: import("@/domain/dashboard/dashboardTypes").OverstockItem[] = [];
+
+  for (const item of items) {
+    const name = (item.item_name ?? "").trim();
+    if (!name) continue;
+
+    const stock = Number(item.current_stock ?? 0);
+    const par = Number(item.par_level ?? 0);
+    const cost = item.unit_cost == null ? null : Number(item.unit_cost);
+
+    const line = computeLineOverstockValue({
+      currentStockCases: stock,
+      parLevelCases: par,
+      unitCostPerCase: cost,
+    });
+    if (line.dollars <= 0) continue;
+
+    const unitsOver = Math.max(0, stock - par);
+    result.push({
+      item_name: name,
+      current_stock: stock,
+      par_level: par,
+      unit_cost: cost ?? 0,
+      units_over: unitsOver,
+      dollars: line.dollars,
+    });
+  }
+
+  return result.sort((a, b) => b.dollars - a.dollars);
+}
+
+/** Human-readable stock band labels for Reports / dashboard copy. */
+export function formatStockRiskBandCopy(thresholds: RiskThresholds): {
+  critical: string;
+  low: string;
+  ok: string;
+} {
+  const red = thresholds.redThresholdPercent;
+  const yellow = thresholds.yellowThresholdPercent;
+  return {
+    critical: `Below ${red}% of PAR level`,
+    low: `Between ${red}–${yellow}% of PAR`,
+    ok: `At or above ${yellow}% of PAR`,
   };
 }
 

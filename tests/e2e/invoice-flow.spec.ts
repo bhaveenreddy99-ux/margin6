@@ -469,8 +469,8 @@ test.describe("feature completeness", () => {
   test("dashboard shows money lost widget", async ({ page }) => {
     await openAppRoute(page, "/app/dashboard");
 
-    await expect(page.getByText(/money lost this period/i)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/estimated loss this period/i)).toBeVisible();
+    await expect(page.getByText(/profit risk identified/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/potential exposure this period/i)).toBeVisible();
   });
 
   test("dashboard shows price hike alerts", async ({ page }) => {

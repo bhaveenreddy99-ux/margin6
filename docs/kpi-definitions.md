@@ -12,11 +12,11 @@ Every KPI below is traced to **production code** in this repository. Formulas de
 
 ---
 
-## 1. Money Lost This Period (hero total)
+## 1. Profit Risk Identified (hero total, formerly “Money Lost”)
 
 | Field | Detail |
 |-------|--------|
-| **UI** | `MoneyLostWidget` — Today tab hero (`src/components/MoneyLostWidget.tsx:157`) |
+| **UI** | `ProfitRiskWidget` — Today tab hero (`src/components/ProfitRiskWidget.tsx`) |
 | **Loader** | Composite from `useDashboardData` / `buildDashboardSnapshot` |
 | **Source tables** | `waste_log`, `notifications`, `invoice_line_comparisons`, `inventory_session_items` (via overstock) |
 | **Business logic** | Sum four period/snapshot components shown as sub-rows |
@@ -198,14 +198,14 @@ Every KPI below is traced to **production code** in this repository. Formulas de
 
 ---
 
-## Known implementation inconsistencies (audit findings)
+## Known implementation inconsistencies (audit findings — updated P0 polish)
 
-| Issue | KPIs affected |
-|-------|----------------|
-| Overstock dedupe differs | Money Lost hero vs `OverstockCashTrapCard` list |
-| Waste cost logic differs | `loadWasteMetrics` vs `loadProfitLeaks` waste bucket |
-| Shrinkage scope differs | Money Lost total vs `ShrinkageAlertCard` (last 10 notifs) |
-| P&L savings omits shrinkage | Banner vs Money Lost hero |
-| Reports copy hardcodes 50%/100% | Actual thresholds from `smart_order_settings` |
+| Issue | Status |
+|-------|--------|
+| Overstock dedupe | **Resolved** — hero, `OverstockCashTrapCard`, drilldowns, and Profit Leaks overstock use `buildSessionOverstockLines` (zone-deduped `computeLineOverstockValue`) |
+| Waste cost logic | **Resolved** — Profit Leaks waste bucket and `fetchWasteBreakdown` use `dollarsForWasteRow` / `aggregateWasteRows` (same as Dashboard) |
+| Reports PAR copy | **Resolved** — dynamic thresholds via `formatStockRiskBandCopy` + `smart_order_settings` |
+| Shrinkage scope differs | **Intentional** — hero total sums all period shrinkage notifications; `ShrinkageAlertCard` shows last 10 for readability |
+| P&L savings omits shrinkage | **Intentional** — banner = recoverable savings (overstock + waste + price hikes); shrinkage is variance alert exposure, not a savings lever |
 
 See `docs/dashboard-label-audit.md` for label recommendations.

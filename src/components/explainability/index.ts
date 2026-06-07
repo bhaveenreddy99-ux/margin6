@@ -8,4 +8,5 @@ export {
   buildMoneyLostExplain,
   buildOverstockExplain,
   buildReorderExplain,
+  type KpiConfidenceSnapshot,
 } from "./kpiExplainBuilders";
