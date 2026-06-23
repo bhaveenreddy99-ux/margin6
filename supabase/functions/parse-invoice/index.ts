@@ -1,4 +1,6 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { applyWeightItemUnitCostCorrection } from "../_shared/resolveInvoiceUnitCost.ts";
+import { classifyParseInvoiceToken, extractBearerToken } from "../_shared/parseInvoiceAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -144,15 +146,64 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceKey) {
+      console.error("parse-invoice: missing Supabase env vars");
+      return new Response(JSON.stringify({ error: "Server not configured" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const token = extractBearerToken(req.headers.get("Authorization"));
+    const authMode = classifyParseInvoiceToken(token, serviceKey);
+    if (authMode === "reject") {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const { content, file_type } = await req.json();
+    const { content, file_type, restaurant_id } = await req.json();
+
+    // "service" = trusted server-to-server callers (inbound-invoice-email,
+    // audit-invoice-anon) presenting the server-only service-role key; they carry
+    // no user context, so the membership check is skipped. "user" = any other
+    // token (incl. the public anon key) — it MUST resolve to a real authenticated
+    // member of the target restaurant, otherwise the function would allow
+    // unbounded Anthropic spend (S0-1).
+    if (authMode === "user") {
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+      const { data: userData, error: userErr } = await admin.auth.getUser(token);
+      if (userErr || !userData?.user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!restaurant_id || typeof restaurant_id !== "string") {
+        return new Response(JSON.stringify({ error: "restaurant_id is required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: membership, error: memErr } = await admin
+        .from("restaurant_members")
+        .select("restaurant_id")
+        .eq("user_id", userData.user.id)
+        .eq("restaurant_id", restaurant_id)
+        .limit(1);
+      if (memErr || !membership?.length) {
+        return new Response(JSON.stringify({ error: "Not a member of this restaurant" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     if (!content) {
       return new Response(JSON.stringify({ error: "No content provided" }), {

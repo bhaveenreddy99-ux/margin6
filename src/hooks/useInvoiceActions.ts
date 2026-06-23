@@ -530,7 +530,7 @@ export function useInvoiceActions({
         try {
           const base64 = await fileToBase64Raw(file);
           const { data: result, error } = await supabase.functions.invoke("parse-invoice", {
-            body: { content: base64, file_type: "PDF" },
+            body: { content: base64, file_type: "PDF", restaurant_id: currentRestaurantId },
           });
           if (error) throw error;
           const parsed = (result || {}) as ParseInvoiceResult;
@@ -560,6 +560,7 @@ export function useInvoiceActions({
       applyParseInvoiceResult,
       assertFileSizeAllowed,
       catalogItems,
+      currentRestaurantId,
       fileToBase64Raw,
       setItems,
       setParsedPoNumberFromPdf,
@@ -578,7 +579,7 @@ export function useInvoiceActions({
       try {
         const base64 = await fileToBase64Raw(file);
         const { data: result, error } = await supabase.functions.invoke("parse-invoice", {
-          body: { content: base64, file_type: "IMAGE" },
+          body: { content: base64, file_type: "IMAGE", restaurant_id: currentRestaurantId },
         });
         if (error) {
           toast.error("Could not read invoice — try again");
@@ -593,7 +594,7 @@ export function useInvoiceActions({
         setParsing(false);
       }
     },
-    [applyParseInvoiceResult, assertFileSizeAllowed, fileToBase64Raw, setParsedPoNumberFromPdf],
+    [applyParseInvoiceResult, assertFileSizeAllowed, currentRestaurantId, fileToBase64Raw, setParsedPoNumberFromPdf],
   );
 
   const handleSaveInvoice = useCallback(
@@ -790,6 +791,7 @@ export function useInvoiceActions({
               body: {
                 content: base64,
                 file_type: file.type.startsWith("image") ? "IMAGE" : "PDF",
+                restaurant_id: currentRestaurantId,
               },
             });
             if (parseFunctionError) {
