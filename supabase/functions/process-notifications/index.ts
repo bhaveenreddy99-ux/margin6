@@ -6,6 +6,7 @@ import {
   sendMargin6Email,
   userWantsEmail,
 } from "../_shared/margin6Email.ts";
+import { isServiceRoleAuthorized } from "../_shared/serviceAuth.ts";
 
 type RiskLevel = "NO_PAR" | "RED" | "YELLOW" | "GREEN";
 
@@ -226,9 +227,29 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Service-role gate (S0-2): this engine is a cron worker that processes ALL
+    // restaurants with the service-role key. verify_jwt is false (the cron has no
+    // user JWT), so authorization is enforced here — the trusted caller (pg_cron)
+    // presents the service-role key in the Authorization header. Without this,
+    // anyone who knows the URL could trigger mass email + a full all-restaurants
+    // fan-out. (Mirrors the send-email gate.)
+    //
+    // DEPLOY CO-REQUISITE: the hourly pg_cron job builds its bearer from the
+    // `app.settings.service_role_key` GUC (migration 20260522000003), which
+    // falls back to an empty string if unset. That GUC MUST be set in the
+    // project before/with this deploy, or the cron's bearer is empty, this gate
+    // rejects it (401), and all notifications silently stop.
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!isServiceRoleAuthorized(req.headers.get("Authorization"), serviceKey)) {
+      return new Response(JSON.stringify({ error: "Unauthorized – service role required" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
+    // serviceKey is guaranteed non-empty by the gate above.
+    const supabase = createClient(supabaseUrl, serviceKey!);
 
     const now = new Date();
     const results: string[] = [];
