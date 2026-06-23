@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { createMemberNotifications } from "@/domain/notifications/createMemberNotifications";
 import { useRestaurant } from "@/contexts/RestaurantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -414,17 +415,15 @@ export default function PARSuggestionsPage() {
       + (fluctuatingCount === 0 && majorCount > 0 ? ` (${majorCount} major)` : "")
       + `. Review in PAR Suggestions.`;
 
-    const notifications = recipientUserIds.map(uid => ({
-      restaurant_id: currentRestaurant.id,
-      user_id: uid,
+    const { error } = await createMemberNotifications(supabase, {
+      restaurantId: currentRestaurant.id,
+      recipientIds: recipientUserIds,
       type: "PAR_SUGGESTIONS",
+      severity,
       title: "PAR suggestions changed",
       message,
-      severity,
       data: notifData,
-    }));
-
-    const { error } = await supabase.from("notifications").insert(notifications);
+    });
     if (error) {
       toast.error(`Failed to send notifications: ${error.message}`);
     } else {

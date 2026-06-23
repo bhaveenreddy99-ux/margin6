@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { createMemberNotifications } from "@/domain/notifications/createMemberNotifications";
 import {
   buildSmartOrderComputedItems,
   buildSmartOrderRiskCounts,
@@ -97,24 +98,22 @@ async function notifySmartOrderAttentionRecipients(args: {
 
   if (targetUserIds.length === 0) return;
 
-  await args.supabase.from("notifications").insert(
-    targetUserIds.map((targetUserId) => ({
-      restaurant_id: args.restaurantId,
-      user_id: targetUserId,
-      type: "LOW_STOCK",
-      severity: (args.redCount > 0 ? "CRITICAL" : "WARNING") as "CRITICAL" | "WARNING",
-      title: `Inventory Approved — ${args.redCount + args.yellowCount} item${
-        args.redCount + args.yellowCount > 1 ? "s" : ""
-      } need attention`,
-      message: `${args.redCount} high risk, ${args.yellowCount} medium risk items detected`,
-      data: {
-        session_id: args.sessionId,
-        run_id: args.runId,
-        red: args.redCount,
-        yellow: args.yellowCount,
-      },
-    })),
-  );
+  await createMemberNotifications(args.supabase, {
+    restaurantId: args.restaurantId,
+    recipientIds: targetUserIds,
+    type: "LOW_STOCK",
+    severity: args.redCount > 0 ? "CRITICAL" : "WARNING",
+    title: `Inventory Approved — ${args.redCount + args.yellowCount} item${
+      args.redCount + args.yellowCount > 1 ? "s" : ""
+    } need attention`,
+    message: `${args.redCount} high risk, ${args.yellowCount} medium risk items detected`,
+    data: {
+      session_id: args.sessionId,
+      run_id: args.runId,
+      red: args.redCount,
+      yellow: args.yellowCount,
+    },
+  });
 }
 
 export async function publishSmartOrderAttentionNotifications(args: {

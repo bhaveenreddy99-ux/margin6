@@ -3335,6 +3335,18 @@ export type Database = {
         Args: { p_invoice_id: string; p_restaurant_id: string }
         Returns: Json
       }
+      create_member_notifications: {
+        Args: {
+          p_restaurant_id: string
+          p_recipient_ids: string[]
+          p_type: string
+          p_severity: string
+          p_title: string
+          p_message: string
+          p_data?: Json
+        }
+        Returns: number
+      }
       create_restaurant_with_owner: {
         Args: { p_is_demo?: boolean; p_name: string }
         Returns: {

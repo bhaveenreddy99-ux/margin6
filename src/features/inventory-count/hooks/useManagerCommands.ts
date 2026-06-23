@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { createMemberNotifications } from "@/domain/notifications/createMemberNotifications";
 import { normalizeItemName } from "@/domain/inventory/items/itemView";
 import type {
   InventoryCatalogItemRow,
@@ -189,13 +190,13 @@ export function useManagerCommands(deps: ManagerCommandDeps) {
     const currentPar = deps.getApprovedPar(deps.staffParRequestItem);
     const reasonText = deps.staffParReason.trim() || "—";
 
-    const notifications = recipientIds.map((recipientId) => ({
-      restaurant_id: deps.currentRestaurantId!,
-      user_id: recipientId,
+    const { error } = await createMemberNotifications(supabase, {
+      restaurantId: deps.currentRestaurantId!,
+      recipientIds,
       type: "PAR_CHANGE_REQUEST",
+      severity: "INFO",
       title: "PAR change requested",
       message: `${staffName} suggested changing ${deps.staffParRequestItem!.item_name} PAR from ${currentPar} to ${suggested}. Reason: ${reasonText}`,
-      severity: "INFO" as const,
       data: {
         item_name: deps.staffParRequestItem!.item_name,
         current_par: currentPar,
@@ -204,9 +205,7 @@ export function useManagerCommands(deps: ManagerCommandDeps) {
         session_id: deps.activeSession!.id,
         requested_by: deps.userId,
       } as Json,
-    }));
-
-    const { error } = await supabase.from("notifications").insert(notifications);
+    });
     setStaffParSending(false);
     if (error) { toast.error(error.message); return; }
     toast.success("PAR change request sent to your manager");
@@ -243,13 +242,13 @@ export function useManagerCommands(deps: ManagerCommandDeps) {
     const currentLabel = currentPrice != null ? `$${currentPrice.toFixed(2)}` : "—";
     const reasonText = deps.staffPriceReason.trim() || "—";
 
-    const notifications = recipientIds.map((recipientId) => ({
-      restaurant_id: deps.currentRestaurantId!,
-      user_id: recipientId,
+    const { error } = await createMemberNotifications(supabase, {
+      restaurantId: deps.currentRestaurantId!,
+      recipientIds,
       type: "PRICE_CHANGE_REQUEST",
+      severity: "INFO",
       title: "Price change requested",
       message: `${staffName} suggested changing ${deps.staffPriceRequestItem!.item_name} unit price from ${currentLabel} to $${suggested.toFixed(2)}. Reason: ${reasonText}`,
-      severity: "INFO" as const,
       data: {
         item_name: deps.staffPriceRequestItem!.item_name,
         current_price: currentPrice,
@@ -258,9 +257,7 @@ export function useManagerCommands(deps: ManagerCommandDeps) {
         session_id: deps.activeSession!.id,
         requested_by: deps.userId,
       } as Json,
-    }));
-
-    const { error } = await supabase.from("notifications").insert(notifications);
+    });
     setStaffPriceSending(false);
     if (error) { toast.error(error.message); return; }
     toast.success("Price change request sent to your manager");
