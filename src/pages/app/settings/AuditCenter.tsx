@@ -38,7 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Shield, Calculator } from "lucide-react";
+import { Shield, Calculator, AlertTriangle } from "lucide-react";
 import { buildDashboardDisplayState } from "@/domain/dashboard/dashboardSelectors";
 
 type AuditRow = {
@@ -57,7 +57,7 @@ export default function AuditCenterPage() {
   const [explainPayload, setExplainPayload] = useState<KpiExplainPayload | null>(null);
   const [explainOpen, setExplainOpen] = useState(false);
 
-  const { loading, error: _error, refetch: _refetch, ...snapshot } = useDashboardData({
+  const { loading, error, refetch, ...snapshot } = useDashboardData({
     currentRestaurantId: currentRestaurant?.id,
     currentLocationId: currentLocation?.id,
     timeFilter: "this_week",
@@ -270,6 +270,26 @@ export default function AuditCenterPage() {
         <Skeleton className="h-10 w-64" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
+  // T0-4: the Audit Center verifies numbers — it must never present unverified
+  // data. On a load error, show an explicit error + Retry and render NO KPI
+  // values, confidence badges, or data-quality score. Failure ≠ $0.
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-24 text-center animate-fade-in">
+        <AlertTriangle className="h-10 w-10 text-destructive/40" />
+        <div>
+          <p className="text-sm font-semibold">Audit data couldn't load</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            We won't show unverified numbers. Check your connection and try again.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={refetch}>
+          Retry
+        </Button>
       </div>
     );
   }
