@@ -1,4 +1,4 @@
-export type { DataQualityBand, DataQualityIssue, DataQualityResult, ConfidenceLevel, KpiConfidence } from "./types";
+export type { DataQualityBand, DataQualityIssue, DataQualityResult, ConfidenceLevel, KpiConfidence, DataQualityInput } from "./types";
 export { computeDataQualityScore, dataQualityBandLabel } from "./computeDataQualityScore";
 export {
   computeFoodCostConfidence,

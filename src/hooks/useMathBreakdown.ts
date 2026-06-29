@@ -9,6 +9,7 @@ import {
 import { buildWasteDrilldownRows } from "@/domain/waste/wasteDrilldownRows";
 import { buildLatestInventorySnapshot, buildSessionOverstockLines } from "@/domain/dashboard/dashboardSelectors";
 import type { InventorySessionItemRow } from "@/domain/dashboard/dashboardTypes";
+import type { DrilldownRow } from "@/components/DrilldownSheet";
 import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 

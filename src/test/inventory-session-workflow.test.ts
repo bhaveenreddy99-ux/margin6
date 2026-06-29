@@ -227,6 +227,16 @@ describe("inventory session workflow", () => {
           })),
         };
       }
+      if (table === "smart_order_runs") {
+        // pre-RPC idempotency guard (sessionWorkflow.ts): no existing run -> proceed to RPC
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            })),
+          })),
+        };
+      }
       throw new Error(`Unexpected table ${table}`);
     });
 
@@ -301,6 +311,16 @@ describe("inventory session workflow", () => {
         return {
           select: vi.fn(() => ({
             eq: vi.fn().mockResolvedValue({ data: [buildSessionItemRow()], error: null }),
+          })),
+        };
+      }
+      if (table === "smart_order_runs") {
+        // pre-RPC idempotency guard (sessionWorkflow.ts): no existing run -> proceed to RPC
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            })),
           })),
         };
       }
@@ -460,6 +480,16 @@ describe("inventory session workflow", () => {
           })),
         };
       }
+      if (table === "smart_order_runs") {
+        // pre-RPC idempotency guard (sessionWorkflow.ts): no existing run -> proceed to RPC
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            })),
+          })),
+        };
+      }
       throw new Error(`Unexpected table ${table}`);
     });
 
@@ -603,6 +633,16 @@ describe("inventory session workflow", () => {
           })),
         };
       }
+      if (table === "smart_order_runs") {
+        // pre-RPC idempotency guard: no existing run -> proceed to RPC
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            })),
+          })),
+        };
+      }
       throw new Error(`Unexpected table ${table}`);
     });
 
@@ -654,6 +694,10 @@ describe("inventory session workflow", () => {
         return {
           select: vi.fn(() => ({
             eq: vi.fn().mockResolvedValue({ data: [{ id: "run-1" }], error: null }),
+          })),
+          // archive prior run on explicit-override reopen (distinct from inventory_sessions updateMock)
+          update: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ data: null, error: null }),
           })),
         };
       }

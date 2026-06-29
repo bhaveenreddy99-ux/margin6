@@ -84,6 +84,8 @@ describe("dashboard empty data scenarios", () => {
         ...emptyConfidenceSnapshot,
         reorderSummary: {
           totalReorderValue: 0,
+          totalSuggestedUnits: 0,
+          totalWasteValue: 0,
           missingCostCount: 0,
           noParCount: 5,
           redCount: 0,

@@ -29,7 +29,7 @@ function seedToSessionRows(): InventorySessionItemRow[] {
     catalog_item_id: item.catalog_item_id ?? null,
     parent_catalog_item_id: null,
     zone_id: null,
-  }));
+  })) as unknown as InventorySessionItemRow[];
 }
 
 describe("P0 trust polish — labels", () => {

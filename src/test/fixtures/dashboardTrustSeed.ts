@@ -7,6 +7,9 @@ export type DashboardTrustSeedItem = {
   current_stock: number;
   par_level: number;
   unit_cost: number | null;
+  unit?: string;
+  pack_size?: string | null;
+  catalog_item_id?: string | null;
 };
 
 export const DASHBOARD_TRUST_SEED_ITEMS: readonly DashboardTrustSeedItem[] = [
@@ -101,5 +104,5 @@ export function seedToSessionItemRows(
     location_id: null,
     restaurant_id: "trust-restaurant",
     display_order: index,
-  })) as InventorySessionItemRow[];
+  })) as unknown as InventorySessionItemRow[];
 }
