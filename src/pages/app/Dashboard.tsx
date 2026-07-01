@@ -1539,7 +1539,7 @@ function SingleDashboard() {
                 priceIncreaseImpact={priceIncreaseImpact}
                 overstockValue={overstockValue}
                 shrinkageValue={shrinkageValue}
-                metricErrors={{ waste: errors.waste, shrinkage: errors.shrinkage }}
+                metricErrors={{ waste: errors.waste, shrinkage: errors.shrinkage, priceHike: errors.spend }}
                 onRetry={refetch}
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}

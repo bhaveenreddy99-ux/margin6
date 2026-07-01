@@ -16,7 +16,7 @@ import { loadOverstockItems } from "@/domain/dashboard/loadOverstockItems";
 import { loadFoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
 import { loadProfitLeaks } from "@/domain/dashboard/loadProfitLeaks";
 import { loadShrinkageValue } from "@/domain/dashboard/loadShrinkageValue";
-import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
+import { loadSpendMetrics, type SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
 import { loadWasteMetrics, type WasteMetricsResult } from "@/domain/dashboard/loadWasteMetrics";
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type {
@@ -32,6 +32,13 @@ const EMPTY_WASTE_RESULT: WasteMetricsResult = {
   recordedWasteValue: 0,
   recordedWasteCount: 0,
   wasteItemsMissingCost: 0,
+};
+
+const EMPTY_SPEND_RESULT: SpendMetricsResult = {
+  periodSpend: 0,
+  spendOverviewData: null,
+  deliveryIssuesCount: 0,
+  priceIncreaseImpact: 0,
 };
 
 export type { DashboardTimeFilter };
@@ -193,7 +200,11 @@ export function useDashboardData({
             ),
           ),
           spendPromise.then((spend) =>
-            loadFoodCostMetrics(locationId, spend.periodSpend, timeFilter),
+            loadFoodCostMetrics(
+              locationId,
+              spend.status === "ok" ? spend.value.periodSpend : 0,
+              timeFilter,
+            ),
           ),
         ]);
 
@@ -212,16 +223,19 @@ export function useDashboardData({
           shrinkageResult.status === "ok" ? shrinkageResult.value : 0;
         const wasteValue =
           wasteResult.status === "ok" ? wasteResult.value : EMPTY_WASTE_RESULT;
+        const spendValue =
+          spendResult.status === "ok" ? spendResult.value : EMPTY_SPEND_RESULT;
         const errors: DashboardKpiErrors = {
           shrinkage: shrinkageResult.status === "error",
           waste: wasteResult.status === "error",
+          spend: spendResult.status === "error",
         };
 
         setSnapshot(
           buildDashboardSnapshot(
             inventoryResult,
             invoiceResult,
-            spendResult,
+            spendValue,
             wasteValue,
             shrinkageValue,
             profitLeaksResult,

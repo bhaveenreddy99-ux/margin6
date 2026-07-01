@@ -169,7 +169,7 @@ export async function buildMoneyLeakSnapshot(input: BuildMoneyLeakSnapshotInput)
 
   const inventory = await loadInventoryMetrics(input.restaurantId, input.locationId);
 
-  const [wasteOutcome, spend, invoiceProblemLineCount] = await Promise.all([
+  const [wasteOutcome, spendOutcome, invoiceProblemLineCount] = await Promise.all([
     loadWasteMetrics(
       input.restaurantId,
       input.locationId,
@@ -187,6 +187,10 @@ export async function buildMoneyLeakSnapshot(input: BuildMoneyLeakSnapshotInput)
     wasteOutcome.status === "ok"
       ? wasteOutcome.value
       : { todayWasteEntries: [], recordedWasteValue: 0, recordedWasteCount: 0, wasteItemsMissingCost: 0 };
+  const spend =
+    spendOutcome.status === "ok"
+      ? spendOutcome.value
+      : { periodSpend: 0, spendOverviewData: null, deliveryIssuesCount: 0, priceIncreaseImpact: 0 };
 
   return moneyLeakSnapshotFromParts({
     period,
