@@ -57,6 +57,7 @@ const DEFAULT_SNAPSHOT: KPISnapshot = {
   recordedWasteCount: 0,
   wasteItemsMissingCost: 0,
   shrinkageValue: 0,
+  shrinkageError: false,
   topProfitLeaks: [],
   overstockItems: [],
   foodCostPct: null,
@@ -197,16 +198,23 @@ export function useDashboardData({
 
         if (cancelled) return;
 
+        // Silent-$0 fix (pilot): a failed shrinkage query surfaces as a per-KPI
+        // error flag instead of a confident $0. A genuine empty period stays 0.
+        const shrinkageValue =
+          shrinkageResult.status === "ok" ? shrinkageResult.value : 0;
+        const shrinkageError = shrinkageResult.status === "error";
+
         setSnapshot(
           buildDashboardSnapshot(
             inventoryResult,
             invoiceResult,
             spendResult,
             wasteResult,
-            shrinkageResult,
+            shrinkageValue,
             profitLeaksResult,
             overstockItemsResult,
             foodCostResult,
+            shrinkageError,
           ),
         );
         setError(null);

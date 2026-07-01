@@ -214,6 +214,8 @@ export type KPISnapshot = {
   recordedWasteCount: number;
   wasteItemsMissingCost: number;
   shrinkageValue: number;
+  /** True when the shrinkage query failed — render "couldn't calculate", not $0. */
+  shrinkageError: boolean;
   topProfitLeaks: ProfitLeakItem[];
   overstockItems: OverstockItem[];
   foodCostPct: number | null;

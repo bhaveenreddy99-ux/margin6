@@ -19,6 +19,7 @@ export function buildDashboardSnapshot(
     targetPct: 30,
     status: null,
   },
+  shrinkageError: boolean = false,
 ): KPISnapshot {
   return {
     stockStatus: inventory.stockStatus,
@@ -43,6 +44,7 @@ export function buildDashboardSnapshot(
     recordedWasteCount: waste.recordedWasteCount,
     wasteItemsMissingCost: waste.wasteItemsMissingCost,
     shrinkageValue,
+    shrinkageError,
     topProfitLeaks,
     overstockItems,
     foodCostPct: foodCost.foodCostPct,

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { KpiCouldNotLoad } from "@/components/dashboard/KpiCouldNotLoad";
 import { DrilldownSheet, type DrilldownRow } from "@/components/DrilldownSheet";
 import {
   KpiExplainSheet,
@@ -63,6 +64,10 @@ export interface ProfitRiskWidgetProps {
   daysSinceLastCount: number | null;
   /** PAR not configured for any counted item — overstock can't be measured. */
   noParConfigured?: boolean;
+  /** Shrinkage query failed — show "couldn't calculate" on that row, not $0. */
+  shrinkageError?: boolean;
+  /** Retry the dashboard load (wired to the shrinkage row when it errored). */
+  onRetry?: () => void;
 }
 
 function formatDollars(n: number): string {
@@ -82,6 +87,8 @@ export function ProfitRiskWidget({
   confidenceSnapshot,
   daysSinceLastCount,
   noParConfigured = false,
+  shrinkageError = false,
+  onRetry,
 }: ProfitRiskWidgetProps) {
   const [openMetric, setOpenMetric] = useState<MetricKey | null>(null);
   const [rows, setRows] = useState<DrilldownRow[]>([]);
@@ -284,11 +291,15 @@ export function ProfitRiskWidget({
             {metricOrder.map((k) => {
               const m = metrics[k];
               const Icon = m.icon;
+              // Silent-$0 fix: if the shrinkage query failed, don't render a fake
+              // $0 — show "couldn't calculate" and make the row retry instead of
+              // opening the (empty) drilldown.
+              const rowErrored = k === "shrinkage" && shrinkageError;
               return (
                 <button
                   key={k}
                   type="button"
-                  onClick={() => void handleOpenRow(k)}
+                  onClick={() => (rowErrored ? onRetry?.() : void handleOpenRow(k))}
                   className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-left hover:bg-background hover:border-border transition-colors"
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -296,10 +307,16 @@ export function ProfitRiskWidget({
                     <span className="text-xs font-medium truncate">{m.title}</span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-sm font-bold font-mono tabular-nums">
-                      {formatDollars(m.value)}
-                    </span>
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                    {rowErrored ? (
+                      <KpiCouldNotLoad />
+                    ) : (
+                      <>
+                        <span className="text-sm font-bold font-mono tabular-nums">
+                          {formatDollars(m.value)}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      </>
+                    )}
                   </div>
                 </button>
               );
