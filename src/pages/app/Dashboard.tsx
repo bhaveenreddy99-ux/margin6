@@ -1279,7 +1279,7 @@ function SingleDashboard() {
     recordedWasteCount,
     wasteItemsMissingCost,
     shrinkageValue,
-    shrinkageError,
+    errors,
     topProfitLeaks,
     overstockItems,
     foodCostPct,
@@ -1539,7 +1539,7 @@ function SingleDashboard() {
                 priceIncreaseImpact={priceIncreaseImpact}
                 overstockValue={overstockValue}
                 shrinkageValue={shrinkageValue}
-                shrinkageError={shrinkageError}
+                metricErrors={{ waste: errors.waste, shrinkage: errors.shrinkage }}
                 onRetry={refetch}
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}

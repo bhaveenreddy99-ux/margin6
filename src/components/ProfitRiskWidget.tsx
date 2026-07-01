@@ -64,9 +64,9 @@ export interface ProfitRiskWidgetProps {
   daysSinceLastCount: number | null;
   /** PAR not configured for any counted item — overstock can't be measured. */
   noParConfigured?: boolean;
-  /** Shrinkage query failed — show "couldn't calculate" on that row, not $0. */
-  shrinkageError?: boolean;
-  /** Retry the dashboard load (wired to the shrinkage row when it errored). */
+  /** Per-row load failures — a true row shows "couldn't calculate", not $0. */
+  metricErrors?: Partial<Record<MetricKey, boolean>>;
+  /** Retry the dashboard load (wired to any errored row). */
   onRetry?: () => void;
 }
 
@@ -87,7 +87,7 @@ export function ProfitRiskWidget({
   confidenceSnapshot,
   daysSinceLastCount,
   noParConfigured = false,
-  shrinkageError = false,
+  metricErrors = {},
   onRetry,
 }: ProfitRiskWidgetProps) {
   const [openMetric, setOpenMetric] = useState<MetricKey | null>(null);
@@ -291,10 +291,10 @@ export function ProfitRiskWidget({
             {metricOrder.map((k) => {
               const m = metrics[k];
               const Icon = m.icon;
-              // Silent-$0 fix: if the shrinkage query failed, don't render a fake
+              // Silent-$0 fix: if this row's query failed, don't render a fake
               // $0 — show "couldn't calculate" and make the row retry instead of
               // opening the (empty) drilldown.
-              const rowErrored = k === "shrinkage" && shrinkageError;
+              const rowErrored = !!metricErrors[k];
               return (
                 <button
                   key={k}

@@ -17,14 +17,22 @@ import { loadFoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
 import { loadProfitLeaks } from "@/domain/dashboard/loadProfitLeaks";
 import { loadShrinkageValue } from "@/domain/dashboard/loadShrinkageValue";
 import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
-import { loadWasteMetrics } from "@/domain/dashboard/loadWasteMetrics";
+import { loadWasteMetrics, type WasteMetricsResult } from "@/domain/dashboard/loadWasteMetrics";
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type {
+  DashboardKpiErrors,
   DashboardTimeFilter,
   KPISnapshot,
   PortfolioDashboardResponse,
   SingleDashboardData,
 } from "@/domain/dashboard/dashboardTypes";
+
+const EMPTY_WASTE_RESULT: WasteMetricsResult = {
+  todayWasteEntries: [],
+  recordedWasteValue: 0,
+  recordedWasteCount: 0,
+  wasteItemsMissingCost: 0,
+};
 
 export type { DashboardTimeFilter };
 
@@ -57,7 +65,7 @@ const DEFAULT_SNAPSHOT: KPISnapshot = {
   recordedWasteCount: 0,
   wasteItemsMissingCost: 0,
   shrinkageValue: 0,
-  shrinkageError: false,
+  errors: {},
   topProfitLeaks: [],
   overstockItems: [],
   foodCostPct: null,
@@ -198,23 +206,28 @@ export function useDashboardData({
 
         if (cancelled) return;
 
-        // Silent-$0 fix (pilot): a failed shrinkage query surfaces as a per-KPI
-        // error flag instead of a confident $0. A genuine empty period stays 0.
+        // Silent-$0 fix: a failed query surfaces as a per-KPI error flag instead
+        // of a confident $0. A genuine empty period still yields a real 0.
         const shrinkageValue =
           shrinkageResult.status === "ok" ? shrinkageResult.value : 0;
-        const shrinkageError = shrinkageResult.status === "error";
+        const wasteValue =
+          wasteResult.status === "ok" ? wasteResult.value : EMPTY_WASTE_RESULT;
+        const errors: DashboardKpiErrors = {
+          shrinkage: shrinkageResult.status === "error",
+          waste: wasteResult.status === "error",
+        };
 
         setSnapshot(
           buildDashboardSnapshot(
             inventoryResult,
             invoiceResult,
             spendResult,
-            wasteResult,
+            wasteValue,
             shrinkageValue,
             profitLeaksResult,
             overstockItemsResult,
             foodCostResult,
-            shrinkageError,
+            errors,
           ),
         );
         setError(null);

@@ -191,6 +191,22 @@ export type LatestInventorySnapshot = {
   missingParCount: number;
 };
 
+/**
+ * Per-loader failure flags (silent-$0 trust fix). A `true` means that loader's
+ * query FAILED and its KPI(s) must render "couldn't calculate", not a $0. Absent
+ * / false means the value is trustworthy (a genuine 0 is still trustworthy).
+ */
+export type DashboardKpiErrors = {
+  inventory?: boolean;
+  spend?: boolean;
+  invoice?: boolean;
+  overstock?: boolean;
+  profitLeaks?: boolean;
+  waste?: boolean;
+  shrinkage?: boolean;
+  foodCost?: boolean;
+};
+
 export type KPISnapshot = {
   stockStatus: DashboardStockStatus;
   topReorder: TopReorderItem[];
@@ -214,8 +230,8 @@ export type KPISnapshot = {
   recordedWasteCount: number;
   wasteItemsMissingCost: number;
   shrinkageValue: number;
-  /** True when the shrinkage query failed — render "couldn't calculate", not $0. */
-  shrinkageError: boolean;
+  /** Per-loader failure flags — see {@link DashboardKpiErrors}. */
+  errors: DashboardKpiErrors;
   topProfitLeaks: ProfitLeakItem[];
   overstockItems: OverstockItem[];
   foodCostPct: number | null;

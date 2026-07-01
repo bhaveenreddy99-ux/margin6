@@ -1,5 +1,5 @@
 import type { FoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
-import type { KPISnapshot, OverstockItem, ProfitLeakItem } from "@/domain/dashboard/dashboardTypes";
+import type { DashboardKpiErrors, KPISnapshot, OverstockItem, ProfitLeakItem } from "@/domain/dashboard/dashboardTypes";
 import type { InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import type { InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
 import type { SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
@@ -19,7 +19,7 @@ export function buildDashboardSnapshot(
     targetPct: 30,
     status: null,
   },
-  shrinkageError: boolean = false,
+  errors: DashboardKpiErrors = {},
 ): KPISnapshot {
   return {
     stockStatus: inventory.stockStatus,
@@ -44,7 +44,7 @@ export function buildDashboardSnapshot(
     recordedWasteCount: waste.recordedWasteCount,
     wasteItemsMissingCost: waste.wasteItemsMissingCost,
     shrinkageValue,
-    shrinkageError,
+    errors,
     topProfitLeaks,
     overstockItems,
     foodCostPct: foodCost.foodCostPct,
