@@ -5,6 +5,7 @@ import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { OverstockCashTrapCard } from "@/components/OverstockCashTrapCard";
 import { PriceHikeAlertsCard } from "@/components/PriceHikeAlertsCard";
 import { ProfitLeaksCard } from "@/components/ProfitLeaksCard";
+import { DashboardErrorBoundary } from "@/components/dashboard/DashboardErrorBoundary";
 import { ShrinkageAlertCard } from "@/components/ShrinkageAlertCard";
 import { TrialBanner } from "@/components/TrialBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1541,6 +1542,7 @@ function SingleDashboard() {
             ) : null}
 
             {currentRestaurant && (
+              <DashboardErrorBoundary label="Profit Risk" onRetry={refetch}>
               <ProfitRiskWidget
                 recordedWasteValue={recordedWasteValue}
                 priceIncreaseImpact={priceIncreaseImpact}
@@ -1562,27 +1564,36 @@ function SingleDashboard() {
                   return total > 0 && s.noParCount === total;
                 })()}
               />
+              </DashboardErrorBoundary>
             )}
 
-            <ProfitLeaksCard items={topProfitLeaks} loading={loading} error={errors.profitLeaks} onRetry={refetch} />
+            <DashboardErrorBoundary label="Profit Leaks" onRetry={refetch}>
+              <ProfitLeaksCard items={topProfitLeaks} loading={loading} error={errors.profitLeaks} onRetry={refetch} />
+            </DashboardErrorBoundary>
 
             {currentRestaurant && (
               <div className="grid gap-5 lg:grid-cols-2">
-                <PriceHikeAlertsCard
-                  restaurantId={currentRestaurant.id}
-                  locationId={currentLocation?.id}
-                  timeFilter={timeFilter}
-                />
-                <OverstockCashTrapCard items={overstockItems} error={errors.overstock} onRetry={refetch} />
+                <DashboardErrorBoundary label="Price Hikes" onRetry={refetch}>
+                  <PriceHikeAlertsCard
+                    restaurantId={currentRestaurant.id}
+                    locationId={currentLocation?.id}
+                    timeFilter={timeFilter}
+                  />
+                </DashboardErrorBoundary>
+                <DashboardErrorBoundary label="Overstock" onRetry={refetch}>
+                  <OverstockCashTrapCard items={overstockItems} error={errors.overstock} onRetry={refetch} />
+                </DashboardErrorBoundary>
               </div>
             )}
 
             {currentRestaurant && (
-              <ShrinkageAlertCard
-                restaurantId={currentRestaurant.id}
-                locationId={currentLocation?.id}
-                timeFilter={timeFilter}
-              />
+              <DashboardErrorBoundary label="Shrinkage" onRetry={refetch}>
+                <ShrinkageAlertCard
+                  restaurantId={currentRestaurant.id}
+                  locationId={currentLocation?.id}
+                  timeFilter={timeFilter}
+                />
+              </DashboardErrorBoundary>
             )}
 
             <section className="space-y-4" aria-labelledby="dash-today-heading">
