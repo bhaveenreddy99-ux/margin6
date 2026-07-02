@@ -1309,6 +1309,8 @@ function SingleDashboard() {
   }, [reorderSummary, deliveryIssuesCount, priceIncreaseImpact, missingParCount]);
 
   const foodCostLabel = useMemo(() => {
+    // Silent-$0 fix: a failed sales query must not read as "enter weekly sales".
+    if (errors.foodCost) return "Couldn't calculate — tap Retry";
     if (foodCostPct == null) {
       return weeklyGrossSales == null
         ? "Enter weekly sales to unlock food cost %"
@@ -1324,7 +1326,7 @@ function SingleDashboard() {
       default:
         return `Industry target 28–32% · your target ${foodCostTargetPct}%`;
     }
-  }, [foodCostPct, foodCostStatus, foodCostTargetPct, weeklyGrossSales]);
+  }, [foodCostPct, foodCostStatus, foodCostTargetPct, weeklyGrossSales, errors.foodCost]);
 
   const foodCostAccent = useMemo((): "destructive" | "warning" | "success" | "primary" => {
     if (foodCostStatus === "over") return "destructive";

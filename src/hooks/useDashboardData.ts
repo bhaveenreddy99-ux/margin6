@@ -14,7 +14,7 @@ import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT, type InventoryMetricsResu
 import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { loadInvoiceMetrics, type InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
 import { loadOverstockItems } from "@/domain/dashboard/loadOverstockItems";
-import { loadFoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
+import { loadFoodCostMetrics, type FoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
 import { loadProfitLeaks } from "@/domain/dashboard/loadProfitLeaks";
 import { loadShrinkageValue } from "@/domain/dashboard/loadShrinkageValue";
 import { loadSpendMetrics, type SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
@@ -40,6 +40,13 @@ const EMPTY_SPEND_RESULT: SpendMetricsResult = {
   spendOverviewData: null,
   deliveryIssuesCount: 0,
   priceIncreaseImpact: 0,
+};
+
+const EMPTY_FOOD_COST: FoodCostMetrics = {
+  foodCostPct: null,
+  weeklyGrossSales: null,
+  targetPct: 30,
+  status: null,
 };
 
 export type { DashboardTimeFilter };
@@ -235,6 +242,8 @@ export function useDashboardData({
           overstockItemsResult.status === "ok" ? overstockItemsResult.value : [];
         const profitLeaksValue =
           profitLeaksResult.status === "ok" ? profitLeaksResult.value : [];
+        const foodCostValue =
+          foodCostResult.status === "ok" ? foodCostResult.value : EMPTY_FOOD_COST;
         const errors: DashboardKpiErrors = {
           inventory: inventoryResult.status === "error",
           invoice: invoiceResult.status === "error",
@@ -243,6 +252,7 @@ export function useDashboardData({
           spend: spendResult.status === "error",
           overstock: overstockItemsResult.status === "error",
           profitLeaks: profitLeaksResult.status === "error",
+          foodCost: foodCostResult.status === "error",
         };
 
         setSnapshot(
@@ -254,7 +264,7 @@ export function useDashboardData({
             shrinkageValue,
             profitLeaksValue,
             overstockItemsValue,
-            foodCostResult,
+            foodCostValue,
             errors,
           ),
         );
