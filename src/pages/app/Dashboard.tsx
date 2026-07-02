@@ -1571,7 +1571,7 @@ function SingleDashboard() {
                   locationId={currentLocation?.id}
                   timeFilter={timeFilter}
                 />
-                <OverstockCashTrapCard items={overstockItems} />
+                <OverstockCashTrapCard items={overstockItems} error={errors.overstock} onRetry={refetch} />
               </div>
             )}
 
