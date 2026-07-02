@@ -24,6 +24,7 @@ import {
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type { DashboardTimeFilter } from "@/domain/dashboard/dashboardTypes";
 import {
+  computeProfitRiskPartialNote,
   PROFIT_RISK_EMPTY_SUBTITLE,
   PROFIT_RISK_EMPTY_TITLE,
   PROFIT_RISK_HERO_SUBTITLE,
@@ -249,6 +250,14 @@ export function ProfitRiskWidget({
   const current = openMetric ? metrics[openMetric] : null;
   const metricOrder: MetricKey[] = ["waste", "priceHike", "overstock", "shrinkage"];
 
+  // Silent-$0 fix: if any Money Lost component failed to load, the headline total
+  // is INCOMPLETE (the failed terms silently contributed 0). Never present it as a
+  // confident full total — flag it as partial and name what's missing.
+  const erroredMetricKeys = metricOrder.filter((k) => !!metricErrors[k]);
+  const partialNote = computeProfitRiskPartialNote(
+    erroredMetricKeys.map((k) => metrics[k].title),
+  );
+
   return (
     <>
       <Card className="border-destructive/15 bg-gradient-to-br from-destructive/5 to-transparent">
@@ -261,8 +270,17 @@ export function ProfitRiskWidget({
               </div>
               <p className="mt-3 text-4xl sm:text-5xl font-extrabold tracking-tight tabular-nums text-destructive">
                 {formatDollars(total)}
+                {partialNote && (
+                  <span className="ml-2 align-middle text-sm font-semibold text-amber-600 dark:text-amber-500">
+                    ({partialNote})
+                  </span>
+                )}
               </p>
-              <p className="mt-1.5 text-xs text-muted-foreground max-w-lg">{PROFIT_RISK_HERO_SUBTITLE}</p>
+              <p className="mt-1.5 text-xs text-muted-foreground max-w-lg">
+                {partialNote
+                  ? "Some components couldn't be calculated — tap the flagged rows below to retry."
+                  : PROFIT_RISK_HERO_SUBTITLE}
+              </p>
             </div>
             <Button
               variant="outline"
