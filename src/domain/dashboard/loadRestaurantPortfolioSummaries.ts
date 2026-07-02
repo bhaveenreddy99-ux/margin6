@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { linePriceIncreaseImpact } from "@/domain/dashboard/dashboardSelectors";
 import { computeLineInventoryValue } from "@/domain/inventory/casePlanningEngine";
 import type { InvoiceLineComparisonRow } from "@/domain/dashboard/dashboardTypes";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 
 export type RestaurantPortfolioSummary = {
   lastCountAt: string | null;
@@ -48,8 +49,8 @@ function sumShrinkageFromNotificationData(data: unknown): number {
  */
 export async function loadRestaurantPortfolioSummaries(
   restaurantIds: string[],
-): Promise<Record<string, RestaurantPortfolioSummary>> {
-  if (restaurantIds.length === 0) return {};
+): Promise<LoadOutcome<Record<string, RestaurantPortfolioSummary>>> {
+  if (restaurantIds.length === 0) return { status: "ok", value: {} };
 
   const ids = restaurantIds;
   const weekStartIso = subDays(new Date(), 7).toISOString();
@@ -93,6 +94,14 @@ export async function loadRestaurantPortfolioSummaries(
       .gte("created_at", weekStartIso),
   ]);
 
+  // Any failed core query makes the whole portfolio unreliable — surface an error
+  // instead of rendering every restaurant as "—"/$0.
+  if (sessionsResult.error) return { status: "error", error: sessionsResult.error };
+  if (wasteResult.error) return { status: "error", error: wasteResult.error };
+  if (invoicesResult.error) return { status: "error", error: invoicesResult.error };
+  if (confirmedResult.error) return { status: "error", error: confirmedResult.error };
+  if (shrinkResult.error) return { status: "error", error: shrinkResult.error };
+
   const summaries = initSummaries(ids);
 
   const latestSessionByRestaurant: Record<string, string> = {};
@@ -134,12 +143,13 @@ export async function loadRestaurantPortfolioSummaries(
   }
 
   if (invoiceIds.length > 0) {
-    const { data: comparisons } = (await supabase
+    const { data: comparisons, error: comparisonsError } = (await supabase
       .from("invoice_line_comparisons")
       .select(
         "invoice_id, status, received_qty, po_qty, invoiced_unit_cost, po_unit_cost, invoiced_qty",
       )
-      .in("invoice_id", invoiceIds)) as { data: InvoiceLineComparisonRow[] | null };
+      .in("invoice_id", invoiceIds)) as { data: InvoiceLineComparisonRow[] | null; error: unknown };
+    if (comparisonsError) return { status: "error", error: comparisonsError };
 
     for (const comparison of comparisons ?? []) {
       if (!comparison.invoice_id || comparison.status !== "price_mismatch") continue;
@@ -164,10 +174,11 @@ export async function loadRestaurantPortfolioSummaries(
 
   const sessionIds = Object.values(latestSessionByRestaurant);
   if (sessionIds.length > 0) {
-    const { data: sessionItems } = await supabase
+    const { data: sessionItems, error: sessionItemsError } = await supabase
       .from("inventory_session_items")
       .select("session_id, current_stock, unit_cost")
       .in("session_id", sessionIds);
+    if (sessionItemsError) return { status: "error", error: sessionItemsError };
 
     const sessionToRestaurant = new Map<string, string>(
       Object.entries(latestSessionByRestaurant).map(([rid, sid]) => [sid, rid]),
@@ -207,7 +218,7 @@ export async function loadRestaurantPortfolioSummaries(
     summaries[rid].moneyLost = hasData ? total : null;
   }
 
-  return summaries;
+  return { status: "ok", value: summaries };
 }
 
 export type RestaurantPortfolioStatus =
