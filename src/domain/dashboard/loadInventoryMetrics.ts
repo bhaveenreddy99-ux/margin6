@@ -19,6 +19,7 @@ import type {
   TopSessionItemByValue,
 } from "@/domain/dashboard/dashboardTypes";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import type { ReorderSummary } from "@/domain/inventory/reorderEngine";
 
 export type InventoryMetricsResult = {
@@ -80,7 +81,7 @@ void _typeCheck;
 export async function loadInventoryMetrics(
   restaurantId: string,
   locationId?: string,
-): Promise<InventoryMetricsResult> {
+): Promise<LoadOutcome<InventoryMetricsResult>> {
   let sessionQuery = supabase
     .from("inventory_sessions")
     .select("id, approved_at, name")
@@ -94,13 +95,16 @@ export async function loadInventoryMetrics(
   if (locationId) sessionQuery = withLocationOrNull(sessionQuery, locationId);
 
   const [sessionsResult, riskSettingsResult] = await Promise.all([
-    sessionQuery as unknown as Promise<{ data: InventorySessionRow[] | null }>,
+    sessionQuery as unknown as Promise<{ data: InventorySessionRow[] | null; error: unknown }>,
     supabase
       .from("smart_order_settings")
       .select("red_threshold, yellow_threshold")
       .eq("restaurant_id", restaurantId)
       .maybeSingle() as unknown as Promise<{ data: SmartOrderSettingsRow | null }>,
   ]);
+
+  // The latest-approved-session query anchors inventory value / reorder / overstock.
+  if (sessionsResult.error) return { status: "error", error: sessionsResult.error };
 
   const sessions = sessionsResult.data;
   const riskThresholds = riskThresholdsFromSettings(riskSettingsResult.data);
@@ -123,10 +127,15 @@ export async function loadInventoryMetrics(
     if (sessions[0].approved_at) lastSessionDate = new Date(sessions[0].approved_at);
     if (sessions[0].name) lastSessionName = sessions[0].name;
 
-    const { data: items } = (await supabase
+    const { data: items, error: itemsErr } = (await supabase
       .from("inventory_session_items")
       .select("*")
-      .eq("session_id", sessions[0].id)) as unknown as { data: InventorySessionItemRow[] | null };
+      .eq("session_id", sessions[0].id)) as unknown as {
+      data: InventorySessionItemRow[] | null;
+      error: unknown;
+    };
+    // These rows ARE the inventory value / reorder / overstock math.
+    if (itemsErr) return { status: "error", error: itemsErr };
 
     if (items) {
       const snapshot = buildLatestInventorySnapshot(items, riskThresholds);
@@ -183,20 +192,23 @@ export async function loadInventoryMetrics(
   ]);
 
   return {
-    stockStatus,
-    topReorder,
-    reorderSummary,
-    highUsage,
-    recommendations,
-    inventoryValue,
-    missingCostCount,
-    trendData,
-    overstockValue,
-    lastSessionDate,
-    lastSessionName,
-    missingParCount,
-    latestSessionUnitCostByCatalogId,
-    topItemsByValue,
-    lastSessionApprovedAtIso,
+    status: "ok",
+    value: {
+      stockStatus,
+      topReorder,
+      reorderSummary,
+      highUsage,
+      recommendations,
+      inventoryValue,
+      missingCostCount,
+      trendData,
+      overstockValue,
+      lastSessionDate,
+      lastSessionName,
+      missingParCount,
+      latestSessionUnitCostByCatalogId,
+      topItemsByValue,
+      lastSessionApprovedAtIso,
+    },
   };
 }

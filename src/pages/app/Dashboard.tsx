@@ -1049,7 +1049,12 @@ function DashboardReportsTab({
     setLoading(true);
     setFetchError(false);
     try {
-      const metrics = await loadInventoryMetrics(restaurantId, locationId ?? undefined);
+      const inventoryOutcome = await loadInventoryMetrics(restaurantId, locationId ?? undefined);
+      if (inventoryOutcome.status === "error") {
+        setFetchError(true);
+        return;
+      }
+      const metrics = inventoryOutcome.value;
       const { data: riskSettings } = await supabase
         .from("smart_order_settings")
         .select("red_threshold, yellow_threshold")
@@ -1539,7 +1544,7 @@ function SingleDashboard() {
                 priceIncreaseImpact={priceIncreaseImpact}
                 overstockValue={overstockValue}
                 shrinkageValue={shrinkageValue}
-                metricErrors={{ waste: errors.waste, shrinkage: errors.shrinkage, priceHike: errors.spend }}
+                metricErrors={{ waste: errors.waste, shrinkage: errors.shrinkage, priceHike: errors.spend, overstock: errors.inventory }}
                 onRetry={refetch}
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}

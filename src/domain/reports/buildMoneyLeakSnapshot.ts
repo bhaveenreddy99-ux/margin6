@@ -9,7 +9,7 @@ import {
   invoiceBusinessDateInRange,
   isInvoiceLineComparisonProblem,
 } from "@/domain/dashboard/dashboardSelectors";
-import { loadInventoryMetrics } from "@/domain/dashboard/loadInventoryMetrics";
+import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT } from "@/domain/dashboard/loadInventoryMetrics";
 import type { InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
 import type { SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
@@ -167,7 +167,9 @@ export async function buildMoneyLeakSnapshot(input: BuildMoneyLeakSnapshotInput)
   const { startDate, endDate } = dashboardSpendRangeFromFilter(input.timeFilter);
   const period: MoneyLeakPeriod = { start: startDate, end: endDate };
 
-  const inventory = await loadInventoryMetrics(input.restaurantId, input.locationId);
+  const inventoryOutcome = await loadInventoryMetrics(input.restaurantId, input.locationId);
+  const inventory =
+    inventoryOutcome.status === "ok" ? inventoryOutcome.value : EMPTY_INVENTORY_RESULT;
 
   const [wasteOutcome, spendOutcome, invoiceProblemLineCount] = await Promise.all([
     loadWasteMetrics(

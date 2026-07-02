@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { buildDashboardSnapshot } from "@/domain/dashboard/buildDashboardSnapshot";
 import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT, type InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { loadInvoiceMetrics, type InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
 import { loadOverstockItems } from "@/domain/dashboard/loadOverstockItems";
 import { loadFoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
@@ -165,8 +166,8 @@ export function useDashboardData({
 
         const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
 
-        const inventoryPromise: Promise<InventoryMetricsResult> = onlyTimeFilterChanged
-          ? Promise.resolve(cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT)
+        const inventoryPromise: Promise<LoadOutcome<InventoryMetricsResult>> = onlyTimeFilterChanged
+          ? Promise.resolve({ status: "ok", value: cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT })
           : loadInventoryMetrics(restaurantId, locationId);
 
         const invoicePromise: Promise<InvoiceMetricsResult> = onlyTimeFilterChanged
@@ -196,7 +197,7 @@ export function useDashboardData({
               restaurantId,
               locationId,
               timeFilter,
-              inventory.latestSessionUnitCostByCatalogId,
+              inventory.status === "ok" ? inventory.value.latestSessionUnitCostByCatalogId : {},
             ),
           ),
           spendPromise.then((spend) =>
@@ -208,10 +209,13 @@ export function useDashboardData({
           ),
         ]);
 
+        const inventoryData =
+          inventoryResult.status === "ok" ? inventoryResult.value : EMPTY_INVENTORY_RESULT;
+
         if (!onlyTimeFilterChanged) {
           latestSessionUnitCostByCatalogIdRef.current =
-            inventoryResult.latestSessionUnitCostByCatalogId;
-          cachedInventoryRef.current = inventoryResult;
+            inventoryData.latestSessionUnitCostByCatalogId;
+          cachedInventoryRef.current = inventoryData;
           cachedInvoiceRef.current = invoiceResult;
         }
 
@@ -226,6 +230,7 @@ export function useDashboardData({
         const spendValue =
           spendResult.status === "ok" ? spendResult.value : EMPTY_SPEND_RESULT;
         const errors: DashboardKpiErrors = {
+          inventory: inventoryResult.status === "error",
           shrinkage: shrinkageResult.status === "error",
           waste: wasteResult.status === "error",
           spend: spendResult.status === "error",
@@ -233,7 +238,7 @@ export function useDashboardData({
 
         setSnapshot(
           buildDashboardSnapshot(
-            inventoryResult,
+            inventoryData,
             invoiceResult,
             spendValue,
             wasteValue,
