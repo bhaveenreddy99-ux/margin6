@@ -170,8 +170,8 @@ export function useDashboardData({
           ? Promise.resolve({ status: "ok", value: cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT })
           : loadInventoryMetrics(restaurantId, locationId);
 
-        const invoicePromise: Promise<InvoiceMetricsResult> = onlyTimeFilterChanged
-          ? Promise.resolve(cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT)
+        const invoicePromise: Promise<LoadOutcome<InvoiceMetricsResult>> = onlyTimeFilterChanged
+          ? Promise.resolve({ status: "ok", value: cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT })
           : loadInvoiceMetrics(restaurantId, locationId);
 
         const spendPromise = loadSpendMetrics(restaurantId, locationId, timeFilter);
@@ -211,12 +211,14 @@ export function useDashboardData({
 
         const inventoryData =
           inventoryResult.status === "ok" ? inventoryResult.value : EMPTY_INVENTORY_RESULT;
+        const invoiceData =
+          invoiceResult.status === "ok" ? invoiceResult.value : EMPTY_INVOICE_RESULT;
 
         if (!onlyTimeFilterChanged) {
           latestSessionUnitCostByCatalogIdRef.current =
             inventoryData.latestSessionUnitCostByCatalogId;
           cachedInventoryRef.current = inventoryData;
-          cachedInvoiceRef.current = invoiceResult;
+          cachedInvoiceRef.current = invoiceData;
         }
 
         if (cancelled) return;
@@ -231,6 +233,7 @@ export function useDashboardData({
           spendResult.status === "ok" ? spendResult.value : EMPTY_SPEND_RESULT;
         const errors: DashboardKpiErrors = {
           inventory: inventoryResult.status === "error",
+          invoice: invoiceResult.status === "error",
           shrinkage: shrinkageResult.status === "error",
           waste: wasteResult.status === "error",
           spend: spendResult.status === "error",
@@ -239,7 +242,7 @@ export function useDashboardData({
         setSnapshot(
           buildDashboardSnapshot(
             inventoryData,
-            invoiceResult,
+            invoiceData,
             spendValue,
             wasteValue,
             shrinkageValue,
