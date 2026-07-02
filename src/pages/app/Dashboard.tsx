@@ -1562,7 +1562,7 @@ function SingleDashboard() {
               />
             )}
 
-            <ProfitLeaksCard items={topProfitLeaks} loading={loading} />
+            <ProfitLeaksCard items={topProfitLeaks} loading={loading} error={errors.profitLeaks} onRetry={refetch} />
 
             {currentRestaurant && (
               <div className="grid gap-5 lg:grid-cols-2">

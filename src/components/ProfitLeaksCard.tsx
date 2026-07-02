@@ -3,11 +3,15 @@ import { ChevronRight, Inbox, TrendingDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DrilldownSheet, type DrilldownRow } from "@/components/DrilldownSheet";
+import { KpiCouldNotLoad } from "@/components/dashboard/KpiCouldNotLoad";
 import type { ProfitLeakItem, ProfitLeakReason } from "@/domain/dashboard/dashboardTypes";
 
 interface ProfitLeaksCardProps {
   items: ProfitLeakItem[];
   loading: boolean;
+  /** Silent-$0 fix: all leak sources failed and nothing loaded — show error, not "no leaks". */
+  error?: boolean;
+  onRetry?: () => void;
 }
 
 const REASON_STYLE: Record<ProfitLeakReason, string> = {
@@ -35,7 +39,7 @@ function formatDollars(n: number, fractionDigits = 0): string {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: fractionDigits })}`;
 }
 
-export function ProfitLeaksCard({ items, loading }: ProfitLeaksCardProps) {
+export function ProfitLeaksCard({ items, loading, error = false, onRetry }: ProfitLeaksCardProps) {
   const [openLeak, setOpenLeak] = useState<ProfitLeakItem | null>(null);
 
   const drilldownRows: DrilldownRow[] = openLeak?.breakdown ?? [];
@@ -54,6 +58,10 @@ export function ProfitLeaksCard({ items, loading }: ProfitLeaksCardProps) {
                 <Skeleton key={i} className="h-12 rounded-lg" />
               ))}
             </div>
+          ) : error ? (
+            <button type="button" onClick={onRetry} className="flex w-full flex-col items-center py-10 text-center">
+              <KpiCouldNotLoad />
+            </button>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center py-10 text-center">
               <Inbox className="h-8 w-8 text-muted-foreground/25 mb-2" />

@@ -5,6 +5,7 @@ import type {
   ProfitLeakItem,
   ProfitLeakReason,
 } from "@/domain/dashboard/dashboardTypes";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import {
   buildPriceIncreaseBreakdownRows,
@@ -55,8 +56,12 @@ export async function loadProfitLeaks(
   locationId: string | null | undefined,
   from: string,
   to: string,
-): Promise<ProfitLeakItem[]> {
+): Promise<LoadOutcome<ProfitLeakItem[]>> {
   const buckets = new Map<LeakKey, Bucket>();
+  // Option A (partial-tolerant): each source degrades independently; we only
+  // report an error when the list ends up EMPTY *and* at least one source failed
+  // (so an all-clear list is never shown when everything actually errored).
+  let sourcesErrored = false;
   const fromDate = from.slice(0, 10);
   const toDate = to.slice(0, 10);
   const loc = locationId ?? undefined;
@@ -160,6 +165,7 @@ export async function loadProfitLeaks(
     }
   } catch {
     // swallow — partial results are better than no card
+    sourcesErrored = true;
   }
 
   // ── 2. Price hikes ────────────────────────────────────────────────────────
@@ -254,6 +260,7 @@ export async function loadProfitLeaks(
     }
   } catch {
     // swallow
+    sourcesErrored = true;
   }
 
   // ── 3. Overstock (latest APPROVED session) ────────────────────────────────
@@ -301,6 +308,7 @@ export async function loadProfitLeaks(
     }
   } catch {
     // swallow
+    sourcesErrored = true;
   }
 
   // ── 4. Shrinkage (SHRINK_ALERT / COUNT_VARIANCE notifications) ───────────
@@ -346,6 +354,7 @@ export async function loadProfitLeaks(
     }
   } catch {
     // swallow
+    sourcesErrored = true;
   }
 
   const leaks: ProfitLeakItem[] = [];
@@ -360,5 +369,11 @@ export async function loadProfitLeaks(
     });
   }
 
-  return leaks.sort((a, b) => b.total - a.total).slice(0, 5);
+  const value = leaks.sort((a, b) => b.total - a.total).slice(0, 5);
+  // Partial-tolerant: only surface an error when there is nothing to show AND a
+  // source failed — otherwise show whatever loaded (a genuine empty stays ok).
+  if (value.length === 0 && sourcesErrored) {
+    return { status: "error", error: new Error("all profit-leak sources failed") };
+  }
+  return { status: "ok", value };
 }

@@ -233,6 +233,8 @@ export function useDashboardData({
           spendResult.status === "ok" ? spendResult.value : EMPTY_SPEND_RESULT;
         const overstockItemsValue =
           overstockItemsResult.status === "ok" ? overstockItemsResult.value : [];
+        const profitLeaksValue =
+          profitLeaksResult.status === "ok" ? profitLeaksResult.value : [];
         const errors: DashboardKpiErrors = {
           inventory: inventoryResult.status === "error",
           invoice: invoiceResult.status === "error",
@@ -240,6 +242,7 @@ export function useDashboardData({
           waste: wasteResult.status === "error",
           spend: spendResult.status === "error",
           overstock: overstockItemsResult.status === "error",
+          profitLeaks: profitLeaksResult.status === "error",
         };
 
         setSnapshot(
@@ -249,7 +252,7 @@ export function useDashboardData({
             spendValue,
             wasteValue,
             shrinkageValue,
-            profitLeaksResult,
+            profitLeaksValue,
             overstockItemsValue,
             foodCostResult,
             errors,
