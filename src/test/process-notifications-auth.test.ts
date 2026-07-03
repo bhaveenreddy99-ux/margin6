@@ -1,15 +1,22 @@
 import { describe, it, expect } from "vitest";
 import {
   extractBearerToken,
-  isServiceRoleAuthorized,
+  bearerHasServiceRole,
 } from "../../supabase/functions/_shared/serviceAuth";
 
-// S0-2: process-notifications service-role gate. These cover the synchronous
-// authorization decision that determines whether the cron engine runs at all.
-// The trusted caller (pg_cron) presents the service-role key in the bearer.
+// S0-2: process-notifications service-role gate. The function is deployed with
+// verify_jwt = true, so Supabase's gateway cryptographically validates the JWT
+// before the handler runs; bearerHasServiceRole then enforces role = service_role.
+// The trusted caller (pg_cron) presents a service_role token in the bearer.
 // See docs/test-results/s0-2-process-notifications-auth-results.md.
 
-const SERVICE_KEY = "service-role-secret-key";
+// Build an UNSIGNED JWT (header.payload.sig) with the given claims. The signature
+// is a placeholder — bearerHasServiceRole never checks it (verify_jwt=true means
+// the gateway already validated the real signature before the handler runs).
+function jwt(payload: Record<string, unknown>): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "HS256", typ: "JWT" })}.${b64(payload)}.sig`;
+}
 
 describe("extractBearerToken", () => {
   it("returns the token from a well-formed Bearer header", () => {
@@ -24,38 +31,35 @@ describe("extractBearerToken", () => {
   });
 });
 
-describe("isServiceRoleAuthorized", () => {
+describe("bearerHasServiceRole", () => {
+  it("accepts a validly-shaped service_role token (the cron caller)", () => {
+    expect(bearerHasServiceRole(`Bearer ${jwt({ role: "service_role", ref: "proj" })}`)).toBe(true);
+  });
+
   it("rejects a missing Authorization header (no auth)", () => {
-    expect(isServiceRoleAuthorized(null, SERVICE_KEY)).toBe(false);
-    expect(isServiceRoleAuthorized(undefined, SERVICE_KEY)).toBe(false);
+    expect(bearerHasServiceRole(null)).toBe(false);
+    expect(bearerHasServiceRole(undefined)).toBe(false);
   });
 
-  it("accepts the exact service-role key as a bearer (the cron caller)", () => {
-    expect(isServiceRoleAuthorized(`Bearer ${SERVICE_KEY}`, SERVICE_KEY)).toBe(true);
+  it("rejects the public anon token (wrong role)", () => {
+    expect(bearerHasServiceRole(`Bearer ${jwt({ role: "anon" })}`)).toBe(false);
   });
 
-  it("rejects an arbitrary / wrong bearer token", () => {
-    expect(isServiceRoleAuthorized("Bearer wrong-token", SERVICE_KEY)).toBe(false);
+  it("rejects a normal authenticated user token (wrong role)", () => {
+    expect(bearerHasServiceRole(`Bearer ${jwt({ role: "authenticated", sub: "user-123" })}`)).toBe(false);
   });
 
-  it("rejects the public anon key (not the service key)", () => {
-    expect(isServiceRoleAuthorized("Bearer eyJ-anon-key-not-the-service-key", SERVICE_KEY)).toBe(false);
+  it("rejects a token with no role claim", () => {
+    expect(bearerHasServiceRole(`Bearer ${jwt({ sub: "x" })}`)).toBe(false);
   });
 
-  it("fails closed when the service key is unset/empty", () => {
-    expect(isServiceRoleAuthorized(`Bearer ${SERVICE_KEY}`, undefined)).toBe(false);
-    expect(isServiceRoleAuthorized(`Bearer ${SERVICE_KEY}`, "")).toBe(false);
-    expect(isServiceRoleAuthorized(null, undefined)).toBe(false);
+  it("rejects the empty bearer the cron would send if its key is unset", () => {
+    expect(bearerHasServiceRole("Bearer ")).toBe(false);
   });
 
-  it("rejects the empty bearer the cron sends when its GUC is unset (R1)", () => {
-    // pg_cron falls back to `Bearer ` (empty) if app.settings.service_role_key
-    // is not set — this MUST be rejected, hence the deploy co-requisite.
-    expect(isServiceRoleAuthorized("Bearer ", SERVICE_KEY)).toBe(false);
-  });
-
-  it("requires an exact match (no substring/prefix bypass)", () => {
-    expect(isServiceRoleAuthorized(`Bearer ${SERVICE_KEY}x`, SERVICE_KEY)).toBe(false);
-    expect(isServiceRoleAuthorized(`Bearer ${SERVICE_KEY.slice(0, -1)}`, SERVICE_KEY)).toBe(false);
+  it("rejects a non-JWT / malformed bearer (fails closed)", () => {
+    expect(bearerHasServiceRole("Bearer not-a-jwt")).toBe(false);
+    expect(bearerHasServiceRole("Bearer a.b")).toBe(false);
+    expect(bearerHasServiceRole("Bearer ...")).toBe(false);
   });
 });
