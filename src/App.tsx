@@ -21,7 +21,7 @@ const DemoPage = lazy(() => import("@/pages/Demo"));
 const PublicDemoPage = lazy(() => import("@/pages/PublicDemo"));
 const LeakAuditPage = lazy(() => import("@/pages/LeakAudit"));
 const CreateRestaurantPage = lazy(() => import("@/pages/onboarding/CreateRestaurant"));
-const DashboardPage = lazy(() => import("@/pages/app/Dashboard"));
+const DashboardPage = lazy(() => import("@/pages/app/DashboardRouter"));
 const MyRestaurantsPage = lazy(() => import("@/pages/app/MyRestaurants"));
 const ListManagementPage = lazy(() => import("@/pages/app/ListManagement"));
 const EnterInventoryPage = lazy(() => import("@/pages/app/inventory/EnterInventory"));
