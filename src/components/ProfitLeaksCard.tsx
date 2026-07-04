@@ -22,11 +22,11 @@ const REASON_STYLE: Record<ProfitLeakReason, string> = {
 
 const REASON_FORMULA: Record<ProfitLeakReason, string> = {
   Waste:
-    "Σ waste_log.total_cost grouped by item_name (period scoped)",
+    "Σ dollarsForWasteRow(waste_log) grouped by item — same valuation as Dashboard period waste",
   "Price Hike":
     "Σ (invoiced_unit_cost − po_unit_cost) × invoiced_qty grouped by item_name (status = 'price_mismatch', invoices in period) plus PRICE_INCREASE notifications",
   Overstock:
-    "(current_stock − par_level) × unit_cost on the latest APPROVED session, item-by-item",
+    "Σ computeLineOverstockValue on latest APPROVED session (zone-deduped, PAR required)",
   Shrinkage:
     "Σ notifications.data.items[].dollar_impact grouped by item_name (type IN 'SHRINK_ALERT','COUNT_VARIANCE')",
 };
@@ -45,7 +45,7 @@ export function ProfitLeaksCard({ items, loading }: ProfitLeaksCardProps) {
       <Card>
         <div className="flex items-center gap-2 p-5 pb-3">
           <TrendingDown className="h-4 w-4 text-destructive" />
-          <h3 className="text-sm font-bold tracking-tight">Top Profit Leaks</h3>
+          <h3 className="text-sm font-bold tracking-tight">Top Profit Risks</h3>
         </div>
         <CardContent className="pt-0 pb-4 px-5">
           {loading ? (

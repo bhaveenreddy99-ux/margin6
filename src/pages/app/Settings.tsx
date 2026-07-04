@@ -24,9 +24,10 @@ import { format, formatDistanceToNow } from "date-fns";
 import {
   Building2, Package, BookOpen, MapPin, Users, Loader2,
   ShoppingCart, FileUp, AlertTriangle, Plus, Trash2,
-  X, Pencil, CalendarClock, ChevronRight, ChevronDown, Mail, Copy, UserCircle,
+  X, Pencil, CalendarClock, ChevronRight, ChevronDown, Mail, Copy, UserCircle, Shield,
 } from "lucide-react";
 import { InventoryScheduleSection } from "@/pages/app/settings/InventorySchedule";
+import AuditCenterPage from "@/pages/app/settings/AuditCenter";
 import {
   useLocationSettings,
   DEFAULT_ASSIGNMENT_PERMISSIONS,
@@ -54,6 +55,7 @@ const TOP_NAV = [
   { key: "schedule",  label: "Inventory Schedule",   icon: CalendarClock, desc: "Reminders and auto-session scheduling", managerOnly: true },
   { key: "locations", label: "Locations",            icon: MapPin,       desc: "Manage restaurant locations and their settings", ownerOnly: true },
   { key: "team",      label: "Team & Permissions",   icon: Users,        desc: "Invite members and manage their assignments", ownerOnly: true },
+  { key: "audit",     label: "Audit Center",           icon: Shield,       desc: "Verify dashboard KPIs, formulas, and data quality", ownerOnly: true },
 ];
 
 const ADVANCED_NAV = [
@@ -145,6 +147,9 @@ export default function SettingsPage() {
           )}
           {section === "team"       && isOwner && currentRestaurant?.id && (
             <TeamSection locationHook={locationHook} />
+          )}
+          {section === "audit"      && isOwner && (
+            <AuditCenterEmbed />
           )}
         </div>
       </div>
@@ -1509,4 +1514,8 @@ function PermRow({ label, description, checked, onCheckedChange }: { label: stri
       <Switch checked={checked} onCheckedChange={onCheckedChange} className="shrink-0" />
     </div>
   );
+}
+
+function AuditCenterEmbed() {
+  return <AuditCenterPage />;
 }

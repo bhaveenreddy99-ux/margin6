@@ -16,7 +16,8 @@
  *   9. Notify every OWNER + MANAGER with INVOICE_EMAIL_RECEIVED notification
  *
  * Required Supabase secrets:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_WEBHOOK_SECRET (optional)
+ *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_WEBHOOK_SECRET (REQUIRED —
+ *   the handler fails closed and rejects every request if it is unset; S0-3)
  *
  * Required DNS / Resend setup (outside codebase):
  *   - MX records for invoices.margin6.com → Resend inbound MX servers
@@ -25,6 +26,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Webhook } from "https://esm.sh/svix@1.24.0";
 import {
   APP_BASE_URL,
   emailWrapper,
@@ -36,6 +38,7 @@ import {
 } from "../_shared/margin6Email.ts";
 import { matchInvoiceCatalogItems } from "../_shared/matchInvoiceCatalogItems.ts";
 import { resolveUnitCost } from "../_shared/resolveInvoiceUnitCost.ts";
+import { extractSvixHeaders } from "../_shared/webhookAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -165,13 +168,56 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ── Webhook authentication (S0-3) ──────────────────────────────────────────
+  // Resend signs inbound webhooks with Svix (svix-id/svix-timestamp/svix-signature).
+  // verify_jwt is false (Resend presents no Supabase JWT), so authenticity is
+  // enforced HERE — fail closed and reject before any DB write, file upload,
+  // parse-invoice call, notification, or email.
+  //
+  // DEPLOY CO-REQUISITE: RESEND_WEBHOOK_SECRET must be set (to Resend's inbound
+  // webhook signing secret) AND signing must be enabled on the Resend inbound
+  // webhook, or every inbound email is rejected here and ingestion stops.
+  const webhookSecret = Deno.env.get("RESEND_WEBHOOK_SECRET");
+  if (!webhookSecret) {
+    console.error("[inbound-invoice-email] RESEND_WEBHOOK_SECRET not set — rejecting (fail closed)");
+    return new Response(JSON.stringify({ error: "Server not configured" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const svixHeaders = extractSvixHeaders((name) => req.headers.get(name));
+  if (!svixHeaders) {
+    return new Response(JSON.stringify({ error: "Missing webhook signature" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Signature is computed over the RAW request body — read it as text once.
+  const rawBodyText = await req.text();
+  let verifiedPayload: unknown;
+  try {
+    verifiedPayload = new Webhook(webhookSecret).verify(rawBodyText, svixHeaders);
+  } catch (sigErr) {
+    console.warn(
+      "[inbound-invoice-email] webhook signature verification failed:",
+      sigErr instanceof Error ? sigErr.message : String(sigErr),
+    );
+    return new Response(JSON.stringify({ error: "Invalid webhook signature" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase    = createClient(supabaseUrl, serviceKey);
 
   let payload: ResendInboundPayload;
   try {
-    const rawBody = await req.json();
+    // Body already parsed and authenticated by Svix verify above.
+    const rawBody = verifiedPayload as Record<string, unknown> & { type?: string; data?: unknown };
     console.log("[inbound] raw body type:", rawBody?.type);
     console.log("[inbound] raw body keys:", Object.keys(rawBody ?? {}));
 

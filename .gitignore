@@ -14,6 +14,8 @@ dist-ssr
 playwright/.auth/
 playwright-report/
 test-results/
+dashboard-trust-human-audit-report.md
+dashboard-trust-human-audit-report.json
 
 # Environment variables
 .env

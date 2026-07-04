@@ -6,6 +6,7 @@ import {
   sendMargin6Email,
   userWantsEmail,
 } from "../_shared/margin6Email.ts";
+import { bearerHasServiceRole } from "../_shared/serviceAuth.ts";
 
 type RiskLevel = "NO_PAR" | "RED" | "YELLOW" | "GREEN";
 
@@ -226,8 +227,33 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Service-role gate (S0-2): this engine is a cron worker that processes ALL
+    // restaurants with the service-role key. Without this gate, anyone who knows
+    // the URL could trigger mass email + a full all-restaurants fan-out.
+    //
+    // Deployed with verify_jwt = true, so Supabase's gateway cryptographically
+    // validates the caller's JWT before this handler runs. We then require the
+    // token's `role` claim to be `service_role`, which rejects anon and normal
+    // user tokens. Accepting any validly-signed service_role token (rather than
+    // one exact key string) makes the gate survive JWT-key rotation and the
+    // legacy↔new-API-key drift that broke the previous exact-match gate.
+    if (!bearerHasServiceRole(req.headers.get("Authorization"))) {
+      return new Response(JSON.stringify({ error: "Unauthorized – service role required" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    // The privileged DB work still needs the service-role key. Fail LOUD (500)
+    // rather than silently degrading to an unprivileged client if it is unset.
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!serviceKey) {
+      return new Response(JSON.stringify({ error: "Server misconfigured: service role key unavailable" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const supabase = createClient(supabaseUrl, serviceKey);
 
     const now = new Date();

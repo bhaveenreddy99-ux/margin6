@@ -170,7 +170,10 @@ describe("validateCatalogItems", () => {
   });
 
   it("returns 100% health for fully populated clean items", () => {
-    const items = [makeItem({ id: "1" }), makeItem({ id: "2", item_name: "Other Item" })];
+    const items = [
+      makeItem({ id: "1", vendor_sku: "SKU-001" }),
+      makeItem({ id: "2", item_name: "Other Item", vendor_sku: "SKU-002" }),
+    ];
     const result = validateCatalogItems(items, new Set());
     expect(result.healthPercent).toBe(100);
     expect(result.missingPrice).toBe(0);
@@ -221,14 +224,16 @@ describe("validateCatalogItems", () => {
     expect(result.missingVendor).toBe(2);
   });
 
-  it("detects duplicate item names (case-insensitive)", () => {
+  it("detects duplicate product numbers / SKUs (case-insensitive)", () => {
+    // The UI surfaces this field as "Duplicate item numbers"; dedup is by vendor_sku
+    // (product number), NOT by item_name. (Field name `duplicateNames` is a misnomer.)
     const items = [
-      makeItem({ id: "1", item_name: "Chicken Breast" }),
-      makeItem({ id: "2", item_name: "chicken breast" }),
-      makeItem({ id: "3", item_name: "Beef" }),
+      makeItem({ id: "1", vendor_sku: "SKU-DUP" }),
+      makeItem({ id: "2", vendor_sku: "sku-dup" }),
+      makeItem({ id: "3", vendor_sku: "SKU-UNIQUE" }),
     ];
     const result = validateCatalogItems(items, new Set());
-    expect(result.duplicateNames).toBe(2); // both "chicken breast" rows flagged
+    expect(result.duplicateNames).toBe(2); // both "sku-dup" rows flagged (case-insensitive)
   });
 
   it("detects uncategorized items when category structure exists", () => {
@@ -260,9 +265,9 @@ describe("validateCatalogItems", () => {
 
   it("health percent reflects only fully clean items", () => {
     const items = [
-      makeItem({ id: "1", item_name: "Apple Juice" }),                            // clean
-      makeItem({ id: "2", item_name: "Beef Patty", default_unit_cost: null }),    // critical: missing price
-      makeItem({ id: "3", item_name: "Corn Starch", vendor_sku: null }),          // warning: missing sku
+      makeItem({ id: "1", item_name: "Apple Juice", vendor_sku: "S1" }),                            // clean
+      makeItem({ id: "2", item_name: "Beef Patty", default_unit_cost: null, vendor_sku: "S2" }),    // critical: missing price
+      makeItem({ id: "3", item_name: "Corn Starch", vendor_sku: null }),                            // warning: missing sku (null sku skipped by dedup)
     ];
     const result = validateCatalogItems(items, new Set());
     // 1 out of 3 fully clean = 33%

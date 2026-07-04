@@ -6,6 +6,12 @@ import {
   loadVendorNamesForInvoiceIds,
   parsePriceIncreaseNotificationData,
 } from "@/domain/dashboard/priceIncreaseFromNotifications";
+import { buildWasteDrilldownRows } from "@/domain/waste/wasteDrilldownRows";
+import { buildLatestInventorySnapshot, buildSessionOverstockLines } from "@/domain/dashboard/dashboardSelectors";
+import type { InventorySessionItemRow } from "@/domain/dashboard/dashboardTypes";
+import type { DrilldownRow } from "@/components/DrilldownSheet";
+import { riskThresholdsFromSettings } from "@/domain/inventory/riskThresholds";
+import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 type WasteRow = {
   item_name: string | null;
@@ -72,31 +78,79 @@ export async function fetchWasteBreakdown(
 ): Promise<DrilldownRow[]> {
   let q = supabase
     .from("waste_log")
-    .select("item_name, total_cost, unit_cost, quantity, reason, logged_at")
+    .select(
+      "item_name, total_cost, unit_cost, quantity, quantity_unit, catalog_item_id, reason, logged_at",
+    )
     .eq("restaurant_id", restaurantId)
     .gte("logged_at", from)
     .lte("logged_at", to)
     .order("logged_at", { ascending: false });
   if (locationId) q = q.eq("location_id", locationId);
 
-  const { data } = (await q) as unknown as { data: WasteRow[] | null };
-  return (data ?? [])
-    .map((row) => {
-      const explicit = Number(row.total_cost);
-      const derived = Number(row.unit_cost) * Number(row.quantity);
-      const value = Number.isFinite(explicit) && explicit > 0
-        ? explicit
-        : Number.isFinite(derived) && derived > 0
-          ? derived
-          : 0;
-      return {
-        label: row.item_name ?? "—",
-        value,
-        date: fmtDate(row.logged_at),
-        source: row.reason ?? "waste",
-      };
-    })
-    .filter((r) => r.value > 0);
+  const { data } = (await q) as unknown as {
+    data: Array<{
+      item_name: string | null;
+      total_cost: number | null;
+      unit_cost: number | null;
+      quantity: number | null;
+      quantity_unit: string | null;
+      catalog_item_id: string | null;
+      reason: string | null;
+      logged_at: string | null;
+    }> | null;
+  };
+
+  const rows = data ?? [];
+  const catalogIds = [
+    ...new Set(
+      rows
+        .map((r) => r.catalog_item_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
+  const catalogDefaultById = new Map<string, number>();
+  if (catalogIds.length > 0) {
+    const { data: catalogRows } = (await supabase
+      .from("inventory_catalog_items")
+      .select("id, default_unit_cost")
+      .eq("restaurant_id", restaurantId)
+      .in("id", catalogIds)) as unknown as {
+      data: Array<{ id: string; default_unit_cost: number | null }> | null;
+    };
+    for (const row of catalogRows ?? []) {
+      const value = Number(row.default_unit_cost);
+      if (Number.isFinite(value) && value >= 0) catalogDefaultById.set(row.id, value);
+    }
+  }
+
+  let sessionUnitByCatalogId = new Map<string, number>();
+  let sessQ = supabase
+    .from("inventory_sessions")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "APPROVED")
+    .order("approved_at", { ascending: false })
+    .limit(1);
+  if (locationId) sessQ = withLocationOrNull(sessQ, locationId);
+  const { data: sessions } = (await sessQ) as unknown as { data: Array<{ id: string }> | null };
+  if (sessions?.length) {
+    const { data: sessionItems } = (await supabase
+      .from("inventory_session_items")
+      .select("*")
+      .eq("session_id", sessions[0]!.id)) as unknown as { data: InventorySessionItemRow[] | null };
+    const { data: riskSettings } = await supabase
+      .from("smart_order_settings")
+      .select("red_threshold, yellow_threshold")
+      .eq("restaurant_id", restaurantId)
+      .maybeSingle();
+    const snap = buildLatestInventorySnapshot(
+      sessionItems ?? [],
+      riskThresholdsFromSettings(riskSettings),
+    );
+    sessionUnitByCatalogId = new Map(Object.entries(snap.latestSessionUnitCostByCatalogId));
+  }
+
+  return buildWasteDrilldownRows(rows, catalogDefaultById, sessionUnitByCatalogId, fmtDate);
 }
 
 export async function fetchPriceHikeBreakdown(
@@ -183,7 +237,7 @@ export async function fetchOverstockBreakdown(
     .eq("status", "APPROVED")
     .order("approved_at", { ascending: false })
     .limit(1);
-  if (locationId) sessQ = sessQ.eq("location_id", locationId);
+  if (locationId) sessQ = withLocationOrNull(sessQ, locationId);
 
   const { data: sessions } = (await sessQ) as unknown as { data: SessionRow[] | null };
   if (!sessions || sessions.length === 0) return [];
@@ -191,28 +245,21 @@ export async function fetchOverstockBreakdown(
   const session = sessions[0];
   const { data: items } = (await supabase
     .from("inventory_session_items")
-    .select("item_name, current_stock, par_level, unit_cost")
-    .eq("session_id", session.id)) as unknown as { data: SessionItemRow[] | null };
+    .select("*")
+    .eq("session_id", session.id)) as unknown as {
+    data: InventorySessionItemRow[] | null;
+  };
 
   const sourceLabel = session.name ?? "Latest count";
   const sourceDate = fmtDate(session.approved_at);
+  const lines = buildSessionOverstockLines(items ?? []);
 
-  return (items ?? [])
-    .map((row) => {
-      const stock = Number(row.current_stock ?? 0);
-      const par = Number(row.par_level ?? 0);
-      const cost = Number(row.unit_cost ?? 0);
-      const excess = Math.max(0, stock - par);
-      const dollars = excess * cost;
-      return {
-        label: row.item_name ?? "—",
-        value: Number.isFinite(dollars) ? dollars : 0,
-        date: sourceDate,
-        source: sourceLabel,
-      };
-    })
-    .filter((r) => r.value > 0)
-    .sort((a, b) => b.value - a.value);
+  return lines.map((row) => ({
+    label: row.item_name,
+    value: row.dollars,
+    date: sourceDate,
+    source: sourceLabel,
+  }));
 }
 
 export async function fetchShrinkageBreakdown(

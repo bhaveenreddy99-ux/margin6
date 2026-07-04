@@ -14,7 +14,8 @@
     "db:parse-packs": "tsx scripts/parse-existing-packs.ts",
     "db:validate-packs": "tsx scripts/validate-pack-parsing.ts",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:human-audit": "playwright test human-dashboard-trust-flow.spec.ts"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

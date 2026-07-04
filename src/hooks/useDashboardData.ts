@@ -1,5 +1,11 @@
-// DEPRECATED: Not used. See loadRestaurantPortfolioSummaries.ts
-// Do not delete — it may have useful logic for future reference.
+// Single-restaurant dashboard data hook. ACTIVELY USED by Dashboard.tsx,
+// AuditCenter.tsx, and PublicDemo.tsx. (`usePortfolioDashboardData` below serves
+// the multi-restaurant portfolio view.)
+//
+// Trust contract (T0-4): on a load error the snapshot is reset to
+// DEFAULT_SNAPSHOT so no stale or zero KPI values can be rendered as if valid;
+// consumers MUST gate on `error` and render an explicit error state rather than
+// any KPI value.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -206,7 +212,12 @@ export function useDashboardData({
         setError(null);
         previousFetchRef.current = { locKey, timeFilter, refetchCount };
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err : new Error(String(err)));
+        if (!cancelled) {
+          // T0-4: clear the snapshot so stale/zero KPI values cannot be rendered
+          // as verified. Consumers must show an explicit error state on `error`.
+          setSnapshot(DEFAULT_SNAPSHOT);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
       } finally {
         if (!cancelled && !onlyTimeFilterChanged) setLoading(false);
       }
