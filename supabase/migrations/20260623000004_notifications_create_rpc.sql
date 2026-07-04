@@ -59,7 +59,10 @@ BEGIN
     ) THEN
       INSERT INTO public.notifications (restaurant_id, user_id, type, severity, title, message, data)
       VALUES (
-        p_restaurant_id, v_rid, p_type, p_severity, p_title, p_message,
+        -- severity column is enum notification_severity ({INFO,WARNING,CRITICAL});
+        -- Postgres won't implicitly cast text->enum, so cast explicitly (fail loud
+        -- on an invalid label). All four client call sites send valid labels.
+        p_restaurant_id, v_rid, p_type, p_severity::notification_severity, p_title, p_message,
         coalesce(p_data, '{}'::jsonb) || jsonb_build_object('source_user_id', v_caller)
       );
       v_count := v_count + 1;   -- the dedupe trigger may still silently drop the row
