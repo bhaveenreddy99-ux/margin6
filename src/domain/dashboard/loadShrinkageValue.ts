@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type { DashboardTimeFilter } from "@/domain/dashboard/dashboardTypes";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 type ShrinkItem = {
@@ -11,13 +12,17 @@ type ShrinkItem = {
 
 /**
  * Sums `dollar_impact` across every SHRINK_ALERT / COUNT_VARIANCE notification
- * fired in the active period. Returns 0 on missing/empty data — never throws.
+ * fired in the active period.
+ *
+ * Returns a {@link LoadOutcome}: a failed query yields `{ status: "error" }` so the
+ * dashboard can show "couldn't calculate" instead of a confident $0. A genuine
+ * empty period is still `{ status: "ok", value: 0 }` (a real zero, not a failure).
  */
 export async function loadShrinkageValue(
   restaurantId: string,
   locationId: string | undefined,
   timeFilter: DashboardTimeFilter,
-): Promise<number> {
+): Promise<LoadOutcome<number>> {
   const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
 
   let q = supabase
@@ -30,10 +35,12 @@ export async function loadShrinkageValue(
   if (locationId) q = withLocationOrNull(q, locationId);
 
   const { data, error } = await q;
-  if (error || !data) return 0;
+  // A real query failure must NOT be rendered as $0.
+  if (error) return { status: "error", error };
 
+  // No error: an empty result set is a genuine zero.
   let total = 0;
-  for (const row of data) {
+  for (const row of data ?? []) {
     const raw = row.data as { items?: unknown } | null | undefined;
     const items = Array.isArray(raw?.items) ? (raw.items as ShrinkItem[]) : [];
     for (const item of items) {
@@ -41,5 +48,5 @@ export async function loadShrinkageValue(
       if (Number.isFinite(impact) && impact > 0) total += impact;
     }
   }
-  return total;
+  return { status: "ok", value: total };
 }

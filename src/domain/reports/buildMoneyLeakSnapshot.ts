@@ -9,7 +9,7 @@ import {
   invoiceBusinessDateInRange,
   isInvoiceLineComparisonProblem,
 } from "@/domain/dashboard/dashboardSelectors";
-import { loadInventoryMetrics } from "@/domain/dashboard/loadInventoryMetrics";
+import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT } from "@/domain/dashboard/loadInventoryMetrics";
 import type { InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
 import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
 import type { SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
@@ -167,9 +167,11 @@ export async function buildMoneyLeakSnapshot(input: BuildMoneyLeakSnapshotInput)
   const { startDate, endDate } = dashboardSpendRangeFromFilter(input.timeFilter);
   const period: MoneyLeakPeriod = { start: startDate, end: endDate };
 
-  const inventory = await loadInventoryMetrics(input.restaurantId, input.locationId);
+  const inventoryOutcome = await loadInventoryMetrics(input.restaurantId, input.locationId);
+  const inventory =
+    inventoryOutcome.status === "ok" ? inventoryOutcome.value : EMPTY_INVENTORY_RESULT;
 
-  const [waste, spend, invoiceProblemLineCount] = await Promise.all([
+  const [wasteOutcome, spendOutcome, invoiceProblemLineCount] = await Promise.all([
     loadWasteMetrics(
       input.restaurantId,
       input.locationId,
@@ -179,6 +181,18 @@ export async function buildMoneyLeakSnapshot(input: BuildMoneyLeakSnapshotInput)
     loadSpendMetrics(input.restaurantId, input.locationId, input.timeFilter),
     fetchInvoiceProblemLineCountForPeriod(input.restaurantId, input.locationId, input.timeFilter),
   ]);
+
+  // Reports surface has no per-KPI error UI; preserve prior behaviour (degrade a
+  // failed waste query to an empty result). The dashboard is where the silent-$0
+  // error state lives.
+  const waste =
+    wasteOutcome.status === "ok"
+      ? wasteOutcome.value
+      : { todayWasteEntries: [], recordedWasteValue: 0, recordedWasteCount: 0, wasteItemsMissingCost: 0 };
+  const spend =
+    spendOutcome.status === "ok"
+      ? spendOutcome.value
+      : { periodSpend: 0, spendOverviewData: null, deliveryIssuesCount: 0, priceIncreaseImpact: 0 };
 
   return moneyLeakSnapshotFromParts({
     period,

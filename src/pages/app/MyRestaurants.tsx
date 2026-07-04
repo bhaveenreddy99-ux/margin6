@@ -79,20 +79,31 @@ export default function MyRestaurantsPage() {
   const navigate = useNavigate();
   const [summaries, setSummaries] = useState<Record<string, RestaurantPortfolioSummary>>({});
   const [summariesLoading, setSummariesLoading] = useState(true);
+  // Silent-$0 fix: distinguish a failed portfolio load from an empty portfolio,
+  // so we don't render every restaurant as "—" when the query actually failed.
+  const [summariesError, setSummariesError] = useState(false);
+  const [refetchKey, setRefetchKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     if (restaurants.length === 0) {
       setSummaries({});
+      setSummariesError(false);
       setSummariesLoading(false);
       return;
     }
 
     const load = async () => {
       setSummariesLoading(true);
-      const next = await loadRestaurantPortfolioSummaries(restaurants.map((r) => r.id));
+      const outcome = await loadRestaurantPortfolioSummaries(restaurants.map((r) => r.id));
       if (cancelled) return;
-      setSummaries(next);
+      if (outcome.status === "error") {
+        setSummariesError(true);
+        setSummaries({});
+      } else {
+        setSummariesError(false);
+        setSummaries(outcome.value);
+      }
       setSummariesLoading(false);
     };
 
@@ -100,7 +111,7 @@ export default function MyRestaurantsPage() {
     return () => {
       cancelled = true;
     };
-  }, [restaurants]);
+  }, [restaurants, refetchKey]);
 
   const openRestaurant = (id: string) => {
     const r = restaurants.find((x) => x.id === id);
@@ -282,6 +293,21 @@ export default function MyRestaurantsPage() {
           {restaurants.length} restaurant{restaurants.length !== 1 ? "s" : ""}
         </p>
       </div>
+
+      {summariesError && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex items-center justify-between gap-3">
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            Couldn&apos;t load your restaurant numbers. They&apos;re not $0 — the query failed.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRefetchKey((k) => k + 1)}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
 
       {restaurants.length === 1 ? (
         <>

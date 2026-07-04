@@ -8,6 +8,7 @@ import type {
   WasteLogPeriodRow,
   WasteLogSnapshotRow,
 } from "@/domain/dashboard/dashboardTypes";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 
 export type WasteMetricsResult = {
@@ -22,7 +23,7 @@ export async function loadWasteMetrics(
   locationId: string | undefined,
   timeFilter: DashboardTimeFilter,
   latestSessionUnitCostByCatalogId: Record<string, number>,
-): Promise<WasteMetricsResult> {
+): Promise<LoadOutcome<WasteMetricsResult>> {
   const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
   const rangeStart = new Date(startDate);
   const rangeEnd = new Date(endDate);
@@ -48,9 +49,12 @@ export async function loadWasteMetrics(
   const wasteRangeQuery = locationId ? withLocationOrNull(wasteRangeBase, locationId) : wasteRangeBase;
 
   const [wasteTodayResult, wasteRangeResult] = await Promise.all([
-    wasteTodayQuery as unknown as Promise<{ data: WasteLogSnapshotRow[] | null }>,
-    wasteRangeQuery as unknown as Promise<{ data: WasteLogPeriodRow[] | null }>,
+    wasteTodayQuery as unknown as Promise<{ data: WasteLogSnapshotRow[] | null; error: unknown }>,
+    wasteRangeQuery as unknown as Promise<{ data: WasteLogPeriodRow[] | null; error: unknown }>,
   ]);
+
+  // The period query drives recordedWasteValue; if it failed, don't report $0.
+  if (wasteRangeResult.error) return { status: "error", error: wasteRangeResult.error };
 
   const todayWasteEntries = wasteTodayResult.data ?? [];
   const wasteList = wasteRangeResult.data ?? [];
@@ -85,9 +89,12 @@ export async function loadWasteMetrics(
   );
 
   return {
-    todayWasteEntries,
-    recordedWasteValue: wasteDollars,
-    recordedWasteCount: wasteList.length,
-    wasteItemsMissingCost: wasteMissingCost,
+    status: "ok",
+    value: {
+      todayWasteEntries,
+      recordedWasteValue: wasteDollars,
+      recordedWasteCount: wasteList.length,
+      wasteItemsMissingCost: wasteMissingCost,
+    },
   };
 }

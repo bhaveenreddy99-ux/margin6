@@ -1,9 +1,13 @@
 import { Inbox, Package } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { KpiCouldNotLoad } from "@/components/dashboard/KpiCouldNotLoad";
 import type { OverstockItem } from "@/domain/dashboard/dashboardTypes";
 
 interface OverstockCashTrapCardProps {
   items: OverstockItem[];
+  /** Silent-$0 fix: the overstock query failed — don't render an empty "lean" state. */
+  error?: boolean;
+  onRetry?: () => void;
 }
 
 function formatDollars(n: number): string {
@@ -14,7 +18,7 @@ function formatNumber(n: number): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
-export function OverstockCashTrapCard({ items }: OverstockCashTrapCardProps) {
+export function OverstockCashTrapCard({ items, error = false, onRetry }: OverstockCashTrapCardProps) {
   const total = items.reduce((acc, it) => acc + (Number.isFinite(it.dollars) ? it.dollars : 0), 0);
   const isEmpty = items.length === 0;
 
@@ -25,7 +29,11 @@ export function OverstockCashTrapCard({ items }: OverstockCashTrapCardProps) {
         <h3 className="text-sm font-bold tracking-tight">Cash Frozen in Overstock</h3>
       </div>
       <CardContent className="pt-0 pb-4 px-5">
-        {isEmpty ? (
+        {error ? (
+          <button type="button" onClick={onRetry} className="flex w-full flex-col items-center py-10 text-center">
+            <KpiCouldNotLoad />
+          </button>
+        ) : isEmpty ? (
           <div className="flex flex-col items-center py-10 text-center">
             <Inbox className="h-8 w-8 text-muted-foreground/25 mb-2" />
             <p className="text-sm font-medium text-muted-foreground">

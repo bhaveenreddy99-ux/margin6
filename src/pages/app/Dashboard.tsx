@@ -5,6 +5,7 @@ import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { OverstockCashTrapCard } from "@/components/OverstockCashTrapCard";
 import { PriceHikeAlertsCard } from "@/components/PriceHikeAlertsCard";
 import { ProfitLeaksCard } from "@/components/ProfitLeaksCard";
+import { DashboardErrorBoundary } from "@/components/dashboard/DashboardErrorBoundary";
 import { ShrinkageAlertCard } from "@/components/ShrinkageAlertCard";
 import { TrialBanner } from "@/components/TrialBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1049,7 +1050,12 @@ function DashboardReportsTab({
     setLoading(true);
     setFetchError(false);
     try {
-      const metrics = await loadInventoryMetrics(restaurantId, locationId ?? undefined);
+      const inventoryOutcome = await loadInventoryMetrics(restaurantId, locationId ?? undefined);
+      if (inventoryOutcome.status === "error") {
+        setFetchError(true);
+        return;
+      }
+      const metrics = inventoryOutcome.value;
       const { data: riskSettings } = await supabase
         .from("smart_order_settings")
         .select("red_threshold, yellow_threshold")
@@ -1279,6 +1285,7 @@ function SingleDashboard() {
     recordedWasteCount,
     wasteItemsMissingCost,
     shrinkageValue,
+    errors,
     topProfitLeaks,
     overstockItems,
     foodCostPct,
@@ -1303,6 +1310,8 @@ function SingleDashboard() {
   }, [reorderSummary, deliveryIssuesCount, priceIncreaseImpact, missingParCount]);
 
   const foodCostLabel = useMemo(() => {
+    // Silent-$0 fix: a failed sales query must not read as "enter weekly sales".
+    if (errors.foodCost) return "Couldn't calculate — tap Retry";
     if (foodCostPct == null) {
       return weeklyGrossSales == null
         ? "Enter weekly sales to unlock food cost %"
@@ -1318,7 +1327,7 @@ function SingleDashboard() {
       default:
         return `Industry target 28–32% · your target ${foodCostTargetPct}%`;
     }
-  }, [foodCostPct, foodCostStatus, foodCostTargetPct, weeklyGrossSales]);
+  }, [foodCostPct, foodCostStatus, foodCostTargetPct, weeklyGrossSales, errors.foodCost]);
 
   const foodCostAccent = useMemo((): "destructive" | "warning" | "success" | "primary" => {
     if (foodCostStatus === "over") return "destructive";
@@ -1533,11 +1542,14 @@ function SingleDashboard() {
             ) : null}
 
             {currentRestaurant && (
+              <DashboardErrorBoundary label="Profit Risk" onRetry={refetch}>
               <ProfitRiskWidget
                 recordedWasteValue={recordedWasteValue}
                 priceIncreaseImpact={priceIncreaseImpact}
                 overstockValue={overstockValue}
                 shrinkageValue={shrinkageValue}
+                metricErrors={{ waste: errors.waste, shrinkage: errors.shrinkage, priceHike: errors.spend, overstock: errors.inventory }}
+                onRetry={refetch}
                 restaurantId={currentRestaurant.id}
                 locationId={currentLocation?.id}
                 timeFilter={timeFilter}
@@ -1552,27 +1564,36 @@ function SingleDashboard() {
                   return total > 0 && s.noParCount === total;
                 })()}
               />
+              </DashboardErrorBoundary>
             )}
 
-            <ProfitLeaksCard items={topProfitLeaks} loading={loading} />
+            <DashboardErrorBoundary label="Profit Leaks" onRetry={refetch}>
+              <ProfitLeaksCard items={topProfitLeaks} loading={loading} error={errors.profitLeaks} onRetry={refetch} />
+            </DashboardErrorBoundary>
 
             {currentRestaurant && (
               <div className="grid gap-5 lg:grid-cols-2">
-                <PriceHikeAlertsCard
-                  restaurantId={currentRestaurant.id}
-                  locationId={currentLocation?.id}
-                  timeFilter={timeFilter}
-                />
-                <OverstockCashTrapCard items={overstockItems} />
+                <DashboardErrorBoundary label="Price Hikes" onRetry={refetch}>
+                  <PriceHikeAlertsCard
+                    restaurantId={currentRestaurant.id}
+                    locationId={currentLocation?.id}
+                    timeFilter={timeFilter}
+                  />
+                </DashboardErrorBoundary>
+                <DashboardErrorBoundary label="Overstock" onRetry={refetch}>
+                  <OverstockCashTrapCard items={overstockItems} error={errors.overstock} onRetry={refetch} />
+                </DashboardErrorBoundary>
               </div>
             )}
 
             {currentRestaurant && (
-              <ShrinkageAlertCard
-                restaurantId={currentRestaurant.id}
-                locationId={currentLocation?.id}
-                timeFilter={timeFilter}
-              />
+              <DashboardErrorBoundary label="Shrinkage" onRetry={refetch}>
+                <ShrinkageAlertCard
+                  restaurantId={currentRestaurant.id}
+                  locationId={currentLocation?.id}
+                  timeFilter={timeFilter}
+                />
+              </DashboardErrorBoundary>
             )}
 
             <section className="space-y-4" aria-labelledby="dash-today-heading">

@@ -18,6 +18,7 @@ import type {
   SpendPurchaseHistoryItemCostRow,
   SpendPurchaseHistoryRow,
 } from "@/domain/dashboard/dashboardTypes";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { withLocationOrNull } from "@/domain/locations/locationQueryScope";
 import {
   fetchPriceIncreaseNotifications,
@@ -35,7 +36,7 @@ async function fetchSpendOverviewData(
   restaurantId: string,
   locationId: string | undefined,
   timeFilter: DashboardTimeFilter,
-): Promise<SpendOverviewData> {
+): Promise<LoadOutcome<SpendOverviewData>> {
   const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
   const rangeStart = new Date(startDate);
   const rangeEnd = new Date(endDate);
@@ -54,18 +55,24 @@ async function fetchSpendOverviewData(
     .eq("status", "confirmed");
   if (locationId) invoiceQuery = withLocationOrNull(invoiceQuery, locationId);
 
-  const { data: invoiceSpendRows } = (await invoiceQuery) as unknown as {
+  const { data: invoiceSpendRows, error: invoiceErr } = (await invoiceQuery) as unknown as {
     data: SpendInvoiceRow[] | null;
+    error: unknown;
   };
+  if (invoiceErr) return { status: "error", error: invoiceErr };
   const invoicesInPeriod = (invoiceSpendRows ?? []).filter(inSpendWindow);
   const invoiceIdsInPeriod = invoicesInPeriod.map((row) => row.id);
 
   const costByDocumentId: Record<string, number> = {};
   if (invoiceIdsInPeriod.length > 0) {
-    const { data: invoiceLineCosts } = (await supabase
+    const { data: invoiceLineCosts, error: lineErr } = (await supabase
       .from("invoice_items")
       .select("invoice_id, total_cost")
-      .in("invoice_id", invoiceIdsInPeriod)) as unknown as { data: SpendInvoiceItemCostRow[] | null };
+      .in("invoice_id", invoiceIdsInPeriod)) as unknown as {
+      data: SpendInvoiceItemCostRow[] | null;
+      error: unknown;
+    };
+    if (lineErr) return { status: "error", error: lineErr };
     (invoiceLineCosts ?? []).forEach((row) => {
       costByDocumentId[row.invoice_id] = (costByDocumentId[row.invoice_id] || 0) + Number(row.total_cost || 0);
     });
@@ -78,21 +85,25 @@ async function fetchSpendOverviewData(
     .in("invoice_status", ["COMPLETE", "POSTED"]);
   if (locationId) purchaseHistoryQuery = withLocationOrNull(purchaseHistoryQuery, locationId);
 
-  const { data: purchaseHistoryRows } = (await purchaseHistoryQuery) as unknown as {
+  const { data: purchaseHistoryRows, error: phErr } = (await purchaseHistoryQuery) as unknown as {
     data: SpendPurchaseHistoryRow[] | null;
+    error: unknown;
   };
+  if (phErr) return { status: "error", error: phErr };
   const filteredPurchaseHistory = (purchaseHistoryRows ?? [])
     .filter((row) => !invoiceDocIds.has(row.id))
     .filter(inSpendWindow);
 
   if (filteredPurchaseHistory.length > 0) {
     const purchaseHistoryIds = filteredPurchaseHistory.map((row) => row.id);
-    const { data: purchaseHistoryItemCosts } = (await supabase
+    const { data: purchaseHistoryItemCosts, error: phLineErr } = (await supabase
       .from("purchase_history_items")
       .select("purchase_history_id, total_cost")
       .in("purchase_history_id", purchaseHistoryIds)) as unknown as {
       data: SpendPurchaseHistoryItemCostRow[] | null;
+      error: unknown;
     };
+    if (phLineErr) return { status: "error", error: phLineErr };
     (purchaseHistoryItemCosts ?? []).forEach((row) => {
       costByDocumentId[row.purchase_history_id] =
         (costByDocumentId[row.purchase_history_id] || 0) + Number(row.total_cost || 0);
@@ -100,7 +111,7 @@ async function fetchSpendOverviewData(
   }
 
   if (!invoicesInPeriod.length && !filteredPurchaseHistory.length) {
-    return { periodSpend: 0, vendors: [] };
+    return { status: "ok", value: { periodSpend: 0, vendors: [] } };
   }
 
   let periodSpend = 0;
@@ -125,14 +136,14 @@ async function fetchSpendOverviewData(
     .sort((a, b) => b.total - a.total)
     .slice(0, 5);
 
-  return { periodSpend, vendors };
+  return { status: "ok", value: { periodSpend, vendors } };
 }
 
 export async function loadSpendMetrics(
   restaurantId: string,
   locationId: string | undefined,
   timeFilter: DashboardTimeFilter,
-): Promise<SpendMetricsResult> {
+): Promise<LoadOutcome<SpendMetricsResult>> {
   const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
   const rangeStart = new Date(startDate);
   const rangeEnd = new Date(endDate);
@@ -143,10 +154,15 @@ export async function loadSpendMetrics(
     .eq("restaurant_id", restaurantId);
   if (locationId) invoiceStatusQuery = withLocationOrNull(invoiceStatusQuery, locationId);
 
-  const [spendOverview, invoiceStatusResult] = await Promise.all([
+  const [spendOverviewOutcome, invoiceStatusResult] = await Promise.all([
     fetchSpendOverviewData(restaurantId, locationId, timeFilter),
-    invoiceStatusQuery as unknown as Promise<{ data: DashboardInvoiceStatusRow[] | null }>,
+    invoiceStatusQuery as unknown as Promise<{ data: DashboardInvoiceStatusRow[] | null; error: unknown }>,
   ]);
+
+  // Period Spend / price-hike impact are unreliable if either core query failed.
+  if (spendOverviewOutcome.status === "error") return spendOverviewOutcome;
+  if (invoiceStatusResult.error) return { status: "error", error: invoiceStatusResult.error };
+  const spendOverview = spendOverviewOutcome.value;
 
   const invoiceStatusRows = invoiceStatusResult.data ?? [];
   const invoicePeriodSummary = sumPeriodInvoiceSpend(invoiceStatusRows, rangeStart, rangeEnd);
@@ -184,10 +200,13 @@ export async function loadSpendMetrics(
   }
 
   return {
-    // spendOverview sums invoice_items.total_cost (line-item ground truth) — single source of truth
-    periodSpend: spendOverview.periodSpend,
-    spendOverviewData: spendOverview.periodSpend > 0 ? spendOverview : null,
-    deliveryIssuesCount: invoicePeriodSummary.issueInvoiceIds.size,
-    priceIncreaseImpact: priceImpact,
+    status: "ok",
+    value: {
+      // spendOverview sums invoice_items.total_cost (line-item ground truth) — single source of truth
+      periodSpend: spendOverview.periodSpend,
+      spendOverviewData: spendOverview.periodSpend > 0 ? spendOverview : null,
+      deliveryIssuesCount: invoicePeriodSummary.issueInvoiceIds.size,
+      priceIncreaseImpact: priceImpact,
+    },
   };
 }

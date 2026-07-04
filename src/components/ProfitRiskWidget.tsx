@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { KpiCouldNotLoad } from "@/components/dashboard/KpiCouldNotLoad";
 import { DrilldownSheet, type DrilldownRow } from "@/components/DrilldownSheet";
 import {
   KpiExplainSheet,
@@ -23,6 +24,7 @@ import {
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type { DashboardTimeFilter } from "@/domain/dashboard/dashboardTypes";
 import {
+  computeProfitRiskPartialNote,
   PROFIT_RISK_EMPTY_SUBTITLE,
   PROFIT_RISK_EMPTY_TITLE,
   PROFIT_RISK_HERO_SUBTITLE,
@@ -63,6 +65,10 @@ export interface ProfitRiskWidgetProps {
   daysSinceLastCount: number | null;
   /** PAR not configured for any counted item — overstock can't be measured. */
   noParConfigured?: boolean;
+  /** Per-row load failures — a true row shows "couldn't calculate", not $0. */
+  metricErrors?: Partial<Record<MetricKey, boolean>>;
+  /** Retry the dashboard load (wired to any errored row). */
+  onRetry?: () => void;
 }
 
 function formatDollars(n: number): string {
@@ -82,6 +88,8 @@ export function ProfitRiskWidget({
   confidenceSnapshot,
   daysSinceLastCount,
   noParConfigured = false,
+  metricErrors = {},
+  onRetry,
 }: ProfitRiskWidgetProps) {
   const [openMetric, setOpenMetric] = useState<MetricKey | null>(null);
   const [rows, setRows] = useState<DrilldownRow[]>([]);
@@ -242,6 +250,14 @@ export function ProfitRiskWidget({
   const current = openMetric ? metrics[openMetric] : null;
   const metricOrder: MetricKey[] = ["waste", "priceHike", "overstock", "shrinkage"];
 
+  // Silent-$0 fix: if any Money Lost component failed to load, the headline total
+  // is INCOMPLETE (the failed terms silently contributed 0). Never present it as a
+  // confident full total — flag it as partial and name what's missing.
+  const erroredMetricKeys = metricOrder.filter((k) => !!metricErrors[k]);
+  const partialNote = computeProfitRiskPartialNote(
+    erroredMetricKeys.map((k) => metrics[k].title),
+  );
+
   return (
     <>
       <Card className="border-destructive/15 bg-gradient-to-br from-destructive/5 to-transparent">
@@ -254,8 +270,17 @@ export function ProfitRiskWidget({
               </div>
               <p className="mt-3 text-4xl sm:text-5xl font-extrabold tracking-tight tabular-nums text-destructive">
                 {formatDollars(total)}
+                {partialNote && (
+                  <span className="ml-2 align-middle text-sm font-semibold text-amber-600 dark:text-amber-500">
+                    ({partialNote})
+                  </span>
+                )}
               </p>
-              <p className="mt-1.5 text-xs text-muted-foreground max-w-lg">{PROFIT_RISK_HERO_SUBTITLE}</p>
+              <p className="mt-1.5 text-xs text-muted-foreground max-w-lg">
+                {partialNote
+                  ? "Some components couldn't be calculated — tap the flagged rows below to retry."
+                  : PROFIT_RISK_HERO_SUBTITLE}
+              </p>
             </div>
             <Button
               variant="outline"
@@ -284,11 +309,15 @@ export function ProfitRiskWidget({
             {metricOrder.map((k) => {
               const m = metrics[k];
               const Icon = m.icon;
+              // Silent-$0 fix: if this row's query failed, don't render a fake
+              // $0 — show "couldn't calculate" and make the row retry instead of
+              // opening the (empty) drilldown.
+              const rowErrored = !!metricErrors[k];
               return (
                 <button
                   key={k}
                   type="button"
-                  onClick={() => void handleOpenRow(k)}
+                  onClick={() => (rowErrored ? onRetry?.() : void handleOpenRow(k))}
                   className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-left hover:bg-background hover:border-border transition-colors"
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -296,10 +325,16 @@ export function ProfitRiskWidget({
                     <span className="text-xs font-medium truncate">{m.title}</span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-sm font-bold font-mono tabular-nums">
-                      {formatDollars(m.value)}
-                    </span>
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                    {rowErrored ? (
+                      <KpiCouldNotLoad />
+                    ) : (
+                      <>
+                        <span className="text-sm font-bold font-mono tabular-nums">
+                          {formatDollars(m.value)}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      </>
+                    )}
                   </div>
                 </button>
               );

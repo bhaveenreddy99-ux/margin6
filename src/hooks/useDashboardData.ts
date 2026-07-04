@@ -11,20 +11,43 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { buildDashboardSnapshot } from "@/domain/dashboard/buildDashboardSnapshot";
 import { loadInventoryMetrics, EMPTY_INVENTORY_RESULT, type InventoryMetricsResult } from "@/domain/dashboard/loadInventoryMetrics";
+import type { LoadOutcome } from "@/domain/dashboard/loadOutcome";
 import { loadInvoiceMetrics, type InvoiceMetricsResult } from "@/domain/dashboard/loadInvoiceMetrics";
 import { loadOverstockItems } from "@/domain/dashboard/loadOverstockItems";
-import { loadFoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
+import { loadFoodCostMetrics, type FoodCostMetrics } from "@/domain/dashboard/loadFoodCostMetrics";
 import { loadProfitLeaks } from "@/domain/dashboard/loadProfitLeaks";
 import { loadShrinkageValue } from "@/domain/dashboard/loadShrinkageValue";
-import { loadSpendMetrics } from "@/domain/dashboard/loadSpendMetrics";
-import { loadWasteMetrics } from "@/domain/dashboard/loadWasteMetrics";
+import { loadSpendMetrics, type SpendMetricsResult } from "@/domain/dashboard/loadSpendMetrics";
+import { loadWasteMetrics, type WasteMetricsResult } from "@/domain/dashboard/loadWasteMetrics";
 import { dashboardSpendRangeFromFilter } from "@/domain/dashboard/dashboardSelectors";
 import type {
+  DashboardKpiErrors,
   DashboardTimeFilter,
   KPISnapshot,
   PortfolioDashboardResponse,
   SingleDashboardData,
 } from "@/domain/dashboard/dashboardTypes";
+
+const EMPTY_WASTE_RESULT: WasteMetricsResult = {
+  todayWasteEntries: [],
+  recordedWasteValue: 0,
+  recordedWasteCount: 0,
+  wasteItemsMissingCost: 0,
+};
+
+const EMPTY_SPEND_RESULT: SpendMetricsResult = {
+  periodSpend: 0,
+  spendOverviewData: null,
+  deliveryIssuesCount: 0,
+  priceIncreaseImpact: 0,
+};
+
+const EMPTY_FOOD_COST: FoodCostMetrics = {
+  foodCostPct: null,
+  weeklyGrossSales: null,
+  targetPct: 30,
+  status: null,
+};
 
 export type { DashboardTimeFilter };
 
@@ -57,6 +80,7 @@ const DEFAULT_SNAPSHOT: KPISnapshot = {
   recordedWasteCount: 0,
   wasteItemsMissingCost: 0,
   shrinkageValue: 0,
+  errors: {},
   topProfitLeaks: [],
   overstockItems: [],
   foodCostPct: null,
@@ -149,12 +173,12 @@ export function useDashboardData({
 
         const { startDate, endDate } = dashboardSpendRangeFromFilter(timeFilter);
 
-        const inventoryPromise: Promise<InventoryMetricsResult> = onlyTimeFilterChanged
-          ? Promise.resolve(cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT)
+        const inventoryPromise: Promise<LoadOutcome<InventoryMetricsResult>> = onlyTimeFilterChanged
+          ? Promise.resolve({ status: "ok", value: cachedInventoryRef.current ?? EMPTY_INVENTORY_RESULT })
           : loadInventoryMetrics(restaurantId, locationId);
 
-        const invoicePromise: Promise<InvoiceMetricsResult> = onlyTimeFilterChanged
-          ? Promise.resolve(cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT)
+        const invoicePromise: Promise<LoadOutcome<InvoiceMetricsResult>> = onlyTimeFilterChanged
+          ? Promise.resolve({ status: "ok", value: cachedInvoiceRef.current ?? EMPTY_INVOICE_RESULT })
           : loadInvoiceMetrics(restaurantId, locationId);
 
         const spendPromise = loadSpendMetrics(restaurantId, locationId, timeFilter);
@@ -180,33 +204,68 @@ export function useDashboardData({
               restaurantId,
               locationId,
               timeFilter,
-              inventory.latestSessionUnitCostByCatalogId,
+              inventory.status === "ok" ? inventory.value.latestSessionUnitCostByCatalogId : {},
             ),
           ),
           spendPromise.then((spend) =>
-            loadFoodCostMetrics(locationId, spend.periodSpend, timeFilter),
+            loadFoodCostMetrics(
+              locationId,
+              spend.status === "ok" ? spend.value.periodSpend : 0,
+              timeFilter,
+            ),
           ),
         ]);
 
+        const inventoryData =
+          inventoryResult.status === "ok" ? inventoryResult.value : EMPTY_INVENTORY_RESULT;
+        const invoiceData =
+          invoiceResult.status === "ok" ? invoiceResult.value : EMPTY_INVOICE_RESULT;
+
         if (!onlyTimeFilterChanged) {
           latestSessionUnitCostByCatalogIdRef.current =
-            inventoryResult.latestSessionUnitCostByCatalogId;
-          cachedInventoryRef.current = inventoryResult;
-          cachedInvoiceRef.current = invoiceResult;
+            inventoryData.latestSessionUnitCostByCatalogId;
+          cachedInventoryRef.current = inventoryData;
+          cachedInvoiceRef.current = invoiceData;
         }
 
         if (cancelled) return;
 
+        // Silent-$0 fix: a failed query surfaces as a per-KPI error flag instead
+        // of a confident $0. A genuine empty period still yields a real 0.
+        const shrinkageValue =
+          shrinkageResult.status === "ok" ? shrinkageResult.value : 0;
+        const wasteValue =
+          wasteResult.status === "ok" ? wasteResult.value : EMPTY_WASTE_RESULT;
+        const spendValue =
+          spendResult.status === "ok" ? spendResult.value : EMPTY_SPEND_RESULT;
+        const overstockItemsValue =
+          overstockItemsResult.status === "ok" ? overstockItemsResult.value : [];
+        const profitLeaksValue =
+          profitLeaksResult.status === "ok" ? profitLeaksResult.value : [];
+        const foodCostValue =
+          foodCostResult.status === "ok" ? foodCostResult.value : EMPTY_FOOD_COST;
+        const errors: DashboardKpiErrors = {
+          inventory: inventoryResult.status === "error",
+          invoice: invoiceResult.status === "error",
+          shrinkage: shrinkageResult.status === "error",
+          waste: wasteResult.status === "error",
+          spend: spendResult.status === "error",
+          overstock: overstockItemsResult.status === "error",
+          profitLeaks: profitLeaksResult.status === "error",
+          foodCost: foodCostResult.status === "error",
+        };
+
         setSnapshot(
           buildDashboardSnapshot(
-            inventoryResult,
-            invoiceResult,
-            spendResult,
-            wasteResult,
-            shrinkageResult,
-            profitLeaksResult,
-            overstockItemsResult,
-            foodCostResult,
+            inventoryData,
+            invoiceData,
+            spendValue,
+            wasteValue,
+            shrinkageValue,
+            profitLeaksValue,
+            overstockItemsValue,
+            foodCostValue,
+            errors,
           ),
         );
         setError(null);
