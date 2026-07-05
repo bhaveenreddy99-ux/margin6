@@ -39,10 +39,14 @@ export type RestaurantSubscriptionInput = {
 
 /**
  * Accounts created before this instant that never took a Stripe subscription are
- * LEGACY and grandfathered forever — the expiry logic never touches them. Set to
- * the subscription-launch / deploy date. ADJUST before enabling billing.
+ * LEGACY and grandfathered forever — the expiry logic never touches them.
+ *
+ * PLACEHOLDER (far future) while PRE-LAUNCH: this grandfathers ALL existing AND
+ * all build-phase test/partner accounts, so nobody lands on a trial/expiry path
+ * before we actually launch. MUST be set to the real launch date before billing
+ * enforcement is ever turned on (Phase 4).
  */
-export const SUBSCRIPTION_LAUNCH_CUTOFF = new Date("2026-07-05T00:00:00.000Z");
+export const SUBSCRIPTION_LAUNCH_CUTOFF = new Date("2027-01-01T00:00:00.000Z");
 
 function toDate(v: string | Date | null | undefined): Date | null {
   if (!v) return null;
