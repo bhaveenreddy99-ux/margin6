@@ -3331,6 +3331,23 @@ export type Database = {
           expires_at: string
         }[]
       }
+      list_invites: {
+        Args: { p_restaurant_id: string }
+        Returns: {
+          invite_id: string
+          invited_email: string
+          role: "OWNER" | "MANAGER" | "STAFF"
+          location_id: string
+          status: "pending" | "accepted" | "revoked" | "expired"
+          expires_at: string
+          created_at: string
+          invited_by: string
+        }[]
+      }
+      revoke_invite: {
+        Args: { p_invite_id: string }
+        Returns: undefined
+      }
       alert_pref_restaurant_id: { Args: { pref_id: string }; Returns: string }
       approve_inventory_session_atomic: {
         Args: {

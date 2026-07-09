@@ -3,7 +3,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { LocationPermissions } from "@/contexts/RestaurantContext";
-import type { Tables, TablesInsert } from "@/integrations/supabase/types";
+import type { Tables } from "@/integrations/supabase/types";
+import { resendTeamInviteEmail, sendTeamInviteEmail } from "@/domain/invites/sendTeamInvite";
 
 export interface LocationWithSettings {
   id: string;
@@ -43,8 +44,10 @@ export interface Invitation {
   role: string;
   status: string;
   created_at: string;
-  /** Which table this row came from (revoke uses the correct API). */
-  source: "invitation" | "user_invite";
+  location_id?: string;
+  location_name?: string;
+  /** Which backend this row came from (revoke/resend use the matching API). */
+  source: "invitation" | "restaurant_invite";
 }
 
 export interface NewLocationData {
@@ -61,6 +64,7 @@ export interface NewLocationData {
 export interface InviteData {
   email: string;
   role: "MANAGER" | "STAFF";
+  location_id: string;
 }
 
 const DEFAULT_STORAGE_TYPES = ["Cooler", "Freezer", "Dry Storage", "Bar"];
@@ -254,18 +258,37 @@ export function useLocationSettings(restaurantId: string | undefined) {
           };
         });
 
-        const { data: invRows, error: e4 } = await supabase
-          .from("invitations")
-          .select("id, email, role, status, created_at")
-          .eq("restaurant_id", restaurantId)
-          .eq("status", "PENDING")
-          .order("created_at", { ascending: false });
+        const [{ data: secureRows, error: eSecure }, { data: invRows, error: e4 }] = await Promise.all([
+          supabase.rpc("list_invites", { p_restaurant_id: restaurantId }),
+          supabase
+            .from("invitations")
+            .select("id, email, role, status, created_at")
+            .eq("restaurant_id", restaurantId)
+            .eq("status", "PENDING")
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (eSecure) {
+          logSupabaseError("list_invites", eSecure);
+          if (isDev) toast.error(`Locations load: invites · ${formatPostgrestError(eSecure)}`);
+        }
         if (e4) {
           logSupabaseError("invitations", e4);
           if (isDev) toast.error(`Locations load: invitations · ${formatPostgrestError(e4)}`);
         }
 
-        const invitations: Invitation[] = (invRows ?? []).map((r) => ({
+        const secureInvites: Invitation[] = (secureRows ?? []).map((r) => ({
+          id: r.invite_id,
+          email: r.invited_email,
+          role: r.role,
+          status: r.status,
+          created_at: r.created_at,
+          location_id: r.location_id,
+          location_name: locNameById.get(r.location_id) ?? "Location",
+          source: "restaurant_invite" as const,
+        }));
+
+        const legacyInvites: Invitation[] = (invRows ?? []).map((r) => ({
           id: r.id as string,
           email: r.email as string,
           role: r.role as string,
@@ -273,6 +296,10 @@ export function useLocationSettings(restaurantId: string | undefined) {
           created_at: r.created_at as string,
           source: "invitation" as const,
         }));
+
+        const invitations = [...secureInvites, ...legacyInvites].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        );
 
         if (!cancelled) {
           setLocations(activeList);
@@ -391,22 +418,33 @@ export function useLocationSettings(restaurantId: string | undefined) {
   const inviteMember = useCallback(
     async (data: InviteData) => {
       if (!restaurantId || !user) return;
-      const row: TablesInsert<"invitations"> = {
-        restaurant_id: restaurantId,
-        email: data.email.trim().toLowerCase(),
+      const result = await sendTeamInviteEmail({
+        restaurantId,
+        email: data.email,
         role: data.role,
-        invited_by: user.id,
-        status: "PENDING",
-      };
-      const { error: e1 } = await supabase.from("invitations").insert(row);
-      if (e1) {
-        logSupabaseError("inviteMember", e1);
-        if (isDev) toast.error(formatPostgrestError(e1));
-        throw e1;
+        locationId: data.location_id,
+        permissions: DEFAULT_ASSIGNMENT_PERMISSIONS,
+      });
+      if (result.email_sent === false) {
+        throw new Error("Invite created but the email could not be sent — try Resend");
       }
       refetch();
     },
     [restaurantId, user, refetch],
+  );
+
+  const resendInvitation = useCallback(
+    async (invitationId: string, source: Invitation["source"]) => {
+      if (source !== "restaurant_invite") {
+        throw new Error("Only email invites can be resent — cancel and create a new invite");
+      }
+      const result = await resendTeamInviteEmail(invitationId);
+      if (result.email_sent === false) {
+        throw new Error("Could not resend the invite email");
+      }
+      refetch();
+    },
+    [refetch],
   );
 
   const assignMember = useCallback(
@@ -450,11 +488,20 @@ export function useLocationSettings(restaurantId: string | undefined) {
 
   const cancelInvitation = useCallback(
     async (invitationId: string, source: Invitation["source"]) => {
-      const { error: e1 } = await supabase.from("invitations").update({ status: "REVOKED" }).eq("id", invitationId);
-      if (e1) {
-        logSupabaseError("cancelInvitation", e1);
-        if (isDev) toast.error(formatPostgrestError(e1));
-        throw e1;
+      if (source === "restaurant_invite") {
+        const { error: e1 } = await supabase.rpc("revoke_invite", { p_invite_id: invitationId });
+        if (e1) {
+          logSupabaseError("revoke_invite", e1);
+          if (isDev) toast.error(formatPostgrestError(e1));
+          throw e1;
+        }
+      } else {
+        const { error: e1 } = await supabase.from("invitations").update({ status: "REVOKED" }).eq("id", invitationId);
+        if (e1) {
+          logSupabaseError("cancelInvitation", e1);
+          if (isDev) toast.error(formatPostgrestError(e1));
+          throw e1;
+        }
       }
       refetch();
     },
@@ -496,6 +543,7 @@ export function useLocationSettings(restaurantId: string | undefined) {
     updateLocation,
     deactivateLocation,
     inviteMember,
+    resendInvitation,
     assignMember,
     removeMemberFromLocation,
     cancelInvitation,
