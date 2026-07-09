@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // Only honor internal accept-invite redirects (no open-redirect).
+  const redirect = params.get("redirect") ?? "";
+  const safeRedirect = redirect.startsWith("/accept-invite") ? redirect : "";
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,6 +24,13 @@ export default function LoginPage() {
     if (error) {
       setLoading(false);
       toast.error(error.message);
+      return;
+    }
+
+    // Invite round-trip: go straight back to the accept page.
+    if (safeRedirect) {
+      setLoading(false);
+      navigate(safeRedirect);
       return;
     }
 

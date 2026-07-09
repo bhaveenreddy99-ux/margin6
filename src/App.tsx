@@ -17,6 +17,7 @@ const LandingPage = lazy(() => import("@/pages/Landing"));
 const PricingPage = lazy(() => import("@/pages/Pricing"));
 const LoginPage = lazy(() => import("@/pages/Login"));
 const SignupPage = lazy(() => import("@/pages/Signup"));
+const AcceptInvitePage = lazy(() => import("@/pages/AcceptInvite"));
 const DemoPage = lazy(() => import("@/pages/Demo"));
 const PublicDemoPage = lazy(() => import("@/pages/PublicDemo"));
 const LeakAuditPage = lazy(() => import("@/pages/LeakAudit"));
@@ -99,6 +100,7 @@ const App = () => (
                 <Route path="/pricing" element={<PricingPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
+                <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route path="/demo" element={<DemoPage />} />

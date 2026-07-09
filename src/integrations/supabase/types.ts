@@ -3312,7 +3312,25 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_invite: {
+        Args: { p_token: string }
+        Returns: {
+          restaurant_id: string
+          role: "OWNER" | "MANAGER" | "STAFF"
+          location_id: string
+        }[]
+      }
       accept_user_invites: { Args: never; Returns: Json }
+      get_invite_preview: {
+        Args: { p_token: string }
+        Returns: {
+          invited_email: string
+          restaurant_name: string
+          role: "OWNER" | "MANAGER" | "STAFF"
+          status: "pending" | "accepted" | "revoked" | "expired"
+          expires_at: string
+        }[]
+      }
       alert_pref_restaurant_id: { Args: { pref_id: string }; Returns: string }
       approve_inventory_session_atomic: {
         Args: {
