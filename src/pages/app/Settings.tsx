@@ -54,7 +54,7 @@ const TOP_NAV = [
   { key: "inventory", label: "Inventory Defaults",   icon: Package,      desc: "Default categories, units, and entry behavior" },
   { key: "schedule",  label: "Inventory Schedule",   icon: CalendarClock, desc: "Reminders and auto-session scheduling", managerOnly: true },
   { key: "locations", label: "Locations",            icon: MapPin,       desc: "Manage restaurant locations and their settings", ownerOnly: true },
-  { key: "team",      label: "Team & Permissions",   icon: Users,        desc: "Invite members and manage their assignments", ownerOnly: true },
+  { key: "team",      label: "Team & Permissions",   icon: Users,        desc: "Invite members and manage their assignments", managerOnly: true },
   { key: "audit",     label: "Audit Center",           icon: Shield,       desc: "Verify dashboard KPIs, formulas, and data quality", ownerOnly: true },
 ];
 
@@ -73,7 +73,7 @@ export default function SettingsPage() {
   const isOwner = currentRestaurant?.role === "OWNER";
   const isManager = currentRestaurant?.role === "MANAGER" || isOwner;
 
-  const locationHook = useLocationSettings(isOwner ? currentRestaurant?.id : undefined);
+  const locationHook = useLocationSettings(isManager ? currentRestaurant?.id : undefined);
 
   const handleSelect = (key: string) => {
     setSection(key);
@@ -145,8 +145,8 @@ export default function SettingsPage() {
           {section === "locations"  && isOwner && currentRestaurant?.id && (
             <LocationsSection locationHook={locationHook} refetchLocations={refetchLocations} />
           )}
-          {section === "team"       && isOwner && currentRestaurant?.id && (
-            <TeamSection locationHook={locationHook} />
+          {section === "team"       && isManager && currentRestaurant?.id && (
+            <TeamSection locationHook={locationHook} isOwner={isOwner} />
           )}
           {section === "audit"      && isOwner && (
             <AuditCenterEmbed />
@@ -1125,22 +1125,46 @@ function LocationCard({
 }
 
 /* ===== 9) Team & Permissions ===== */
-function TeamSection({ locationHook }: { locationHook: ReturnType<typeof useLocationSettings> }) {
-  const { locations, teamMembers, pendingInvitations, loading, inviteMember, assignMember, removeMemberFromLocation, cancelInvitation, updatePermissions, refetch } = locationHook;
+function TeamSection({
+  locationHook,
+  isOwner,
+}: {
+  locationHook: ReturnType<typeof useLocationSettings>;
+  isOwner: boolean;
+}) {
+  const { locations, teamMembers, pendingInvitations, loading, inviteMember, resendInvitation, assignMember, removeMemberFromLocation, cancelInvitation, updatePermissions, refetch } = locationHook;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"MANAGER" | "STAFF">("MANAGER");
+  const [inviteRole, setInviteRole] = useState<"MANAGER" | "STAFF">(isOwner ? "MANAGER" : "STAFF");
+  const [inviteLocationId, setInviteLocationId] = useState("");
   const [permMember, setPermMember] = useState<TeamMember | null>(null);
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!inviteOpen || inviteLocationId || locations.length === 0) return;
+    setInviteLocationId(locations[0].id);
+  }, [inviteOpen, inviteLocationId, locations]);
+
+  useEffect(() => {
+    if (isOwner) return;
+    setInviteRole("STAFF");
+  }, [isOwner]);
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) { toast.error("Email required"); return; }
+    if (!inviteLocationId) { toast.error("Choose a location"); return; }
+    setSendingInvite(true);
     try {
-      await inviteMember({ email: inviteEmail.trim(), role: inviteRole });
-      toast.success(`Invitation sent to ${inviteEmail.trim()}`);
+      await inviteMember({ email: inviteEmail.trim(), role: inviteRole, location_id: inviteLocationId });
+      toast.success(`Invitation email sent to ${inviteEmail.trim()}`);
       setInviteOpen(false);
       setInviteEmail("");
-    } catch {
-      toast.error("Could not send invitation");
+      setInviteRole(isOwner ? "MANAGER" : "STAFF");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not send invitation");
+    } finally {
+      setSendingInvite(false);
     }
   };
 
@@ -1188,28 +1212,64 @@ function TeamSection({ locationHook }: { locationHook: ReturnType<typeof useLoca
           </CardHeader>
           <CardContent className="space-y-2">
             {pendingInvitations.map((inv) => (
-              <div key={inv.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 p-3">
+              <div key={`${inv.source}-${inv.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 p-3">
                 <div>
-                  <p className="text-sm font-medium">{inv.email}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium">{inv.email}</p>
+                    {inv.source === "invitation" && (
+                      <Badge variant="outline" className="text-[10px] font-normal">Legacy</Badge>
+                    )}
+                    {inv.status === "expired" && (
+                      <Badge variant="secondary" className="text-[10px] font-normal">Expired</Badge>
+                    )}
+                  </div>
                   <p className="text-[11px] text-muted-foreground">
-                    {inv.role} · sent {formatDistanceToNow(new Date(inv.created_at), { addSuffix: true })}
+                    {inv.role}
+                    {inv.location_name ? ` · ${inv.location_name}` : ""}
+                    {" · "}
+                    {inv.source === "restaurant_invite" ? "emailed" : "pending signup"}
+                    {" "}
+                    {formatDistanceToNow(new Date(inv.created_at), { addSuffix: true })}
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-xs text-destructive"
-                  onClick={async () => {
-                    try {
-                      await cancelInvitation(inv.id, inv.source);
-                      toast.success("Invitation cancelled");
-                    } catch {
-                      toast.error("Could not cancel");
-                    }
-                  }}
-                >
-                  Cancel
-                </Button>
+                <div className="flex items-center gap-1">
+                  {inv.source === "restaurant_invite" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                      disabled={resendingId === inv.id}
+                      onClick={async () => {
+                        setResendingId(inv.id);
+                        try {
+                          await resendInvitation(inv.id, inv.source);
+                          toast.success(`Invite resent to ${inv.email}`);
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Could not resend");
+                        } finally {
+                          setResendingId(null);
+                        }
+                      }}
+                    >
+                      {resendingId === inv.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Resend"}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-xs text-destructive"
+                    onClick={async () => {
+                      try {
+                        await cancelInvitation(inv.id, inv.source);
+                        toast.success("Invitation cancelled");
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Could not cancel");
+                      }
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -1227,23 +1287,41 @@ function TeamSection({ locationHook }: { locationHook: ReturnType<typeof useLoca
               <Input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="h-9" placeholder="member@example.com" type="email" />
             </div>
             <div>
+              <Label className="text-xs">Location *</Label>
+              <Select value={inviteLocationId} onValueChange={setInviteLocationId}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Choose location" /></SelectTrigger>
+                <SelectContent>
+                  {locations.map((loc) => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label className="text-xs">Role</Label>
               <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as "MANAGER" | "STAFF")}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="MANAGER">Manager</SelectItem>
+                  {isOwner && <SelectItem value="MANAGER">Manager</SelectItem>}
                   <SelectItem value="STAFF">Staff</SelectItem>
                 </SelectContent>
               </Select>
+              {!isOwner && (
+                <p className="text-[11px] text-muted-foreground mt-1">Managers can invite staff only.</p>
+              )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              After they accept, you can assign them to specific locations from the Team tab.
+              They&apos;ll receive an email with a secure link to accept. The invite is tied to the location above.
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>Close</Button>
-            <Button className="bg-gradient-amber shadow-amber" onClick={() => void handleInvite()} disabled={!inviteEmail.trim()}>
-              Send invitation
+            <Button
+              className="bg-gradient-amber shadow-amber"
+              onClick={() => void handleInvite()}
+              disabled={!inviteEmail.trim() || !inviteLocationId || sendingInvite}
+            >
+              {sendingInvite ? "Sending…" : "Send invitation"}
             </Button>
           </DialogFooter>
         </DialogContent>
