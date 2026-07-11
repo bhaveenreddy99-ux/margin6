@@ -25,13 +25,13 @@ Back-of-house operations for **independent restaurant groups** (~2–10 location
 - Auth, signup, password reset
 - Restaurant onboarding (`create_restaurant_with_owner`)
 - Multi-restaurant and location selection
-- Secure invite flow (`restaurant_invites`, `send-invite`, `AcceptInvite`)
+- Secure invite path (`restaurant_invites`, `send-invite`, `AcceptInvite`) — legacy invite tables/paths still active
 - Inventory counting with zones and approval RPC
 - Smart order submission → purchase orders
 - Invoice intake, review, comparison rows
 - Receipt confirmation RPC (Owner/Manager gate)
 - Waste log
-- Staff dashboard isolation (count-only; money dashboard not loaded for STAFF)
+- Staff dashboard route isolation (count-only UI; money dashboard not loaded for STAFF) — backend/API cost exposure remains
 - Large Vitest domain test suite; production build succeeds
 
 See [`docs/status/current-product-status.md`](docs/status/current-product-status.md) for detail and caveats.
@@ -40,7 +40,7 @@ See [`docs/status/current-product-status.md`](docs/status/current-product-status
 
 ## Known high-risk gaps (not fixed by README)
 
-- Manager **location isolation** RLS gap on `locations` (fix authored; not production-verified)
+- Manager **location isolation** RLS gap on `locations` (not fixed on `main`; corrective migration planned in separate uncommitted work)
 - Dashboard **financial KPI trust** (silent `$0`, price double-count, Money Lost mixing time bases)
 - **Legacy invite** paths coexist with secure invites; production has rows in both systems
 - **GitHub ↔ Supabase** migration ledger timestamp drift and possible edge-function drift
@@ -53,7 +53,7 @@ See [`docs/status/known-blockers.md`](docs/status/known-blockers.md).
 
 ## Explicit non-goals
 
-POS, recipes, menu profitability, theoretical food cost, payroll, scheduling, full accounting, and **trusted** Food Cost / P&L / Money Lost KPIs for the current pilot scope.
+POS, recipes, menu profitability, theoretical food cost, payroll, scheduling, full accounting, and **trusted** Food Cost / P&L / Money Lost KPIs for the current **internal-demo trusted scope**.
 
 Full list: [`docs/product/non-goals.md`](docs/product/non-goals.md)
 
@@ -65,18 +65,18 @@ Full list: [`docs/product/non-goals.md`](docs/product/non-goals.md)
 # Prerequisites: Node 20+, Supabase CLI, Docker (for local Supabase)
 
 npm install
-supabase start
-bash scripts/local/export-local-env.sh   # writes .env.local.supabase (gitignored)
+cp .env.example .env.local   # then set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY
+supabase start               # local stack; use `supabase status` for local URL and keys
 npm run dev
 ```
 
-Optional baseline seed (local only):
+Optional demo seed (local only):
 
 ```bash
-node scripts/local/seed-full-product-baseline.mjs
+node seed-test-data.js
 ```
 
-**Do not** point local scripts at production. See `scripts/local/verify-not-production.sh`.
+**Do not** point local env or scripts at production. Use a dedicated local or staging Supabase project only.
 
 ---
 
@@ -86,7 +86,7 @@ node scripts/local/seed-full-product-baseline.mjs
 npm run test          # Vitest
 npm run build         # Production build
 npm run typecheck     # TypeScript (may fail on edge-shared imports)
-npm run test:e2e:local  # Playwright against local stack (when configured)
+npm run test:e2e:smoke  # Playwright smoke subset (requires configured E2E env)
 ```
 
 Run tests after changes; do not trust stale pass counts in old documents.
@@ -95,12 +95,13 @@ Run tests after changes; do not trust stale pass counts in old documents.
 
 ## Source-of-truth hierarchy
 
-1. Live Supabase schema (production)
-2. GitHub `main` application code
-3. `supabase/migrations/`
-4. `docs/status/` and `docs/decisions/`
-5. `docs/system-audit/` (dated verifications)
-6. `docs/archive/` — **historical only**
+1. **Live Supabase** — deployed-state truth (what production runs today)
+2. **GitHub `main` code + `supabase/migrations/`** — intended implementation and schema truth
+3. `docs/status/` and `docs/decisions/`
+4. `docs/system-audit/` (dated verifications)
+5. `docs/archive/` — **historical only**
+
+When GitHub and Supabase differ, **report drift** before changing either side. Do not treat production drift as intended design, and do not overwrite production without review.
 
 Details: [`docs/decisions/0002-source-of-truth-hierarchy.md`](docs/decisions/0002-source-of-truth-hierarchy.md)
 

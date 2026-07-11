@@ -11,7 +11,7 @@ Receipt confirmation, catalog cost updates, and dashboard dollars must be trustw
 - **Receipt confirmation:** Owner/Manager only (current).
 - **Latest approved count** = operational on-hand source of truth.
 - **Stock movements** = audit ledger until continuous on-hand explicitly approved.
-- **Unit/pack mismatches** must **block** catalog cost updates in the future repair epic (do not guess).
+- **Unit/pack mismatches** must **block** catalog cost updates — **approved future repair rule** (not current shipped behavior; receipt flow may notify but not fully block today).
 - Dashboard must not show **failed loads** or **missing cost** as confident `$0`.
 
 ## Consequences

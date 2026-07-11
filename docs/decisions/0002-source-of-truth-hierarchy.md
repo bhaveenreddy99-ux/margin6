@@ -8,15 +8,22 @@ GitHub, Supabase production, migration ledger timestamps, generated types, and d
 
 ## Decision
 
-Trust order:
+Trust order for **understanding** the system:
 
-1. Live Supabase schema (read-only verification)
-2. GitHub `main` code
-3. `supabase/migrations/`
+1. **Live Supabase schema** (read-only verification) — **deployed-state truth** (what production runs today)
+2. **GitHub `main` code** — **intended application logic**
+3. **`supabase/migrations/`** — **intended schema**
 4. Generated types (verify; may be stale)
 5. `docs/status/`, `docs/decisions/`
 6. `docs/system-audit/` (dated)
 7. `docs/archive/` — **never** for implementation guidance
+
+**When GitHub and Supabase differ:**
+
+- **Report drift** before changing either side.
+- Do **not** treat production drift as intended design.
+- Do **not** overwrite production simply because GitHub differs — use staging, review, and approval.
+- Do **not** change GitHub to match production drift without explicit repair intent.
 
 ZIPs, AI summaries, and archived plans are **not** sources of truth.
 

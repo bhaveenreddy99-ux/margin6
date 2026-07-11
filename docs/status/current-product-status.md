@@ -1,7 +1,14 @@
 # Current product status
 
 **Verification date:** 2026-07-11  
-**Git branch (status baseline):** `main` @ `7750750`  
+
+**Baselines (do not conflate):**
+
+| Baseline | Ref | Scope |
+|----------|-----|-------|
+| **Production / application** | `main` @ `7750750` | What the product implementation reflects today |
+| **Documentation PR** | branch `docs/margin6-source-of-truth-reset` | Doc hierarchy and status only — **does not change application code** |
+
 **Supabase project:** `margin6` · ref `ogbnctyctoujzdcfphad` · Postgres 17 · `us-east-1`
 
 **Readiness label:** **Internal-demo ready** — suitable for controlled demos and local/staging validation. **Not commercial-ready.**
@@ -15,14 +22,14 @@
 | Auth (login, signup, reset) | `src/pages/Login.tsx`, `Signup.tsx`, `AuthContext` |
 | Onboarding | `create_restaurant_with_owner`, `CreateRestaurant.tsx` |
 | Multi-restaurant + locations | `RestaurantContext`, `user_location_assignments` |
-| Secure invites | `restaurant_invites`, `AcceptInvite.tsx`, `send-invite` edge, `sendTeamInvite.ts` |
+| Secure invites (new path) | `restaurant_invites`, `AcceptInvite.tsx`, `send-invite` edge, `sendTeamInvite.ts` — legacy invite tables/paths remain |
 | Inventory count + zones | `InventoryCountPage`, `inventory_session_item_zones` |
 | Count approval → smart order | `approve_inventory_session_atomic` |
 | Smart order → PO | `submit_smart_order`, `SmartOrder.tsx` |
 | Invoice intake / review | `InvoiceReview.tsx`, `parse-invoice` edge |
 | Receipt confirm RPC | `confirm_invoice_receipt` (Manager+ gate in RPC) |
 | Waste log | `WasteLog.tsx` |
-| Staff financial isolation (dashboard route) | `DashboardRouter.tsx` → `EmployeeDashboard` |
+| Staff financial isolation (dashboard route) | `DashboardRouter.tsx` → `EmployeeDashboard` — route-level only; API cost exposure remains |
 | Domain tests + build | `npm run test`, `npm run build` per `docs/system-audit/00-executive-summary.md` |
 
 ---
@@ -46,6 +53,8 @@
 | Issue | Severity |
 |-------|----------|
 | Manager can list/read unassigned **locations** (prod RLS) | P1 security |
+| Manager can invite STAFF to unassigned locations (`create_invite` RPC gap) | P1 security |
+| Null-`location_id` rows visible to managers/staff via RLS OR-clause | P1 security |
 | Anon EXECUTE on sensitive RPCs (prod grants drift) | P1 security |
 | Manager cost data may appear in API responses | P1 privacy |
 | Price-increase KPI double-count suspected | P1 trust |
@@ -57,9 +66,9 @@ Details: [`known-blockers.md`](known-blockers.md), [`production-drift.md`](produ
 
 ---
 
-## What should be hidden or de-emphasized (pilot scope)
+## What should be hidden or de-emphasized (internal-demo trusted scope)
 
-Per founder decision, **outside trusted pilot scope** until repair epics complete:
+Per founder decision, **outside current trusted scope** until repair epics complete:
 
 - Food Cost %, Sales, P&L, Money Lost aggregate, blended Profit Risk as **trusted** numbers
 - Shrinkage **dollar** KPI (unverified notification math)

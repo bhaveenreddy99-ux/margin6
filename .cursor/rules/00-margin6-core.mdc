@@ -7,14 +7,11 @@ alwaysApply: true
 
 Read and follow [`AGENTS.md`](../../AGENTS.md). It is the **only** canonical instruction file for product scope, security, calculations, testing, migrations, and documentation hierarchy.
 
-**Product:** Margin6 — independent restaurant groups (~2–10 locations). **Internal-demo ready; trust repair in progress.**
+**Product:** Margin6 — see [`AGENTS.md`](../../AGENTS.md) for scope, maturity, workflow, and rules.
 
-**Workflow:** Count → Approve → Smart Order → PO → Invoice → Receipt → Dashboard/Alerts
-
-**Rules:**
+**Rules (summary — full detail in AGENTS.md):**
 - Inspect before editing; report drift before fixing
 - One epic / one branch / one PR
-- Do not rebuild `[AUDIT]` items already implemented
 - Do not trust archived docs, ZIPs, or AI summaries over code + live Supabase
 - No production migrations, deploys, or broad grant revokes without explicit approval
 

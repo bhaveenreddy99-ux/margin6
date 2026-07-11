@@ -25,12 +25,14 @@ Helpers: `user_accessible_location_ids`, `user_can_access_location`, `has_locati
 
 ---
 
-## Invite rules (founder)
+## Invite rules (founder — intended)
 
 - **Managers** may invite **STAFF only**, for **their assigned locations**.
 - **Managers** may **not** invite managers or owners.
 - Invite creation: **`create_invite`** RPC — **edge function only** (`send-invite`), never browser-direct (plaintext token).
 - Accept: **`accept_invite`**, **`get_invite_preview`** (capability token model for preview).
+
+**Current gap:** `create_invite` enforces OWNER/MANAGER for STAFF invites and validates `p_location_id` belongs to the restaurant, but does **not** verify the manager is assigned to that location.
 
 ---
 
@@ -41,18 +43,22 @@ Helpers: `user_accessible_location_ids`, `user_can_access_location`, `has_locati
 
 ---
 
-## Null location_id records
+## Null location_id records (founder — intended)
 
 - **Founder rule:** Managers and staff must **not** receive locationless operational records.
 - Historical null-`location_id` data: **owner-only** visibility until reviewed and repaired.
 
----
+**Current gap:** RLS on invoices, sessions, orders, and related tables allows `location_id IS NULL` rows for any restaurant member, not owner-only.
 
-## Known defects (production)
+## Known defects (current implementation)
+
+These are **bugs/gaps**, not intended policy. See founder rules above for intended behavior.
 
 | Defect | Policy / area |
 |--------|----------------|
 | Manager reads all locations | `locations` SELECT: `is_member_of(restaurant_id)` only |
+| Manager can invite STAFF without assignment check | `create_invite` verifies restaurant membership, not `user_can_access_location` for `p_location_id` |
+| Locationless rows visible to managers/staff | RLS uses `location_id IS NULL OR user_can_access_location(...)` on several operational tables |
 | Cost flags UI-only | Dashboard loaders fetch costs regardless of `can_see_costs` |
 | Anon RPC EXECUTE drift | Several DEFINER functions callable by `anon` |
 

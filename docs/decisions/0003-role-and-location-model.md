@@ -23,6 +23,13 @@ Managers could read unassigned locations on production. Invite rules and null-lo
 
 Production `locations` policy may not yet enforce assignment scoping.
 
-## Not in this PR
+## Current implementation gaps (not intended policy)
 
-RLS migration not applied to production.
+| Gap | Current behavior |
+|-----|------------------|
+| Manager invite location scoping | `create_invite` allows a MANAGER to invite STAFF to any location in the restaurant without checking `user_can_access_location` |
+| Null `location_id` visibility | RLS on several operational tables uses `location_id IS NULL OR user_can_access_location(...)`, exposing locationless rows to managers/staff |
+
+These require corrective RPC/RLS work on staging before production. RLS migration not applied to production.
+
+## Not in this PR

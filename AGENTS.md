@@ -30,15 +30,24 @@ See [`docs/product/non-goals.md`](docs/product/non-goals.md).
 
 ## Source-of-truth hierarchy
 
-When documents conflict, trust in this order:
+Two truths — use the right one for the question:
 
-1. **Live Supabase schema** (production project `margin6`, ref `ogbnctyctoujzdcfphad`) — for deployed behavior
-2. **Current GitHub `main` code** — for application logic
-3. **Migrations in `supabase/migrations/`** — for intended schema (may differ from prod ledger timestamps)
+| Question | Source of truth |
+|----------|-----------------|
+| What does **production run today**? | **Live Supabase** (project `margin6`, ref `ogbnctyctoujzdcfphad`) |
+| What should the **app and schema do**? | **GitHub `main` code** + **`supabase/migrations/`** |
+
+Reference order when documents conflict:
+
+1. **Live Supabase schema** — deployed-state truth
+2. **Current GitHub `main` code** — intended application logic
+3. **Migrations in `supabase/migrations/`** — intended schema (may differ from prod ledger timestamps)
 4. **Generated types** (`src/integrations/supabase/types.ts`) — may be stale; verify against schema
 5. **`docs/status/` and `docs/decisions/`** — current product/status ADRs
 6. **`docs/system-audit/`** — verified read-only audits (dated)
 7. **`docs/archive/`** — **non-authoritative** history only
+
+**When GitHub and Supabase differ:** report drift before changing either side. Do not treat production drift as intended design. Do not overwrite production without review. Do not change GitHub to match drift without explicit repair intent.
 
 **Never trust:** ZIP exports, AI chat summaries, archived docs, code comments, or README marketing copy over code + live schema.
 
@@ -74,7 +83,7 @@ See [`docs/security/authorization-model.md`](docs/security/authorization-model.m
 - Never render a **failed query** or **missing cost** as a confident `$0`.
 - **Latest approved physical count** = current operational on-hand source of truth.
 - **Stock movements** = audit ledger until continuous on-hand is explicitly approved.
-- **Unit/pack mismatches** must block catalog-cost updates (future repair epic; document, do not silently guess).
+- **Unit/pack mismatches** must block catalog-cost updates — **approved future repair rule** (not current shipped behavior; document, do not silently guess).
 
 ---
 

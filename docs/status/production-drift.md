@@ -5,14 +5,26 @@
 
 ---
 
+## Three states to keep separate
+
+| State | What it means |
+|-------|----------------|
+| **GitHub `main` / this docs branch** | Committed application code and **131** migration files — intended implementation truth |
+| **Uncommitted working tree** | May contain corrective SQL drafts (e.g. location RLS, anon grant revoke) **not** in any merged commit — do not cite as branch truth |
+| **Live Supabase production** | Deployed schema, grants, and edge functions — deployed-state truth |
+
+When these differ, **report drift** before changing production or claiming a fix is shipped.
+
+---
+
 ## Migration ledger drift
 
-| Topic | GitHub | Production |
-|-------|--------|------------|
-| Logical migration count | 131 (+2 corrective files in unmerged work) | 131 applied |
-| Latest invite migrations | Filenames `20260706`–`20260711` | Same SQL, versions `20260705194029`–`20260706210854` |
-| Corrective location RLS | `20260712000001` (repo) | **Not applied** |
-| Corrective anon RPC revoke | `20260712000002` (repo) | **Not applied** |
+| Topic | GitHub (`main` / docs branch) | Uncommitted working tree (if present) | Production |
+|-------|--------------------------------|---------------------------------------|------------|
+| Migration file count | **131** committed | May include draft `20260712000001` / `20260712000002` files locally — **not on branch** | **131** applied |
+| Latest invite migrations | Filenames `20260706`–`20260711` | — | Same SQL, ledger versions `20260705194029`–`20260706210854` |
+| Location SELECT RLS scoping | `is_member_of(restaurant_id)` on `locations` | Draft `20260712000001_location_select_rls_scoped.sql` may exist locally | **Not applied** — same as `main` |
+| Anon RPC grant hardening | Grant drift documented in audit 16 | Draft `20260712000002_revoke_unintentional_anon_rpc_exec.sql` may exist locally | **Not applied** |
 
 **Rule:** Do **not** apply repo-only timestamp filenames to production if equivalent objects already exist under different version strings. See [`../system-audit/15-production-reconciliation.md`](../system-audit/15-production-reconciliation.md).
 
