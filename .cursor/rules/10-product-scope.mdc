@@ -1,0 +1,18 @@
+---
+description: Margin6 product scope and non-goals
+alwaysApply: true
+---
+
+# Product scope
+
+Full definition: [`AGENTS.md`](../../AGENTS.md) and [`docs/product/product-definition.md`](../../docs/product/product-definition.md).
+
+**Building:** inventory counting, approval, PAR/smart ordering, POs, invoice intake/review, receipt confirmation, waste, notifications, owner oversight, manager/staff location-scoped operations.
+
+**Not building:** POS, recipes, menu profitability, theoretical food cost, payroll, scheduling, full accounting, trusted Food Cost / P&L / Money Lost KPIs for pilot.
+
+**Invite rules:** Managers invite **STAFF only** for **assigned locations**. No manager/owner invites by managers.
+
+**Orders:** `purchase_orders` is the **intended** authoritative order record; current prod may still use legacy paths — document drift, do not silently rewrite in unrelated work.
+
+**Null `location_id`:** Operational records without location are **owner-only** until data is repaired.

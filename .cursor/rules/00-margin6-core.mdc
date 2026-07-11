@@ -1,0 +1,21 @@
+---
+description: Margin6 core agent rules — read AGENTS.md first
+alwaysApply: true
+---
+
+# Margin6 core
+
+Read and follow [`AGENTS.md`](../../AGENTS.md). It is the **only** canonical instruction file for product scope, security, calculations, testing, migrations, and documentation hierarchy.
+
+**Product:** Margin6 — independent restaurant groups (~2–10 locations). **Internal-demo ready; trust repair in progress.**
+
+**Workflow:** Count → Approve → Smart Order → PO → Invoice → Receipt → Dashboard/Alerts
+
+**Rules:**
+- Inspect before editing; report drift before fixing
+- One epic / one branch / one PR
+- Do not rebuild `[AUDIT]` items already implemented
+- Do not trust archived docs, ZIPs, or AI summaries over code + live Supabase
+- No production migrations, deploys, or broad grant revokes without explicit approval
+
+**Status docs:** [`docs/status/current-product-status.md`](../../docs/status/current-product-status.md)

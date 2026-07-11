@@ -1,47 +1,137 @@
-# Margin6 — Restaurant Inventory & Procurement Platform
+# Margin6
 
-A full-stack SaaS platform helping independent restaurant operators manage inventory, purchase orders, and supplier invoices — replacing spreadsheets with automated workflows and real-time visibility.
+Back-of-house operations for **independent restaurant groups** (~2–10 locations): inventory counting, count approval, PAR-based ordering, purchase orders, invoice intake and review, receipt confirmation, waste, alerts, and owner oversight.
 
-## The Problem
-Most independent restaurants track inventory on paper or spreadsheets. They over-order, waste ingredients, and never know their real food costs until it's too late.
+**Maturity:** Internal-demo ready. Active work is **trust and workflow repair**, not new product surfaces.
 
-## What I Built
+**Canonical agent instructions:** [`AGENTS.md`](AGENTS.md)
 
-- **PAR-level smart ordering engine** — reads current stock against minimum thresholds and calculates optimal reorder quantities automatically
-- **Session-based inventory counting** — approval workflow (draft → in_review → approved) with duplicate detection and data integrity validation
-- **3-way PO matching** — flags mismatches between what was ordered, invoiced, and received before operators notice manually
-- **Supplier invoice reconciliation** — automated delivery discrepancy detection
-- **Multi-location portfolio management** — role-based access controls and cross-location inventory rollups
-- **Real-time KPI dashboards** — inventory value, spend trends, R/Y/G risk banding, distressed stock flags
-- **Automated low-stock alerts** — scheduled edge functions via pg_cron + Resend
+---
 
-## Engineering Highlights
-
-- **Multi-tenant architecture** with Row Level Security (RLS) for complete data isolation between restaurant accounts
-- **Atomic Postgres RPC** for inventory session approval — prevents partial state on concurrent updates
-- **19% PLpgSQL** — real database migrations, RLS policies, and edge functions written from scratch
-- **Playwright E2E + Vitest unit tests** for critical workflow coverage
-- **Structured quality tracker** (DEMO_READINESS.md) with file:line bug references, fix patterns, and test cases
-
-## Tech Stack
+## Stack
 
 | Layer | Technology |
-|---|---|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| State Management | TanStack Query |
-| Backend | Supabase (Postgres, Auth, Storage, Edge Functions) |
-| Database | PostgreSQL with RLS, pg_cron, atomic RPCs |
-| Charts | Recharts |
-| Testing | Playwright (E2E), Vitest (unit) |
-| Deployment | Vercel + Supabase |
-| Payments | Stripe |
-| Email | Resend |
-| AI | Claude Sonnet (invoice parsing) |
+|-------|------------|
+| Frontend | React 18, TypeScript, Vite, Tailwind, shadcn/ui |
+| State / data | TanStack Query |
+| Backend | Supabase (PostgreSQL, Auth, RLS, Storage, Edge Functions) |
+| Tests | Vitest, Playwright |
+| Deploy | Vercel (app) + Supabase (data) |
 
-## Core Workflow
-Inventory Count → Session Approval → Smart Order → Purchase Order
-→ Supplier Invoice → 3-way Match → Inventory Update → KPI Dashboard
+---
 
-## Built By
-Bhaveen Padigapati — Supply Chain & Operations Analyst
-[linkedin.com/in/bhaveen99](https://linkedin.com/in/bhaveen99)
+## What works (verified in repo audits)
+
+- Auth, signup, password reset
+- Restaurant onboarding (`create_restaurant_with_owner`)
+- Multi-restaurant and location selection
+- Secure invite flow (`restaurant_invites`, `send-invite`, `AcceptInvite`)
+- Inventory counting with zones and approval RPC
+- Smart order submission → purchase orders
+- Invoice intake, review, comparison rows
+- Receipt confirmation RPC (Owner/Manager gate)
+- Waste log
+- Staff dashboard isolation (count-only; money dashboard not loaded for STAFF)
+- Large Vitest domain test suite; production build succeeds
+
+See [`docs/status/current-product-status.md`](docs/status/current-product-status.md) for detail and caveats.
+
+---
+
+## Known high-risk gaps (not fixed by README)
+
+- Manager **location isolation** RLS gap on `locations` (fix authored; not production-verified)
+- Dashboard **financial KPI trust** (silent `$0`, price double-count, Money Lost mixing time bases)
+- **Legacy invite** paths coexist with secure invites; production has rows in both systems
+- **GitHub ↔ Supabase** migration ledger timestamp drift and possible edge-function drift
+- Manager **cost permissions** enforced in UI more than in API responses
+- Playwright **not fully in CI**
+
+See [`docs/status/known-blockers.md`](docs/status/known-blockers.md).
+
+---
+
+## Explicit non-goals
+
+POS, recipes, menu profitability, theoretical food cost, payroll, scheduling, full accounting, and **trusted** Food Cost / P&L / Money Lost KPIs for the current pilot scope.
+
+Full list: [`docs/product/non-goals.md`](docs/product/non-goals.md)
+
+---
+
+## Local setup (safe)
+
+```bash
+# Prerequisites: Node 20+, Supabase CLI, Docker (for local Supabase)
+
+npm install
+supabase start
+bash scripts/local/export-local-env.sh   # writes .env.local.supabase (gitignored)
+npm run dev
+```
+
+Optional baseline seed (local only):
+
+```bash
+node scripts/local/seed-full-product-baseline.mjs
+```
+
+**Do not** point local scripts at production. See `scripts/local/verify-not-production.sh`.
+
+---
+
+## Testing
+
+```bash
+npm run test          # Vitest
+npm run build         # Production build
+npm run typecheck     # TypeScript (may fail on edge-shared imports)
+npm run test:e2e:local  # Playwright against local stack (when configured)
+```
+
+Run tests after changes; do not trust stale pass counts in old documents.
+
+---
+
+## Source-of-truth hierarchy
+
+1. Live Supabase schema (production)
+2. GitHub `main` application code
+3. `supabase/migrations/`
+4. `docs/status/` and `docs/decisions/`
+5. `docs/system-audit/` (dated verifications)
+6. `docs/archive/` — **historical only**
+
+Details: [`docs/decisions/0002-source-of-truth-hierarchy.md`](docs/decisions/0002-source-of-truth-hierarchy.md)
+
+---
+
+## Documentation map
+
+| Document | Purpose |
+|----------|---------|
+| [`AGENTS.md`](AGENTS.md) | Canonical AI/agent instructions |
+| [`docs/status/current-product-status.md`](docs/status/current-product-status.md) | What works / partial / unsafe |
+| [`docs/status/production-drift.md`](docs/status/production-drift.md) | GitHub vs Supabase drift |
+| [`docs/status/known-blockers.md`](docs/status/known-blockers.md) | Repair priority |
+| [`docs/system-audit/`](docs/system-audit/) | Dated verification audits |
+| [`docs/product/`](docs/product/) | Product definition |
+| [`docs/architecture/`](docs/architecture/) | System and data truth |
+| [`docs/decisions/`](docs/decisions/) | ADRs |
+| [`docs/archive/`](docs/archive/) | Non-authoritative history |
+
+**Deployment runbook:** [`docs/runbooks/deployment.md`](docs/runbooks/deployment.md) (placeholder — requires human approval for prod)
+
+---
+
+## Production warning
+
+**Do not** run `supabase db push`, `migration repair`, or production data changes without explicit review, backup, and staging verification.
+
+See [`docs/status/production-drift.md`](docs/status/production-drift.md).
+
+---
+
+## License / contact
+
+Private repository. Built by Bhaveen Padigapati.
