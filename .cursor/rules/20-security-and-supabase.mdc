@@ -1,0 +1,18 @@
+---
+description: Margin6 Supabase security and RLS
+globs: supabase/**,src/**/supabase/**
+alwaysApply: false
+---
+
+# Security and Supabase
+
+See [`AGENTS.md`](../../AGENTS.md) and [`docs/security/authorization-model.md`](../../docs/security/authorization-model.md).
+
+- RLS + SECURITY DEFINER RPCs are the enforcement layer; UI hiding is not sufficient
+- Verify `auth.uid()`, membership, location access, and role inside every sensitive RPC
+- Do not drop legacy invite tables until new flow is verified and legacy rows are empty
+- Do not apply migrations to production or run `supabase db push` / `migration repair` without approval
+- Do not broadly revoke EXECUTE from advisor warnings alone — trace callers first
+- Receipt confirmation: Owner/Manager only (current)
+
+**Drift:** [`docs/status/production-drift.md`](../../docs/status/production-drift.md)

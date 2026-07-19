@@ -1,0 +1,17 @@
+---
+description: Margin6 React and TypeScript conventions
+globs: src/**/*.ts,src/**/*.tsx
+alwaysApply: false
+---
+
+# React and TypeScript
+
+See [`AGENTS.md`](../../AGENTS.md).
+
+- Business logic in `src/domain/*` — not in page components
+- One source of truth per calculation; prefer pure functions
+- Use Supabase generated types; avoid `any` and unsafe casts
+- Smallest safe fix; do not rewrite large files
+- Match existing import and naming conventions in surrounding code
+
+**Priority pages for stabilization:** inventory count, invoice review, invoices list, dashboard — fix trust before new UI surfaces.

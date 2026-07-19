@@ -1,0 +1,12 @@
+---
+description: Margin6 product scope and non-goals
+alwaysApply: true
+---
+
+# Product scope
+
+All product scope, non-goals, invite rules, order-model intent, and location policy are defined in [`AGENTS.md`](../../AGENTS.md).
+
+Supporting docs: [`docs/product/product-definition.md`](../../docs/product/product-definition.md), [`docs/product/non-goals.md`](../../docs/product/non-goals.md), [`docs/security/authorization-model.md`](../../docs/security/authorization-model.md).
+
+Do not duplicate policy here — read `AGENTS.md` before building.

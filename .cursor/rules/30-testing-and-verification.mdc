@@ -1,0 +1,21 @@
+---
+description: Margin6 testing and verification
+globs: src/test/**,tests/**,**/*.test.ts,**/*.spec.ts
+alwaysApply: false
+---
+
+# Testing and verification
+
+See [`AGENTS.md`](../../AGENTS.md).
+
+**Commands (from `package.json`):**
+- `npm run test` — Vitest unit/domain tests
+- `npm run build` — production build
+- `npm run typecheck` — TypeScript (known edge-shared import issues may fail)
+- `npm run test:e2e` / `test:e2e:smoke` / `test:e2e:local` — Playwright
+
+**Rules:**
+- Add regression tests for trust and security fixes
+- Do not invent missing historical test artifacts
+- Distinguish load **error** vs **genuine zero** in dashboard tests
+- Playwright is not fully gated in CI — verify locally when touching E2E paths
